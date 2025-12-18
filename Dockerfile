@@ -16,6 +16,9 @@ RUN npm ci
 # Copia sorgenti
 COPY . .
 
+# Verifica che index.md sia presente
+RUN test -f index.md || (echo "❌ index.md non trovato!" && ls -la && exit 1)
+
 # Build sito VitePress (genera file statici in .vitepress/dist)
 RUN npm run build
 
