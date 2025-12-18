@@ -7,8 +7,9 @@ node_modules
 .gitignore
 README.md
 SETUP.md
+README.DEPLOY.md
 .env
 .env.local
-*.md
-!package*.json
+# Non escludere i file .md del sito (index.md, features.md, etc.)
+# Solo escludi i README
 
