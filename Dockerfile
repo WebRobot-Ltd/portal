@@ -85,6 +85,11 @@ http { \
             add_header Content-Type application/json; \
             try_files $uri =404; \
         } \
+        location ~* \.(png|jpg|jpeg|gif|svg|webp|ico)$ { \
+            try_files $uri =404; \
+            expires 1y; \
+            add_header Cache-Control "public, immutable"; \
+        } \
         location / { \
             try_files $uri $uri/ /index.html; \
         } \
