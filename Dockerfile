@@ -21,9 +21,13 @@ RUN npm run build
 
 # Verifica che i file siano stati generati
 RUN ls -la .vitepress/dist || (echo "❌ Directory .vitepress/dist non trovata!" && exit 1)
+RUN test -f .vitepress/dist/index.html || (echo "❌ index.html non trovato in .vitepress/dist!" && exit 1)
 
 # Stage 2: Production - Nginx
 FROM nginx:alpine
+
+# Rimuovi file di default di nginx per evitare conflitti
+RUN rm -rf /usr/share/nginx/html/*
 
 # Copia file statici generati da VitePress
 COPY --from=builder /app/.vitepress/dist /usr/share/nginx/html
