@@ -4,6 +4,9 @@ export default defineConfig({
   title: 'WebRobot',
   description: 'Spark-native, API-first data infrastructure for agentic ETL pipelines and data products',
   
+  // Ignore dead links (some links point to external documentation)
+  ignoreDeadLinks: true,
+  
   // Theme configuration
   themeConfig: {
     // Logo

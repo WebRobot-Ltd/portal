@@ -17,7 +17,7 @@ Generate high-quality datasets for training and fine-tuning Large Language Model
 - Fine-tuning for specific tasks
 - Dataset augmentation
 
-[Learn More →](/docs/vertical-llm-finetuning)
+[Learn More →](https://docs.webrobot.eu/guides/vertical-llm-finetuning)
 
 ## Price Comparison
 
@@ -34,7 +34,7 @@ Monitor and compare prices across multiple e-commerce sites in real-time.
 - Competitor analysis
 - Price optimization
 
-[Learn More →](/docs/vertical-price-comparison)
+[Learn More →](https://docs.webrobot.eu/guides/vertical-price-comparison)
 
 ## Sports Betting
 
@@ -51,7 +51,7 @@ Detect arbitrage opportunities and surebets across multiple bookmakers.
 - Odds comparison
 - Betting strategy optimization
 
-[Learn More →](/docs/vertical-sports-betting)
+[Learn More →](https://docs.webrobot.eu/guides/vertical-sports-betting)
 
 ## Real Estate
 
@@ -68,7 +68,7 @@ Analyze property listings, detect duplicates, and identify market opportunities.
 - Market research
 - Investment analysis
 
-[Learn More →](/docs/vertical-real-estate)
+[Learn More →](https://docs.webrobot.eu/guides/vertical-real-estate)
 
 ## Portfolio Management
 
@@ -85,7 +85,7 @@ Monitor financial markets and generate trading signals.
 - Portfolio optimization
 - Risk management
 
-[Learn More →](/docs/vertical-portfolio-management)
+[Learn More →](https://docs.webrobot.eu/guides/vertical-portfolio-management)
 
 ## Custom Solutions
 
@@ -97,5 +97,5 @@ Build your own vertical solution using WebRobot's extensibility features.
 - Attribute resolvers
 - Custom actions
 
-[Learn More →](/docs/plugins)
+[Learn More →](https://docs.webrobot.eu/guides/plugins)
 
