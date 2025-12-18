@@ -756,7 +756,7 @@ if (typeof window !== 'undefined') {
 .demo-section h2 {
   font-size: 1.5rem;
   margin-bottom: 0.75rem;
-  margin-top: 2rem;
+  margin-top: 0;
 }
 
 .demo-section > p {
