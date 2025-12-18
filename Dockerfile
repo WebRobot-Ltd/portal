@@ -50,12 +50,14 @@ RUN mkdir -p /var/cache/nginx/client_temp \
     chown -R nginx:nginx /var/cache/nginx /var/run/nginx
 
 # Configurazione nginx personalizzata
-# Configura nginx per usare directory scrivibili
+# Configura nginx per usare directory scrivibili e MIME types corretti
 RUN echo 'pid /var/run/nginx/nginx.pid; \
 events { \
     worker_connections 1024; \
 } \
 http { \
+    include /etc/nginx/mime.types; \
+    default_type application/octet-stream; \
     client_body_temp_path /tmp/client_temp; \
     proxy_temp_path /tmp/proxy_temp; \
     fastcgi_temp_path /tmp/fastcgi_temp; \
@@ -68,6 +70,15 @@ http { \
         index index.html; \
         location / { \
             try_files $uri $uri/ /index.html; \
+        } \
+        location ~* \.(js|mjs)$ { \
+            add_header Content-Type application/javascript; \
+        } \
+        location ~* \.(css)$ { \
+            add_header Content-Type text/css; \
+        } \
+        location ~* \.(json)$ { \
+            add_header Content-Type application/json; \
         } \
         location /health { \
             access_log off; \
