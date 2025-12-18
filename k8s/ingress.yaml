@@ -13,6 +13,7 @@ metadata:
     traefik.ingress.kubernetes.io/transport.respondingTimeouts.writeTimeout: "300"
     traefik.ingress.kubernetes.io/custom-request-headers: "X-Forwarded-Proto:%[req.scheme"
 spec:
+  ingressClassName: traefik
   rules:
   - host: portal.webrobot.eu
     http:
