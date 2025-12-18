@@ -6,7 +6,7 @@ hero:
   text: "Agentic ETL Platform"
   tagline: Spark-native, API-first data infrastructure for building intelligent data pipelines
   image:
-    src: /logo-webrobot.png
+    src: /logo.jpeg
     alt: WebRobot
   actions:
     - theme: brand

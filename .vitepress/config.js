@@ -10,7 +10,7 @@ export default defineConfig({
   // Theme configuration
   themeConfig: {
     // Logo
-    logo: '/logo-webrobot.png',
+    logo: '/logo.jpeg',
     
     // Navigation
     nav: [
