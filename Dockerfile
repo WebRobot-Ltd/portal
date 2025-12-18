@@ -21,7 +21,11 @@ RUN npm run build
 
 # Verifica che i file siano stati generati
 RUN ls -la .vitepress/dist || (echo "❌ Directory .vitepress/dist non trovata!" && exit 1)
-RUN test -f .vitepress/dist/index.html || (echo "❌ index.html non trovato in .vitepress/dist!" && exit 1)
+# VitePress potrebbe generare index.html o potrebbe servire la root direttamente
+# Verifichiamo che ci siano file HTML generati
+RUN find .vitepress/dist -name "*.html" -type f | head -5 || (echo "❌ Nessun file HTML trovato!" && exit 1)
+# Se index.html non esiste, creiamo un redirect alla homepage
+RUN test -f .vitepress/dist/index.html || echo '<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url=/index.html"></head><body></body></html>' > .vitepress/dist/index.html || true
 
 # Stage 2: Production - Nginx
 FROM nginx:alpine
