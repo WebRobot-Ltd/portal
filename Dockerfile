@@ -27,6 +27,8 @@ RUN ls -la .vitepress/dist || (echo "❌ Directory .vitepress/dist non trovata!"
 # VitePress potrebbe generare index.html o potrebbe servire la root direttamente
 # Verifichiamo che ci siano file HTML generati
 RUN find .vitepress/dist -name "*.html" -type f | head -5 || (echo "❌ Nessun file HTML trovato!" && exit 1)
+# Verifica che i file dalla directory public siano stati copiati
+RUN ls -la .vitepress/dist/logo* || (echo "⚠️ Logo files non trovati in dist" && ls -la .vitepress/dist/ | head -20)
 # Se index.html non esiste, creiamo un redirect alla homepage
 RUN test -f .vitepress/dist/index.html || echo '<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url=/index.html"></head><body></body></html>' > .vitepress/dist/index.html || true
 
