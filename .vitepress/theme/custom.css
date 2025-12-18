@@ -1,0 +1,188 @@
+/* Custom vibrant theme styles */
+
+:root {
+  /* Vibrant color palette */
+  --vp-c-brand: #667eea;
+  --vp-c-brand-light: #818cf8;
+  --vp-c-brand-lighter: #a5b4fc;
+  --vp-c-brand-dark: #4f46e5;
+  --vp-c-brand-darker: #4338ca;
+  
+  /* Gradient backgrounds */
+  --gradient-primary: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  --gradient-secondary: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  --gradient-success: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  
+  /* Shadows */
+  --shadow-sm: 0 2px 8px rgba(102, 126, 234, 0.1);
+  --shadow-md: 0 4px 16px rgba(102, 126, 234, 0.15);
+  --shadow-lg: 0 8px 32px rgba(102, 126, 234, 0.2);
+  
+  /* Borders */
+  --border-color: #E5E7EB;
+  --border-color-hover: #667eea;
+  --border-radius: 12px;
+  --border-width: 2px;
+}
+
+/* Animated background */
+.vp-hero {
+  position: relative;
+  overflow: hidden;
+}
+
+.vp-hero::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+  animation: gradient-shift 15s ease infinite;
+  z-index: -1;
+}
+
+@keyframes gradient-shift {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* Vibrant buttons */
+.vp-button {
+  transition: all 0.3s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.vp-button::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.3);
+  transform: translate(-50%, -50%);
+  transition: width 0.6s, height 0.6s;
+}
+
+.vp-button:hover::before {
+  width: 300px;
+  height: 300px;
+}
+
+/* Animated features */
+.vp-feature {
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+}
+
+.vp-feature:hover {
+  transform: translateY(-8px);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Pulse animation for CTAs */
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+}
+
+.vp-button.primary {
+  animation: pulse 2s ease-in-out infinite;
+}
+
+/* Smooth scroll */
+html {
+  scroll-behavior: smooth;
+}
+
+/* Enhanced code blocks */
+.vp-code-group {
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow-md);
+}
+
+/* Vibrant links */
+a {
+  transition: color 0.3s ease;
+  position: relative;
+}
+
+a:hover {
+  color: var(--vp-c-brand);
+}
+
+/* Card animations */
+.card {
+  transition: all 0.3s ease;
+  border-radius: var(--border-radius);
+  padding: 1.5rem;
+  background: white;
+  box-shadow: var(--shadow-sm);
+  border: var(--border-width) solid var(--border-color);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-lg);
+  transform: translateY(-4px);
+  border-color: var(--border-color-hover);
+}
+
+/* Keep VitePress default page spacing (home-like). Avoid overriding main/container layout.
+   Borders should live on components/cards, not on the global page shell. */
+
+/* Gradient text */
+.gradient-text {
+  background: var(--gradient-primary);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-weight: 700;
+}
+
+/* Floating animation */
+@keyframes float {
+  0%, 100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-20px);
+  }
+}
+
+.floating {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Shimmer effect */
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.3) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
+

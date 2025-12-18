@@ -1,0 +1,25 @@
+{
+  "name": "webrobot-vitepress-site",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "WebRobot enterprise showcase website built with VitePress",
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview",
+    "docker:build": "docker build -t webrobot-vitepress-site .",
+    "docker:run": "docker run -p 8080:80 webrobot-vitepress-site"
+  },
+  "keywords": [
+    "webrobot",
+    "etl",
+    "spark",
+    "ai",
+    "documentation"
+  ],
+  "author": "WebRobot Team",
+  "license": "MIT",
+  "devDependencies": {
+    "vitepress": "^1.6.4"
+  }
+}

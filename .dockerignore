@@ -1,0 +1,14 @@
+node_modules
+.vitepress/dist
+.vitepress/cache
+.DS_Store
+*.log
+.git
+.gitignore
+README.md
+SETUP.md
+.env
+.env.local
+*.md
+!package*.json
+
