@@ -332,25 +332,41 @@
               </div>
               <div class="step-content">
                 <div class="form-group">
-                  <label for="ean-query">SQL Query:</label>
+                  <label for="ean-query">EAN Codes (comma or line separated):</label>
                   <textarea 
                     id="ean-query"
                     v-model="eanConfig.query"
-                    placeholder="SELECT * FROM ean_results WHERE country = 'denmark' LIMIT 10"
+                    placeholder="8711000429969, 4012824723641&#10;Or one per line:&#10;8711000429969&#10;4012824723641"
                     class="textarea-input"
                     rows="4"
                   ></textarea>
+                  <p class="hint">Enter EAN codes separated by commas or one per line</p>
                 </div>
-                <button 
-                  class="btn btn-primary"
-                  :disabled="!eanConfig.query.trim() || isQueryingEAN"
-                  @click="queryEANResults"
-                >
-                  <span v-if="isQueryingEAN" class="loading-spinner"></span>
-                  {{ isQueryingEAN ? 'Querying...' : 'Execute Query' }}
-                </button>
+                <div class="button-group">
+                  <button 
+                    class="btn btn-primary"
+                    :disabled="!eanConfig.query.trim() || isQueryingEAN"
+                    @click="queryEANResults"
+                  >
+                    <span v-if="isQueryingEAN" class="loading-spinner"></span>
+                    {{ isQueryingEAN ? 'Querying...' : 'Query Results' }}
+                  </button>
+                  <button 
+                    class="btn btn-secondary"
+                    :disabled="!eanConfig.query.trim() || isFetchingImages"
+                    @click="getEANImagesList"
+                  >
+                    <span v-if="isFetchingImages" class="loading-spinner"></span>
+                    {{ isFetchingImages ? 'Loading...' : 'Get Images List' }}
+                  </button>
+                </div>
               </div>
             </div>
+          </div>
+
+          <!-- Error Display -->
+          <div v-if="eanError" class="error-content" style="margin-top: 1rem;">
+            <p class="error-message">{{ eanError }}</p>
           </div>
 
           <!-- EAN Results Display -->
@@ -374,6 +390,32 @@
                   </tr>
                 </tbody>
               </table>
+            </div>
+          </div>
+
+          <!-- EAN Images List Display -->
+          <div v-if="eanImagesList" class="ean-images-list">
+            <div class="results-header">
+              <h3>Images Matched with EAN Codes</h3>
+              <span class="badge badge-info">{{ eanImagesList.length }} EAN codes</span>
+            </div>
+            <div v-for="eanEntry in eanImagesList" :key="eanEntry.ean" class="ean-images-group">
+              <h4>EAN: {{ eanEntry.ean }}</h4>
+              <div v-if="eanEntry.images && eanEntry.images.length > 0" class="images-grid">
+                <div v-for="(image, idx) in eanEntry.images" :key="idx" class="image-card">
+                  <img 
+                    :src="image.base64 || image.url" 
+                    :alt="`Image ${idx + 1} for EAN ${eanEntry.ean}`"
+                    class="product-image"
+                    @error="handleImageError"
+                  />
+                  <div class="image-info">
+                    <p class="image-score">Score: {{ (image.score * 100).toFixed(1) }}%</p>
+                    <a :href="image.url" target="_blank" class="image-link">View Source</a>
+                  </div>
+                </div>
+              </div>
+              <p v-else class="no-images">No images found for this EAN code</p>
             </div>
           </div>
         </div>
@@ -416,9 +458,18 @@ const isAuthenticating = ref(false)
 const isAuthenticated = ref(false)
 const authError = ref(null)
 const authenticatedUser = ref(null)
+const authenticatedOrganizationId = ref(null) // Store organization_id from API
 const selectedPrivateDemo = ref(null)
 
 // Private demos available (extensible structure)
+// Each demo can be associated with specific organization_ids
+// 
+// organizationId assignment rules:
+// - null or undefined: demo is available to ALL organizations
+// - string (e.g., 'org-123'): demo is available ONLY to that specific organization
+// - array (e.g., ['org-1', 'org-2']): demo is available to multiple organizations listed
+//
+// To add a new demo, copy the structure below and assign the appropriate organizationId
 const availablePrivateDemos = ref([
   {
     id: 'ean-plugin',
@@ -427,17 +478,46 @@ const availablePrivateDemos = ref([
     description: 'Upload EAN codes and extract product images from e-commerce sites',
     features: ['CSV Upload', 'Image Extraction', 'SQL Query', 'Multi-country'],
     status: 'available',
-    plugin: 'ean-image-sourcing'
+    plugin: 'ean-image-sourcing',
+    organizationId: null // Available to all organizations - change to specific org ID(s) to restrict access
   }
-  // Future demos can be added here:
+  // 
+  // ADD MORE DEMOS HERE - Examples:
+  //
+  // Demo for a single organization:
   // {
-  //   id: 'custom-plugin-1',
-  //   name: 'Custom Plugin Demo',
+  //   id: 'custom-plugin-org1',
+  //   name: 'Custom Plugin for Organization 1',
   //   icon: '🔧',
-  //   description: 'Description of custom plugin',
+  //   description: 'Custom plugin available only to organization 1',
   //   features: ['Feature 1', 'Feature 2'],
   //   status: 'available',
-  //   plugin: 'custom-plugin-1'
+  //   plugin: 'custom-plugin-org1',
+  //   organizationId: 'org-1' // Replace 'org-1' with actual organization_id
+  // },
+  //
+  // Demo for multiple organizations:
+  // {
+  //   id: 'shared-plugin',
+  //   name: 'Shared Plugin',
+  //   icon: '📦',
+  //   description: 'Plugin available to multiple organizations',
+  //   features: ['Feature A', 'Feature B'],
+  //   status: 'available',
+  //   plugin: 'shared-plugin',
+  //   organizationId: ['org-1', 'org-2', 'org-3'] // Replace with actual organization_ids
+  // },
+  //
+  // Demo available to all (public demo):
+  // {
+  //   id: 'public-demo',
+  //   name: 'Public Demo',
+  //   icon: '🌐',
+  //   description: 'Demo available to everyone',
+  //   features: ['Public Feature'],
+  //   status: 'available',
+  //   plugin: 'public-demo',
+  //   organizationId: null // null = available to all
   // }
 ])
 
@@ -445,14 +525,18 @@ const availablePrivateDemos = ref([
 const eanConfig = ref({
   country: '',
   query: '',
-  file: null
+  file: null,
+  cloudCredentialId: '' // Optional: cloud credential ID for execution
 })
 const isUploading = ref(false)
 const isExecutingEAN = ref(false)
 const isQueryingEAN = ref(false)
+const isFetchingImages = ref(false)
 const eanUploadResult = ref(null)
 const eanResults = ref(null)
+const eanImagesList = ref(null) // Lista immagini matchate con EAN code
 const eanTableColumns = ref([])
+const eanError = ref(null)
 
 // Available pipelines from documentation (matching Redocly structure)
 const availablePipelines = ref([
@@ -598,59 +682,124 @@ function saveAndExecute() {
 }
 
 // Private Demo Authentication
-function authenticate() {
+// API base URL - can be configured via environment variable or use production default
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.webrobot.eu'
+
+async function authenticate() {
   if (!authConfig.value.apiKey.trim()) return
   
   isAuthenticating.value = true
   authError.value = null
   
-  // Simulate API authentication (will be replaced with actual backend)
-  setTimeout(() => {
-    // Mock: Different API keys return different user profiles with different demos
-    const mockUsers = {
-      'ean-demo-key': {
-        name: 'EAN Client',
-        email: 'ean@example.com',
-        demos: ['ean-plugin']
-      },
-      'premium-key': {
-        name: 'Premium Client',
-        email: 'premium@example.com',
-        demos: ['ean-plugin', 'custom-plugin-1']
+  try {
+    // Step 1: Validate API key and get user information
+    // Using the new /api/webrobot/api/auth/me endpoint to get user info including organization_id
+    const authResponse = await fetch(`${API_BASE_URL}/api/webrobot/api/auth/me`, {
+      method: 'GET',
+      headers: {
+        'X-API-Key': authConfig.value.apiKey.trim(),
+        'Content-Type': 'application/json'
       }
+    })
+    
+    if (!authResponse.ok) {
+      if (authResponse.status === 401) {
+        authError.value = 'Invalid API key. Please check your credentials.'
+      } else if (authResponse.status === 403) {
+        authError.value = 'API key does not have required permissions.'
+      } else {
+        authError.value = `Authentication failed: ${authResponse.statusText}`
+      }
+      isAuthenticating.value = false
+      return
     }
     
-    const user = mockUsers[authConfig.value.apiKey] || {
-      name: 'Standard Client',
-      email: 'client@example.com',
-      demos: ['ean-plugin']
+    // Parse user information from response
+    const userInfo = await authResponse.json()
+    const organizationId = userInfo.organizationId || null
+    const userId = userInfo.userId || 'unknown'
+    const role = userInfo.role || 'authenticated'
+    const scopes = userInfo.scopes || []
+    
+    // Store organization_id for demo filtering
+    authenticatedOrganizationId.value = organizationId
+    
+    // Build user object
+    const user = {
+      name: `User ${userId}`,
+      email: '',
+      userId: userId,
+      role: role,
+      organizationId: organizationId,
+      scopes: scopes,
+      demos: [] // Will be filtered based on organization_id
     }
     
+    // Helper function to check if a demo is available for the user's organization
+    const isDemoAvailableForOrg = (demoOrgId, userOrgId) => {
+      // If demo has no organization restriction (null), it's available to all
+      if (demoOrgId === null || demoOrgId === undefined) {
+        return true
+      }
+      
+      // If user has no organization_id, only show demos available to all
+      if (userOrgId === null || userOrgId === undefined) {
+        return false
+      }
+      
+      // If demo.organizationId is an array, check if user's org is in the list
+      if (Array.isArray(demoOrgId)) {
+        return demoOrgId.includes(userOrgId)
+      }
+      
+      // If demo.organizationId is a string, compare directly
+      if (typeof demoOrgId === 'string') {
+        return demoOrgId === userOrgId
+      }
+      
+      // Fallback: demo not available
+      return false
+    }
+    
+    // Filter demos based on organization_id
+    // Each demo's organizationId can be:
+    // - null/undefined: available to all organizations
+    // - string: available only to that specific organization_id
+    // - array: available to multiple organization_ids listed in the array
+    const filteredDemos = availablePrivateDemos.value.filter(demo => {
+      return isDemoAvailableForOrg(demo.organizationId, organizationId)
+    })
+    
+    // Update user demos list
+    user.demos = filteredDemos.map(demo => demo.id)
+    
+    isAuthenticated.value = true
+    authenticatedUser.value = user
+    
+    // Store API key and organization_id in sessionStorage
+    sessionStorage.setItem('webrobot_api_key', authConfig.value.apiKey.trim())
+    if (organizationId) {
+      sessionStorage.setItem('webrobot_org_id', organizationId)
+    }
+    
+  } catch (error) {
+    console.error('Authentication error:', error)
+    authError.value = 'Network error. Please check your connection and try again.'
+  } finally {
     isAuthenticating.value = false
-    
-    if (user) {
-      isAuthenticated.value = true
-      authenticatedUser.value = user
-      // Filter demos based on user access
-      availablePrivateDemos.value = availablePrivateDemos.value.filter(demo => 
-        user.demos.includes(demo.id)
-      )
-      // Store API key in sessionStorage (not localStorage for security)
-      sessionStorage.setItem('webrobot_api_key', authConfig.value.apiKey)
-    } else {
-      authError.value = 'Invalid API key. Please check your credentials.'
-    }
-  }, 1500)
+  }
 }
 
 function logout() {
   isAuthenticated.value = false
   authenticatedUser.value = null
+  authenticatedOrganizationId.value = null
   authConfig.value.apiKey = ''
   selectedPrivateDemo.value = null
   eanUploadResult.value = null
   eanResults.value = null
   sessionStorage.removeItem('webrobot_api_key')
+  sessionStorage.removeItem('webrobot_org_id')
 }
 
 function selectPrivateDemo(demo) {
@@ -659,6 +808,20 @@ function selectPrivateDemo(demo) {
     // Reset demo-specific state
     eanUploadResult.value = null
     eanResults.value = null
+    eanImagesList.value = null
+    eanError.value = null
+  }
+}
+
+function handleImageError(event) {
+  // Fallback to URL if base64 fails
+  const img = event.target
+  if (img.src && img.src.startsWith('data:')) {
+    // Try to get URL from parent data attributes or fallback
+    const url = img.getAttribute('data-url')
+    if (url) {
+      img.src = url
+    }
   }
 }
 
@@ -674,52 +837,200 @@ function handleFileSelect(event) {
   }
 }
 
-function uploadEANDataset() {
+async function uploadEANDataset() {
   if (!canUploadEAN.value) return
   
   isUploading.value = true
+  eanError.value = null
   
-  // Simulate upload (will be replaced with actual API call)
-  setTimeout(() => {
-    isUploading.value = false
-    eanUploadResult.value = {
-      country: eanConfig.value.country,
-      datasetId: `ds-${Date.now()}`,
-      datasetName: `EAN Image Sourcing - ${eanConfig.value.country} - ${new Date().toISOString().split('T')[0]}`,
-      storagePath: `s3a://sparklogs-data/ean-sourcing/${eanConfig.value.country}/${Date.now()}-products.csv`,
-      status: 'uploaded'
+  try {
+    const apiKey = getAuthenticatedApiKey()
+    if (!apiKey) {
+      throw new Error('Not authenticated. Please log in first.')
     }
-  }, 2000)
+    
+    // Prepare multipart form data
+    const formData = new FormData()
+    formData.append('file', eanConfig.value.file)
+    
+    // Call upload endpoint
+    const response = await fetch(`${API_BASE_URL}/api/webrobot/ean-image-sourcing/${eanConfig.value.country}/upload`, {
+      method: 'POST',
+      headers: {
+        'X-API-Key': apiKey
+        // Don't set Content-Type header - browser will set it with boundary for multipart/form-data
+      },
+      body: formData
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(errorData.error || `Upload failed: ${response.statusText}`)
+    }
+    
+    const result = await response.json()
+    eanUploadResult.value = result
+    
+  } catch (error) {
+    console.error('Upload error:', error)
+    eanError.value = error.message || 'Failed to upload dataset'
+  } finally {
+    isUploading.value = false
+  }
 }
 
-function executeEANJob() {
+async function executeEANJob() {
   if (!eanUploadResult.value) return
   
   isExecutingEAN.value = true
+  eanError.value = null
   
-  // Simulate execution (will be replaced with actual API call)
-  setTimeout(() => {
+  try {
+    const apiKey = getAuthenticatedApiKey()
+    if (!apiKey) {
+      throw new Error('Not authenticated. Please log in first.')
+    }
+    
+    // Prepare request body
+    const requestBody = {}
+    if (eanUploadResult.value.datasetId) {
+      requestBody.datasetId = eanUploadResult.value.datasetId
+    }
+    if (eanConfig.value.cloudCredentialId) {
+      requestBody.cloudCredentialId = eanConfig.value.cloudCredentialId
+    }
+    
+    // Call execute endpoint
+    const response = await authenticatedFetch(`/api/webrobot/ean-image-sourcing/${eanConfig.value.country}/execute`, {
+      method: 'POST',
+      body: JSON.stringify(requestBody)
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(errorData.error || `Execution failed: ${response.statusText}`)
+    }
+    
+    const result = await response.json()
+    
+    // Update upload result with execution info
+    eanUploadResult.value = {
+      ...eanUploadResult.value,
+      ...result,
+      executionStatus: 'started'
+    }
+    
+    alert(`Job execution started successfully!\nJob ID: ${result.jobId || 'N/A'}\nOutput Dataset ID: ${result.outputDatasetId || 'N/A'}`)
+    
+  } catch (error) {
+    console.error('Execution error:', error)
+    eanError.value = error.message || 'Failed to execute job'
+  } finally {
     isExecutingEAN.value = false
-    alert('Job execution started. Check status endpoint for progress.')
-  }, 2000)
+  }
 }
 
-function queryEANResults() {
+async function queryEANResults() {
   if (!eanConfig.value.query.trim()) return
   
   isQueryingEAN.value = true
+  eanError.value = null
   
-  // Simulate query (will be replaced with actual API call)
-  setTimeout(() => {
+  try {
+    const apiKey = getAuthenticatedApiKey()
+    if (!apiKey) {
+      throw new Error('Not authenticated. Please log in first.')
+    }
+    
+    // Parse EAN codes from query (can be comma-separated or one per line)
+    const eanCodes = eanConfig.value.query
+      .split(/[,\n]/)
+      .map(code => code.trim())
+      .filter(code => code.length > 0)
+    
+    if (eanCodes.length === 0) {
+      throw new Error('Please provide at least one EAN code')
+    }
+    
+    // Call query endpoint
+    const response = await authenticatedFetch(`/api/webrobot/ean-image-sourcing/${eanConfig.value.country}/query`, {
+      method: 'POST',
+      body: JSON.stringify({
+        eanCodes: eanCodes
+      })
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(errorData.error || `Query failed: ${response.statusText}`)
+    }
+    
+    const results = await response.json()
+    eanResults.value = results
+    
+    // Extract table columns from first result if available
+    if (results && results.length > 0) {
+      eanTableColumns.value = Object.keys(results[0])
+    } else {
+      eanTableColumns.value = []
+    }
+    
+  } catch (error) {
+    console.error('Query error:', error)
+    eanError.value = error.message || 'Failed to query results'
+    eanResults.value = null
+  } finally {
     isQueryingEAN.value = false
-    // Mock results
-    eanResults.value = [
-      { ean: '1234567890123', product_name: 'Product A', price: 29.99, image_url: 'https://example.com/img1.jpg', similarity: 0.95 },
-      { ean: '1234567890124', product_name: 'Product B', price: 49.99, image_url: 'https://example.com/img2.jpg', similarity: 0.92 },
-      { ean: '1234567890125', product_name: 'Product C', price: 19.99, image_url: 'https://example.com/img3.jpg', similarity: 0.88 }
-    ]
-    eanTableColumns.value = Object.keys(eanResults.value[0])
-  }, 1500)
+  }
+}
+
+// Function to get images list matched with EAN codes
+async function getEANImagesList() {
+  if (!eanConfig.value.query.trim()) return
+  
+  isFetchingImages.value = true
+  eanError.value = null
+  
+  try {
+    const apiKey = getAuthenticatedApiKey()
+    if (!apiKey) {
+      throw new Error('Not authenticated. Please log in first.')
+    }
+    
+    // Parse EAN codes from query
+    const eanCodes = eanConfig.value.query
+      .split(/[,\n]/)
+      .map(code => code.trim())
+      .filter(code => code.length > 0)
+    
+    if (eanCodes.length === 0) {
+      throw new Error('Please provide at least one EAN code')
+    }
+    
+    // Call images endpoint (simplified format)
+    const response = await authenticatedFetch(`/api/webrobot/ean-image-sourcing/${eanConfig.value.country}/images`, {
+      method: 'POST',
+      body: JSON.stringify({
+        eanCodes: eanCodes,
+        limit: 10 // Max 10 images per EAN
+      })
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(errorData.error || `Failed to fetch images: ${response.statusText}`)
+    }
+    
+    const imagesList = await response.json()
+    eanImagesList.value = imagesList
+    
+  } catch (error) {
+    console.error('Images fetch error:', error)
+    eanError.value = error.message || 'Failed to fetch images'
+    eanImagesList.value = null
+  } finally {
+    isFetchingImages.value = false
+  }
 }
 
 function formatCellValue(value) {
@@ -729,12 +1040,49 @@ function formatCellValue(value) {
   return value
 }
 
+// Helper function to get authenticated API key for API requests
+function getAuthenticatedApiKey() {
+  if (typeof window === 'undefined') return null
+  return sessionStorage.getItem('webrobot_api_key')
+}
+
+// Helper function to make authenticated API requests
+async function authenticatedFetch(url, options = {}) {
+  const apiKey = getAuthenticatedApiKey()
+  if (!apiKey) {
+    throw new Error('Not authenticated. Please log in first.')
+  }
+  
+  const headers = {
+    'X-API-Key': apiKey,
+    'Content-Type': 'application/json',
+    ...options.headers
+  }
+  
+  return fetch(`${API_BASE_URL}${url}`, {
+    ...options,
+    headers
+  })
+}
+
 // Check for existing session on mount
 if (typeof window !== 'undefined') {
   const storedKey = sessionStorage.getItem('webrobot_api_key')
+  const storedOrgId = sessionStorage.getItem('webrobot_org_id')
   if (storedKey) {
     authConfig.value.apiKey = storedKey
-    authenticate()
+    if (storedOrgId) {
+      authenticatedOrganizationId.value = storedOrgId
+    }
+    // Authenticate automatically if API key is stored
+    authenticate().catch(err => {
+      console.error('Auto-authentication failed:', err)
+      // Clear invalid stored keys
+      sessionStorage.removeItem('webrobot_api_key')
+      sessionStorage.removeItem('webrobot_org_id')
+      authConfig.value.apiKey = ''
+      authenticatedOrganizationId.value = null
+    })
   }
 }
 </script>
@@ -1327,6 +1675,100 @@ if (typeof window !== 'undefined') {
   .results-table {
     font-size: 0.8rem;
   }
+
+  .images-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+}
+
+/* EAN Images List Styles */
+.ean-images-list {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  background: var(--vp-c-bg-soft);
+  border-radius: 8px;
+}
+
+.ean-images-group {
+  margin-bottom: 2rem;
+  padding-bottom: 2rem;
+  border-bottom: 2px solid var(--vp-c-divider);
+}
+
+.ean-images-group:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+.ean-images-group h4 {
+  margin-bottom: 1rem;
+  color: var(--vp-c-text-1);
+  font-size: 1.1rem;
+}
+
+.images-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.image-card {
+  background: var(--vp-c-bg);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.image-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.product-image {
+  width: 100%;
+  height: 200px;
+  object-fit: contain;
+  background: var(--vp-c-bg-alt);
+  display: block;
+}
+
+.image-info {
+  padding: 0.75rem;
+  text-align: center;
+}
+
+.image-score {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--vp-c-brand);
+}
+
+.image-link {
+  display: inline-block;
+  font-size: 0.8rem;
+  color: var(--vp-c-text-2);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+
+.image-link:hover {
+  color: var(--vp-c-brand);
+}
+
+.no-images {
+  color: var(--vp-c-text-2);
+  font-style: italic;
+  margin: 1rem 0;
+}
+
+.button-group {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
 }
 </style>
 
