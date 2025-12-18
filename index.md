@@ -6,12 +6,12 @@ hero:
   text: "Agentic ETL Platform"
   tagline: Spark-native, API-first data infrastructure for building intelligent data pipelines
   image:
-    src: /logo.svg
+    src: /logo-webrobot.png
     alt: WebRobot
   actions:
     - theme: brand
       text: Get Started
-      link: /docs/introduction
+      link: https://docs.webrobot.eu/
     - theme: alt
       text: View on GitHub
       link: https://github.com/webrobot
@@ -71,12 +71,12 @@ webrobot init my-pipeline
 
 ### Learn More
 
-- [Documentation](/docs/introduction) - Comprehensive guides and tutorials
-- [API Reference](/api/authentication) - Complete API documentation
+- [Documentation](https://docs.webrobot.eu/) - Comprehensive guides and tutorials
+- [API Reference](https://docs.webrobot.eu/#-api-reference) - Complete API documentation
 - [Use Cases](/use-cases) - Real-world examples and solutions
 - [Examples](https://github.com/webrobot/examples) - Sample pipelines and code
 
 ---
 
-**Ready to transform your data infrastructure?** [Get started now →](/docs/introduction)
+**Ready to transform your data infrastructure?** [Get started now →](https://docs.webrobot.eu/)
 

@@ -10,15 +10,15 @@ export default defineConfig({
   // Theme configuration
   themeConfig: {
     // Logo
-    logo: '/logo.svg',
+    logo: '/logo-webrobot.png',
     
     // Navigation
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Features', link: '/features' },
       { text: 'Demo', link: '/demo' },
-      { text: 'Documentation', link: '/docs' },
-      { text: 'API Reference', link: '/api' },
+      { text: 'Documentation', link: 'https://docs.webrobot.eu/' },
+      { text: 'API Reference', link: 'https://docs.webrobot.eu/#-api-reference' },
       { text: 'Use Cases', link: '/use-cases' },
       { text: 'Contact', link: '/contact' },
       { text: 'About', link: '/about' }
