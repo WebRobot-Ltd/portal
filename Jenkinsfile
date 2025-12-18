@@ -5,8 +5,8 @@ pipeline {
         // Repository GitHub
         GITHUB_REPOSITORY = 'WebRobot-Ltd/portal'
         
-        // Immagine Docker su GHCR
-        DOCKER_IMAGE = "ghcr.io/${GITHUB_REPOSITORY}"
+        // Immagine Docker su GHCR (deve essere lowercase)
+        DOCKER_IMAGE = "ghcr.io/webrobot-ltd/portal"
         DOCKER_TAG = "${env.BUILD_NUMBER}"
         
         // Credenziali
