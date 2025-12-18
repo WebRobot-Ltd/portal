@@ -19,6 +19,12 @@ COPY . .
 # Verifica che index.md sia presente
 RUN test -f index.md || (echo "❌ index.md non trovato!" && ls -la && exit 1)
 
+# Verifica che i file nella directory public siano presenti
+RUN echo "📁 Verifica file nella directory public:" && \
+    ls -la public/ || (echo "❌ Directory public non trovata!" && exit 1) && \
+    test -f public/logo-webrobot.png || (echo "❌ logo-webrobot.png non trovato in public!" && exit 1) && \
+    test -f public/logo.svg || (echo "⚠️ logo.svg non trovato in public" || true)
+
 # Build sito VitePress (genera file statici in .vitepress/dist)
 RUN npm run build
 
@@ -28,7 +34,9 @@ RUN ls -la .vitepress/dist || (echo "❌ Directory .vitepress/dist non trovata!"
 # Verifichiamo che ci siano file HTML generati
 RUN find .vitepress/dist -name "*.html" -type f | head -5 || (echo "❌ Nessun file HTML trovato!" && exit 1)
 # Verifica che i file dalla directory public siano stati copiati
-RUN ls -la .vitepress/dist/logo* || (echo "⚠️ Logo files non trovati in dist" && ls -la .vitepress/dist/ | head -20)
+RUN echo "📁 Verifica file logo copiati in dist:" && \
+    ls -la .vitepress/dist/logo* || (echo "⚠️ Logo files non trovati in dist" && ls -la .vitepress/dist/ | head -20) && \
+    test -f .vitepress/dist/logo-webrobot.png || (echo "❌ logo-webrobot.png non copiato in dist!" && ls -la .vitepress/dist/ | grep -i logo || true && exit 1)
 # Se index.html non esiste, creiamo un redirect alla homepage
 RUN test -f .vitepress/dist/index.html || echo '<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url=/index.html"></head><body></body></html>' > .vitepress/dist/index.html || true
 
