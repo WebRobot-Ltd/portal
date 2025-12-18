@@ -2,8 +2,8 @@ pipeline {
     agent none // Definiamo l'agente a livello di stage
     
     environment {
-        // Repository GitHub (da aggiornare quando disponibile)
-        GITHUB_REPOSITORY = 'webrobot-ltd/webrobot-vitepress-site'
+        // Repository GitHub
+        GITHUB_REPOSITORY = 'WebRobot-Ltd/portal'
         
         // Immagine Docker su GHCR
         DOCKER_IMAGE = "ghcr.io/${GITHUB_REPOSITORY}"
@@ -202,24 +202,24 @@ spec:
                                 kubectl apply -f k8s/ingress.yaml -n webrobot || true
                                 
                                 # Aggiorna l'immagine se necessario
-                                kubectl set image deployment/webrobot-vitepress-site \\
-                                    vitepress-site=${env.DOCKER_IMAGE}:${imageTag} \\
+                                kubectl set image deployment/webrobot-portal \\
+                                    portal=${env.DOCKER_IMAGE}:${imageTag} \\
                                     -n webrobot || true
                             else
                                 echo "⚠️ Directory k8s/ non trovata, creazione deployment base..."
-                                kubectl create deployment webrobot-vitepress-site \\
+                                kubectl create deployment webrobot-portal \\
                                     --image=${env.DOCKER_IMAGE}:${imageTag} \\
                                     --namespace=webrobot \\
                                     --dry-run=client -o yaml | kubectl apply -f - || true
                                 
-                                kubectl set image deployment/webrobot-vitepress-site \\
-                                    vitepress-site=${env.DOCKER_IMAGE}:${imageTag} \\
+                                kubectl set image deployment/webrobot-portal \\
+                                    portal=${env.DOCKER_IMAGE}:${imageTag} \\
                                     -n webrobot || true
                             fi
                         """
                         
                         // Attendi il rollout del deployment
-                        sh "kubectl rollout status deployment/webrobot-vitepress-site -n webrobot --timeout=5m || echo '⚠️ Deployment non trovato o rollout in corso'"
+                        sh "kubectl rollout status deployment/webrobot-portal -n webrobot --timeout=5m || echo '⚠️ Deployment non trovato o rollout in corso'"
                         
                         echo "✅ Deploy su Kubernetes completato"
                     }

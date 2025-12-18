@@ -1,19 +1,11 @@
 <template>
   <div class="demo-app">
-    <div class="demo-header">
-      <h1>🚀 WebRobot Demo</h1>
-      <p class="demo-subtitle">
-        Explore WebRobot's capabilities: execute example pipelines or generate new ones from natural language
-      </p>
-    </div>
 
     <!-- Section 1: Execute Existing Pipelines -->
     <div class="demo-section">
-      <div class="section-header">
-        <h2>📋 Execute Example Pipelines</h2>
-        <p>Run publicly available ETL pipelines from our documentation. Preview limited to 5-10 records.</p>
-      </div>
-
+      <h2>📋 Execute Example Pipelines</h2>
+      <p>Run publicly available ETL pipelines from our documentation. Preview limited to 5-10 records.</p>
+      
       <div class="pipeline-selector-card">
         <div class="form-group">
           <label for="pipeline-selector">Select a Pipeline:</label>
@@ -40,6 +32,9 @@
           <div class="pipeline-meta">
             <span class="badge">Source: {{ selectedPipelineInfo.source }}</span>
             <span class="badge">Stages: {{ selectedPipelineInfo.stages }}</span>
+            <a :href="selectedPipelineInfo.docLink" target="_blank" class="badge badge-link">
+              View Documentation →
+            </a>
           </div>
         </div>
 
@@ -85,13 +80,11 @@
 
     <!-- Section 2: Generate Pipeline from Natural Language -->
     <div class="demo-section">
-      <div class="section-header">
-        <h2>🤖 Generate Pipeline from Natural Language</h2>
-        <p>
-          Describe what you want to scrape or extract, and our AI agent will generate a pipeline YAML for you.
-          <strong>Note: Generated pipelines are not executed automatically.</strong>
-        </p>
-      </div>
+      <h2>🤖 Generate Pipeline from Natural Language</h2>
+      <p>
+        Describe what you want to scrape or extract, and our AI agent will generate a pipeline YAML for you.
+        <strong>Note: Generated pipelines are not executed automatically.</strong>
+      </p>
 
       <div class="generation-card">
         <div class="form-group">
@@ -461,41 +454,46 @@ const eanUploadResult = ref(null)
 const eanResults = ref(null)
 const eanTableColumns = ref([])
 
-// Available pipelines from documentation
+// Available pipelines from documentation (matching Redocly structure)
 const availablePipelines = ref([
   {
     id: 'llm-finetuning-dataset',
     name: 'LLM Fine-tuning Dataset',
     description: 'Scrape and prepare datasets for LLM fine-tuning from public domain sources',
-    source: 'docs/examples/pipelines/23-llm-finetuning-dataset.yaml',
+    source: 'examples/pipelines/23-llm-finetuning-dataset.yaml',
+    docLink: 'https://docs.webrobot.eu/guides/vertical-llm-finetuning',
     stages: ['load_csv', 'visit', 'iextract', 'store']
   },
   {
     id: 'price-comparison',
     name: 'Price Comparison (5 Sites)',
     description: 'Compare product prices across multiple e-commerce sites',
-    source: 'docs/examples/pipelines/19-price-comparison-5-sites.yaml',
+    source: 'examples/pipelines/19-price-comparison-5-sites.yaml',
+    docLink: 'https://docs.webrobot.eu/guides/vertical-price-comparison',
     stages: ['visit', 'iextract', 'union_with', 'store']
   },
   {
     id: 'sports-betting',
     name: 'Sports Betting Surebet Detection',
     description: 'Detect arbitrage opportunities across multiple bookmakers',
-    source: 'docs/examples/pipelines/21-surebet-intelligent-extraction.yaml',
+    source: 'examples/pipelines/21-surebet-intelligent-extraction.yaml',
+    docLink: 'https://docs.webrobot.eu/guides/vertical-sports-betting',
     stages: ['visit', 'iextract', 'store']
   },
   {
     id: 'real-estate',
     name: 'Real Estate Property Scraping',
     description: 'Extract property listings with intelligent extraction',
-    source: 'docs/examples/pipelines/22-real-estate-intelligent-extraction.yaml',
+    source: 'examples/pipelines/22-real-estate-arbitrage-clustering.yaml',
+    docLink: 'https://docs.webrobot.eu/guides/vertical-real-estate',
     stages: ['visit', 'iextract', 'propertyCluster', 'store']
   },
   {
     id: 'portfolio-management',
     name: 'Portfolio Management (90d Prediction)',
     description: 'Analyze portfolio data for 90-day predictions',
-    source: 'docs/examples/pipelines/24-portfolio-management-90d-prediction.yaml',
+    source: 'examples/pipelines/24-portfolio-management-90d-prediction.yaml',
+    docLink: 'https://docs.webrobot.eu/guides/vertical-portfolio-management',
     stages: ['load_csv', 'visit', 'iextract', 'store']
   }
 ])
@@ -743,46 +741,23 @@ if (typeof window !== 'undefined') {
 
 <style scoped>
 .demo-app {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 2rem;
-}
-
-.demo-header {
-  text-align: center;
-  margin-bottom: 3rem;
-}
-
-.demo-header h1 {
-  font-size: 2.5rem;
-  margin-bottom: 0.5rem;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
-.demo-subtitle {
-  font-size: 1.1rem;
-  color: var(--vp-c-text-2);
+  max-width: 100%;
 }
 
 .demo-section {
-  margin-bottom: 4rem;
+  margin-bottom: 3rem;
 }
 
-.section-header {
-  margin-bottom: 1.5rem;
+.demo-section h2 {
+  font-size: 1.5rem;
+  margin-bottom: 0.75rem;
+  margin-top: 2rem;
 }
 
-.section-header h2 {
-  font-size: 1.8rem;
-  margin-bottom: 0.5rem;
-}
-
-.section-header p {
+.demo-section > p {
   color: var(--vp-c-text-2);
   line-height: 1.6;
+  margin-bottom: 1.5rem;
 }
 
 .pipeline-selector-card,
@@ -868,6 +843,17 @@ if (typeof window !== 'undefined') {
   border-radius: 12px;
   font-size: 0.85rem;
   color: var(--vp-c-text-2);
+}
+
+.badge-link {
+  background: var(--vp-c-brand-1);
+  color: var(--vp-c-brand-text);
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+
+.badge-link:hover {
+  opacity: 0.8;
 }
 
 .btn {
@@ -1300,14 +1286,6 @@ if (typeof window !== 'undefined') {
 }
 
 @media (max-width: 768px) {
-  .demo-app {
-    padding: 1rem;
-  }
-  
-  .demo-header h1 {
-    font-size: 2rem;
-  }
-  
   .result-stats {
     flex-direction: column;
     gap: 1rem;
@@ -1320,6 +1298,11 @@ if (typeof window !== 'undefined') {
   .btn {
     width: 100%;
     justify-content: center;
+  }
+  
+  .pipeline-meta {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .private-demos-grid {
