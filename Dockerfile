@@ -68,22 +68,25 @@ http { \
         server_name _; \
         root /usr/share/nginx/html; \
         index index.html; \
-        location / { \
-            try_files $uri $uri/ /index.html; \
-        } \
-        location ~* \.(js|mjs)$ { \
-            add_header Content-Type application/javascript; \
-        } \
-        location ~* \.(css)$ { \
-            add_header Content-Type text/css; \
-        } \
-        location ~* \.(json)$ { \
-            add_header Content-Type application/json; \
-        } \
         location /health { \
             access_log off; \
             return 200 "healthy\n"; \
             add_header Content-Type text/plain; \
+        } \
+        location ~* \.(js|mjs)$ { \
+            add_header Content-Type application/javascript; \
+            try_files $uri =404; \
+        } \
+        location ~* \.(css)$ { \
+            add_header Content-Type text/css; \
+            try_files $uri =404; \
+        } \
+        location ~* \.(json)$ { \
+            add_header Content-Type application/json; \
+            try_files $uri =404; \
+        } \
+        location / { \
+            try_files $uri $uri/ /index.html; \
         } \
     } \
 }' > /etc/nginx/nginx.conf
