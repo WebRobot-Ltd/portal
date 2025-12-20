@@ -237,10 +237,20 @@ a:hover {
   border: 2px solid #E5E7EB;
 }
 
+.dark .vp-doc .feature-card {
+  background: var(--vp-c-bg-alt);
+  border-color: var(--vp-c-divider);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+}
+
 .vp-doc .feature-card:hover {
   transform: translateY(-8px);
   box-shadow: 0 12px 40px rgba(102, 126, 234, 0.2);
   border-color: #667eea;
+}
+
+.dark .vp-doc .feature-card:hover {
+  box-shadow: 0 12px 40px rgba(102, 126, 234, 0.4);
 }
 
 .vp-doc .feature-card h3 {
@@ -249,6 +259,10 @@ a:hover {
   margin-bottom: 1rem;
   font-size: 1.5rem;
   font-weight: 700;
+}
+
+.dark .vp-doc .feature-card h3 {
+  color: var(--vp-c-brand-light);
 }
 
 .vp-doc .feature-card ul {
@@ -263,6 +277,12 @@ a:hover {
   position: relative;
   line-height: 1.6;
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  color: var(--vp-c-text-1);
+}
+
+.dark .vp-doc .feature-card li {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--vp-c-text-1);
 }
 
 .vp-doc .feature-card li:last-child {
@@ -281,5 +301,29 @@ a:hover {
 .vp-doc .feature-card strong {
   color: #1F2937;
   font-weight: 600;
+}
+
+.dark .vp-doc .feature-card strong {
+  color: var(--vp-c-text-1);
+}
+
+/* Features intro dark mode */
+.dark .vp-doc .features-intro {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
+  color: var(--vp-c-text-1);
+}
+
+/* Features page text colors for dark mode */
+.dark .vp-doc .features-intro p {
+  color: var(--vp-c-text-1);
+}
+
+.dark .vp-doc h2,
+.dark .vp-doc h3 {
+  color: var(--vp-c-text-1);
+}
+
+.dark .vp-doc p {
+  color: var(--vp-c-text-2);
 }
 

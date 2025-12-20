@@ -15,9 +15,6 @@ hero:
     - theme: alt
       text: View on GitHub
       link: https://github.com/webrobot
-    - theme: alt
-      text: Contact Us
-      link: /contact
 
 features:
   - icon: 

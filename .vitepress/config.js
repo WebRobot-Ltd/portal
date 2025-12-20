@@ -20,7 +20,6 @@ export default defineConfig({
       { text: 'Documentation', link: 'https://docs.webrobot.eu/' },
       { text: 'API Reference', link: 'https://docs.webrobot.eu/#-api-reference' },
       { text: 'Use Cases', link: '/use-cases' },
-      { text: 'Contact', link: '/contact' },
       { text: 'About', link: '/about' }
     ],
     
