@@ -697,7 +697,7 @@ async function getDemoJwtToken() {
 }
 
 // Helper function to make authenticated fetch requests
-async function authenticatedDemoFetch(url: string, options: RequestInit = {}) {
+async function authenticatedDemoFetch(url, options = {}) {
   try {
     const token = await getDemoJwtToken()
     
@@ -751,7 +751,7 @@ async function loadPipelines() {
     const demos = data.demos || []
     
     // Map backend demo format to frontend format
-    availablePipelines.value = demos.map((demo: any) => ({
+    availablePipelines.value = demos.map((demo) => ({
       id: demo.pipeline_name || demo.name,
       name: demo.display_name || demo.name || demo.pipeline_name,
       description: demo.description || 'No description available',
@@ -782,7 +782,7 @@ function onPipelineSelected() {
   demoUploadError.value = null
 }
 
-function handleDemoFileSelect(event: Event) {
+function handleDemoFileSelect(event) {
   const target = event.target as HTMLInputElement
   if (target.files && target.files.length > 0) {
     demoUploadFile.value = target.files[0]
@@ -836,7 +836,7 @@ async function executePipeline() {
     const pipelineName = selectedPipeline.value
     
     // Build request body with parameters
-    const requestBody: any = {
+    const requestBody = {
       parameters: {
         limit: 10 // Demo limit
       }
