@@ -53,56 +53,70 @@
           </div>
         </div>
 
-        <!-- CSV Upload Form (if pipeline requires input dataset) -->
-        <div v-if="selectedPipelineInfo && selectedPipelineInfo.requiresInputDataset" class="upload-form">
-          <h4>Upload CSV Dataset</h4>
-          <p v-if="selectedPipelineInfo.csvFormatDescription" class="csv-format-hint">
-            {{ selectedPipelineInfo.csvFormatDescription }}
-          </p>
-          <p v-else class="csv-format-hint">
-            This pipeline requires a CSV input dataset. Please upload a CSV file matching the pipeline requirements.
-          </p>
-          
-          <div class="form-group">
-            <label for="demo-csv-file">CSV File:</label>
-            <input 
-              type="file"
-              id="demo-csv-file"
-              accept=".csv"
-              @change="handleDemoFileSelect"
-              class="file-input"
-            />
-            <p v-if="demoUploadFile" class="file-name">{{ demoUploadFile.name }}</p>
-          </div>
-
-          <div v-if="demoUploadError" class="error-content">
-            <p class="error-message">{{ demoUploadError }}</p>
-          </div>
-
-          <div v-if="demoUploadResult" class="upload-result">
-            <p class="success-message">✅ Dataset uploaded successfully!</p>
-            <p><strong>Dataset ID:</strong> {{ demoUploadResult.datasetId }}</p>
-            <p><strong>Dataset Name:</strong> {{ demoUploadResult.datasetName }}</p>
-          </div>
-
-          <button 
-            class="btn btn-secondary"
-            :disabled="!demoUploadFile || isUploadingDemoDataset"
-            @click="uploadDemoDataset"
-          >
-            <span v-if="isUploadingDemoDataset" class="loading-spinner"></span>
-            {{ isUploadingDemoDataset ? 'Uploading...' : 'Upload Dataset' }}
-          </button>
-        </div>
-
         <button 
           class="btn btn-primary"
-          :disabled="!selectedPipeline || isExecuting || (selectedPipelineInfo && selectedPipelineInfo.requiresInputDataset && !demoUploadResult)"
-          @click="executePipeline"
+          :disabled="!selectedPipeline || isExecuting"
+          @click="handleExecutePipeline"
         >
           <span v-if="isExecuting" class="loading-spinner"></span>
           {{ isExecuting ? 'Executing...' : 'Run Selected Pipeline' }}
         </button>
+        
+        <!-- Upload Dataset Modal (if pipeline requires input dataset) -->
+        <div v-if="showUploadModal" class="modal-overlay" @click="closeUploadModal">
+          <div class="modal-content" @click.stop>
+            <div class="modal-header">
+              <h3>Upload CSV Dataset</h3>
+              <button class="modal-close" @click="closeUploadModal">&times;</button>
+            </div>
+            <div class="modal-body">
+              <p v-if="selectedPipelineInfo && selectedPipelineInfo.csvFormatDescription" class="csv-format-hint">
+                {{ selectedPipelineInfo.csvFormatDescription }}
+              </p>
+              <p v-else class="csv-format-hint">
+                This pipeline requires a CSV input dataset. Please upload a CSV file matching the pipeline requirements.
+              </p>
+              
+              <div class="form-group">
+                <label for="demo-csv-file-modal">CSV File:</label>
+                <input 
+                  type="file"
+                  id="demo-csv-file-modal"
+                  accept=".csv"
+                  @change="handleDemoFileSelect"
+                  class="file-input"
+                />
+                <p v-if="demoUploadFile" class="file-name">{{ demoUploadFile.name }}</p>
+              </div>
+
+              <div v-if="demoUploadError" class="error-content">
+                <p class="error-message">{{ demoUploadError }}</p>
+              </div>
+
+              <div v-if="demoUploadResult" class="upload-result">
+                <p class="success-message">✅ Dataset uploaded successfully!</p>
+                <p><strong>Dataset ID:</strong> {{ demoUploadResult.datasetId }}</p>
+                <p><strong>Dataset Name:</strong> {{ demoUploadResult.datasetName }}</p>
+              </div>
+            </div>
+            <div class="modal-footer">
+              <button 
+                class="btn btn-secondary"
+                @click="closeUploadModal"
+              >
+                Cancel
+              </button>
+              <button 
+                class="btn btn-primary"
+                :disabled="!demoUploadFile || isUploadingDemoDataset"
+                @click="uploadAndExecute"
+              >
+                <span v-if="isUploadingDemoDataset" class="loading-spinner"></span>
+                {{ isUploadingDemoDataset ? 'Uploading...' : (demoUploadResult ? 'Execute Pipeline' : 'Upload & Execute') }}
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Execution Results -->
@@ -505,6 +519,7 @@ const demoUploadFile = ref(null)
 const isUploadingDemoDataset = ref(false)
 const demoUploadResult = ref(null)
 const demoUploadError = ref(null)
+const showUploadModal = ref(false)
 
 // JWT authentication state for demo endpoints
 const demoJwtToken = ref(null)
@@ -750,6 +765,12 @@ async function loadPipelines() {
     const data = await response.json()
     const demos = data.demos || []
     
+    // Debug: log pipeline data to check requires_input_dataset
+    console.log('Loaded demos:', demos)
+    demos.forEach(demo => {
+      console.log(`Pipeline: ${demo.pipeline_name}, requires_input_dataset: ${demo.requires_input_dataset}, csv_format: ${demo.csv_format_description}`)
+    })
+    
     // Map backend demo format to frontend format
     availablePipelines.value = demos.map((demo) => ({
       id: demo.pipeline_name || demo.name,
@@ -776,6 +797,17 @@ function onPipelineSelected() {
   const pipeline = availablePipelines.value.find(p => p.id === selectedPipeline.value)
   selectedPipelineInfo.value = pipeline || null
   executionResult.value = null
+  
+  // Debug: log selected pipeline info
+  if (pipeline) {
+    console.log('Selected pipeline:', {
+      id: pipeline.id,
+      name: pipeline.name,
+      requiresInputDataset: pipeline.requiresInputDataset,
+      csvFormatDescription: pipeline.csvFormatDescription
+    })
+  }
+  
   // Reset upload state when selecting a new pipeline
   demoUploadFile.value = null
   demoUploadResult.value = null
@@ -822,6 +854,48 @@ async function uploadDemoDataset() {
     demoUploadError.value = error instanceof Error ? error.message : 'Failed to upload dataset'
   } finally {
     isUploadingDemoDataset.value = false
+  }
+}
+
+function handleExecutePipeline() {
+  if (!selectedPipeline.value) return
+  
+  // If pipeline requires input dataset, show modal first
+  if (selectedPipelineInfo.value && selectedPipelineInfo.value.requiresInputDataset) {
+    // If dataset already uploaded, execute directly
+    if (demoUploadResult.value && demoUploadResult.value.datasetId) {
+      executePipeline()
+    } else {
+      // Show upload modal
+      showUploadModal.value = true
+      // Reset upload state
+      demoUploadFile.value = null
+      demoUploadResult.value = null
+      demoUploadError.value = null
+    }
+  } else {
+    // Pipeline doesn't require input, execute directly
+    executePipeline()
+  }
+}
+
+function closeUploadModal() {
+  showUploadModal.value = false
+  demoUploadFile.value = null
+  demoUploadResult.value = null
+  demoUploadError.value = null
+}
+
+async function uploadAndExecute() {
+  if (!demoUploadFile.value) return
+  
+  // First upload the dataset
+  await uploadDemoDataset()
+  
+  // If upload successful, execute pipeline
+  if (demoUploadResult.value && demoUploadResult.value.datasetId) {
+    closeUploadModal()
+    executePipeline()
   }
 }
 
@@ -1914,6 +1988,101 @@ if (typeof window !== 'undefined') {
   font-size: 0.85rem;
   color: var(--vp-c-text-2);
   margin-top: 0.5rem;
+}
+
+/* Modal styles */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 1rem;
+}
+
+.modal-content {
+  background: var(--vp-c-bg);
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-width: 600px;
+  width: 100%;
+  max-height: 90vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.5rem;
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 1.5rem;
+  color: var(--vp-c-text-1);
+}
+
+.modal-close {
+  background: none;
+  border: none;
+  font-size: 2rem;
+  line-height: 1;
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.modal-close:hover {
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+}
+
+.modal-body {
+  padding: 1.5rem;
+  flex: 1;
+  overflow-y: auto;
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1rem;
+  padding: 1.5rem;
+  border-top: 1px solid var(--vp-c-divider);
+}
+
+.csv-format-hint {
+  background: var(--vp-c-bg-soft);
+  padding: 1rem;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  color: var(--vp-c-text-2);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.file-name {
+  margin-top: 0.5rem;
+  font-size: 0.9rem;
+  color: var(--vp-c-text-2);
+  font-style: italic;
 }
 
 .ean-results {
