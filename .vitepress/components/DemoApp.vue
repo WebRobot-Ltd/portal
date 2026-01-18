@@ -1025,12 +1025,15 @@ async function uploadAndExecute() {
   
   // If upload successful, execute pipeline
   if (demoUploadResult.value && demoUploadResult.value.datasetId) {
+    // Save datasetId before closing modal (which resets demoUploadResult)
+    const datasetId = demoUploadResult.value.datasetId
     closeUploadModal()
-    executePipeline()
+    // Execute with the saved datasetId
+    executePipeline(datasetId)
   }
 }
 
-async function executePipeline() {
+async function executePipeline(datasetIdParam = null) {
   if (!selectedPipeline.value) return
   
   isExecuting.value = true
@@ -1047,10 +1050,18 @@ async function executePipeline() {
       }
     }
     
-    // If pipeline requires input dataset and we have upload result, include datasetId
-    if (selectedPipelineInfo.value && selectedPipelineInfo.value.requiresInputDataset && demoUploadResult.value && demoUploadResult.value.datasetId) {
-      requestBody.parameters.datasetId = demoUploadResult.value.datasetId
+    // Use datasetId from parameter (from uploadAndExecute) or from demoUploadResult
+    const datasetIdToUse = datasetIdParam || (demoUploadResult.value && demoUploadResult.value.datasetId)
+    
+    // If pipeline requires input dataset and we have a datasetId, include it
+    if (selectedPipelineInfo.value && selectedPipelineInfo.value.requiresInputDataset && datasetIdToUse) {
+      requestBody.parameters.datasetId = datasetIdToUse
+      console.log('Executing pipeline with datasetId:', datasetIdToUse)
+    } else if (selectedPipelineInfo.value && selectedPipelineInfo.value.requiresInputDataset) {
+      console.warn('Pipeline requires input dataset but no datasetId provided!')
     }
+    
+    console.log('Executing pipeline request:', JSON.stringify(requestBody, null, 2))
     
     // Call backend API to execute demo pipeline
     const response = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/execute/${encodeURIComponent(pipelineName)}`, {
