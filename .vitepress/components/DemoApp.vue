@@ -77,6 +77,31 @@
                 This pipeline requires a CSV input dataset. Please upload a CSV file matching the pipeline requirements.
               </p>
               
+              <!-- Pipeline YAML Viewer -->
+              <div v-if="selectedPipelineInfo && selectedPipelineInfo.pipelineYaml" class="pipeline-yaml-section">
+                <div class="yaml-section-header">
+                  <h4>Pipeline YAML Configuration</h4>
+                  <div class="yaml-section-actions">
+                    <button 
+                      class="btn btn-secondary btn-sm"
+                      @click="copyPipelineYamlToClipboard"
+                      title="Copy YAML to clipboard"
+                    >
+                      📋 Copy YAML
+                    </button>
+                    <button 
+                      class="btn btn-secondary btn-sm"
+                      @click="showPipelineYaml = !showPipelineYaml"
+                    >
+                      {{ showPipelineYaml ? '▼ Hide' : '▶ Show' }} YAML
+                    </button>
+                  </div>
+                </div>
+                <div v-if="showPipelineYaml" class="yaml-content">
+                  <pre class="code-block yaml-block">{{ selectedPipelineInfo.pipelineYaml }}</pre>
+                </div>
+              </div>
+              
               <div class="form-group">
                 <label for="demo-csv-file-modal">CSV File:</label>
                 <input 
@@ -520,6 +545,7 @@ const isUploadingDemoDataset = ref(false)
 const demoUploadResult = ref(null)
 const demoUploadError = ref(null)
 const showUploadModal = ref(false)
+const showPipelineYaml = ref(false)
 
 // JWT authentication state for demo endpoints
 const demoJwtToken = ref(null)
@@ -780,7 +806,8 @@ async function loadPipelines() {
       docLink: demo.doc_link || `https://docs.webrobot.eu`,
       stages: demo.stages || [],
       requiresInputDataset: demo.requires_input_dataset || false,
-      csvFormatDescription: demo.csv_format_description || null
+      csvFormatDescription: demo.csv_format_description || null,
+      pipelineYaml: demo.pipeline_yaml || null
     }))
     
   } catch (error) {
@@ -797,6 +824,7 @@ function onPipelineSelected() {
   const pipeline = availablePipelines.value.find(p => p.id === selectedPipeline.value)
   selectedPipelineInfo.value = pipeline || null
   executionResult.value = null
+  showPipelineYaml.value = false // Reset YAML visibility when selecting a new pipeline
   
   // Debug: log selected pipeline info
   if (pipeline) {
@@ -867,6 +895,7 @@ function handleExecutePipeline() {
       executePipeline()
     } else {
       // Show upload modal
+      showPipelineYaml.value = false // Reset YAML visibility when opening modal
       showUploadModal.value = true
       // Reset upload state
       demoUploadFile.value = null
@@ -881,6 +910,7 @@ function handleExecutePipeline() {
 
 function closeUploadModal() {
   showUploadModal.value = false
+  showPipelineYaml.value = false // Reset YAML visibility when closing modal
   demoUploadFile.value = null
   demoUploadResult.value = null
   demoUploadError.value = null
@@ -1002,6 +1032,17 @@ async function generatePipeline() {
 
 function formatPreview(preview) {
   return JSON.stringify(preview, null, 2)
+}
+
+function copyPipelineYamlToClipboard() {
+  if (!selectedPipelineInfo.value || !selectedPipelineInfo.value.pipelineYaml) return
+  try {
+    navigator.clipboard.writeText(selectedPipelineInfo.value.pipelineYaml)
+    alert('Pipeline YAML copied to clipboard!')
+  } catch (error) {
+    console.error('Failed to copy YAML:', error)
+    alert('Failed to copy YAML to clipboard')
+  }
 }
 
 function copyToClipboard() {
@@ -2076,6 +2117,43 @@ if (typeof window !== 'undefined') {
   color: var(--vp-c-text-2);
   font-size: 0.9rem;
   line-height: 1.5;
+}
+
+.pipeline-yaml-section {
+  margin: 1.5rem 0;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+}
+
+.yaml-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.yaml-section-header h4 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+
+.yaml-section-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.btn-sm {
+  padding: 0.375rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.yaml-content {
+  padding: 1rem;
 }
 
 .file-name {
