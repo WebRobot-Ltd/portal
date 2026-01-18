@@ -783,8 +783,8 @@ function onPipelineSelected() {
 }
 
 function handleDemoFileSelect(event) {
-  const target = event.target as HTMLInputElement
-  if (target.files && target.files.length > 0) {
+  const target = event.target
+  if (target && target.files && target.files.length > 0) {
     demoUploadFile.value = target.files[0]
     demoUploadError.value = null
   }
