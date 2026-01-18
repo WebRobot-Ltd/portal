@@ -77,6 +77,33 @@
                 This pipeline requires a CSV input dataset. Please upload a CSV file matching the pipeline requirements.
               </p>
               
+              <!-- Pipeline Stages Viewer -->
+              <div v-if="selectedPipelineInfo && selectedPipelineInfo.stages && selectedPipelineInfo.stages.length > 0" class="pipeline-stages-section">
+                <div class="stages-section-header">
+                  <h4>Pipeline Stages ({{ selectedPipelineInfo.stages.length }})</h4>
+                  <button 
+                    class="btn btn-secondary btn-sm"
+                    @click="showPipelineStages = !showPipelineStages"
+                  >
+                    {{ showPipelineStages ? '▼ Hide' : '▶ Show' }} Stages
+                  </button>
+                </div>
+                <div v-if="showPipelineStages" class="stages-content">
+                  <div v-for="(stage, index) in selectedPipelineInfo.stages" :key="index" class="stage-item">
+                    <div class="stage-number">{{ index + 1 }}</div>
+                    <div class="stage-details">
+                      <div class="stage-name">
+                        <strong>Stage:</strong> <code>{{ stage.stage }}</code>
+                      </div>
+                      <div v-if="stage.args" class="stage-args">
+                        <strong>Args:</strong>
+                        <pre class="code-block stage-args-block">{{ JSON.stringify(stage.args, null, 2) }}</pre>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
               <!-- Pipeline YAML Viewer -->
               <div v-if="selectedPipelineInfo && selectedPipelineInfo.pipelineYaml" class="pipeline-yaml-section">
                 <div class="yaml-section-header">
@@ -825,6 +852,7 @@ function onPipelineSelected() {
   selectedPipelineInfo.value = pipeline || null
   executionResult.value = null
   showPipelineYaml.value = false // Reset YAML visibility when selecting a new pipeline
+  showPipelineStages.value = false // Reset stages visibility when selecting a new pipeline
   
   // Debug: log selected pipeline info
   if (pipeline) {
@@ -896,6 +924,7 @@ function handleExecutePipeline() {
     } else {
       // Show upload modal
       showPipelineYaml.value = false // Reset YAML visibility when opening modal
+      showPipelineStages.value = false // Reset stages visibility when opening modal
       showUploadModal.value = true
       // Reset upload state
       demoUploadFile.value = null
@@ -911,6 +940,7 @@ function handleExecutePipeline() {
 function closeUploadModal() {
   showUploadModal.value = false
   showPipelineYaml.value = false // Reset YAML visibility when closing modal
+  showPipelineStages.value = false // Reset stages visibility when closing modal
   demoUploadFile.value = null
   demoUploadResult.value = null
   demoUploadError.value = null
@@ -2117,6 +2147,92 @@ if (typeof window !== 'undefined') {
   color: var(--vp-c-text-2);
   font-size: 0.9rem;
   line-height: 1.5;
+}
+
+.pipeline-stages-section {
+  margin: 1.5rem 0;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+}
+
+.stages-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem;
+  border-bottom: 1px solid var(--vp-c-divider);
+}
+
+.stages-section-header h4 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--vp-c-text-1);
+}
+
+.stages-content {
+  padding: 1rem;
+}
+
+.stage-item {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+  margin-bottom: 0.75rem;
+  background: var(--vp-c-bg);
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 6px;
+}
+
+.stage-number {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--vp-c-brand);
+  color: white;
+  border-radius: 50%;
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.stage-details {
+  flex: 1;
+  min-width: 0;
+}
+
+.stage-name {
+  margin-bottom: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.stage-name code {
+  background: var(--vp-c-bg-alt);
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.875rem;
+  color: var(--vp-c-brand);
+}
+
+.stage-args {
+  margin-top: 0.5rem;
+}
+
+.stage-args strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--vp-c-text-2);
+}
+
+.stage-args-block {
+  max-height: 200px;
+  overflow-y: auto;
+  font-size: 0.8rem;
+  margin-top: 0.5rem;
 }
 
 .pipeline-yaml-section {
