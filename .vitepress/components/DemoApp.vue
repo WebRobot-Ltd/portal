@@ -1016,7 +1016,9 @@ function closeUploadModal() {
 }
 
 async function uploadAndExecute() {
-  if (!demoUploadFile.value) return
+  // Validate input based on mode
+  if (csvInputMode.value === 'file' && !demoUploadFile.value) return
+  if (csvInputMode.value === 'manual' && (!demoCsvText.value || !demoCsvText.value.trim())) return
   
   // First upload the dataset
   await uploadDemoDataset()
