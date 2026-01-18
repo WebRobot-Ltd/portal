@@ -7,13 +7,25 @@
       <p>Run publicly available ETL pipelines from our documentation. Preview limited to 5-10 records.</p>
       
       <div class="pipeline-selector-card">
+        <div v-if="pipelinesError" class="error-content" style="margin-bottom: 1rem;">
+          <p class="error-message">{{ pipelinesError }}</p>
+          <button class="btn btn-secondary btn-sm" @click="loadPipelines" style="margin-top: 0.5rem;">
+            Retry
+          </button>
+        </div>
         <div class="form-group">
           <label for="pipeline-selector">Select a Pipeline:</label>
+          <div v-if="loadingPipelines" class="loading-state">
+            <span class="loading-spinner"></span>
+            <span>Loading pipelines...</span>
+          </div>
           <select 
+            v-else
             id="pipeline-selector" 
             v-model="selectedPipeline"
             @change="onPipelineSelected"
             class="pipeline-select"
+            :disabled="availablePipelines.length === 0"
           >
             <option value="">-- Choose a pipeline --</option>
             <option 
@@ -24,6 +36,9 @@
               {{ pipeline.name }}
             </option>
           </select>
+          <p v-if="!loadingPipelines && availablePipelines.length === 0 && !pipelinesError" class="hint">
+            No pipelines available. Please check backend connection.
+          </p>
         </div>
 
         <div v-if="selectedPipelineInfo" class="pipeline-info">
@@ -38,9 +53,51 @@
           </div>
         </div>
 
+        <!-- CSV Upload Form (if pipeline requires input dataset) -->
+        <div v-if="selectedPipelineInfo && selectedPipelineInfo.requiresInputDataset" class="upload-form">
+          <h4>Upload CSV Dataset</h4>
+          <p v-if="selectedPipelineInfo.csvFormatDescription" class="csv-format-hint">
+            {{ selectedPipelineInfo.csvFormatDescription }}
+          </p>
+          <p v-else class="csv-format-hint">
+            This pipeline requires a CSV input dataset. Please upload a CSV file matching the pipeline requirements.
+          </p>
+          
+          <div class="form-group">
+            <label for="demo-csv-file">CSV File:</label>
+            <input 
+              type="file"
+              id="demo-csv-file"
+              accept=".csv"
+              @change="handleDemoFileSelect"
+              class="file-input"
+            />
+            <p v-if="demoUploadFile" class="file-name">{{ demoUploadFile.name }}</p>
+          </div>
+
+          <div v-if="demoUploadError" class="error-content">
+            <p class="error-message">{{ demoUploadError }}</p>
+          </div>
+
+          <div v-if="demoUploadResult" class="upload-result">
+            <p class="success-message">✅ Dataset uploaded successfully!</p>
+            <p><strong>Dataset ID:</strong> {{ demoUploadResult.datasetId }}</p>
+            <p><strong>Dataset Name:</strong> {{ demoUploadResult.datasetName }}</p>
+          </div>
+
+          <button 
+            class="btn btn-secondary"
+            :disabled="!demoUploadFile || isUploadingDemoDataset"
+            @click="uploadDemoDataset"
+          >
+            <span v-if="isUploadingDemoDataset" class="loading-spinner"></span>
+            {{ isUploadingDemoDataset ? 'Uploading...' : 'Upload Dataset' }}
+          </button>
+        </div>
+
         <button 
           class="btn btn-primary"
-          :disabled="!selectedPipeline || isExecuting"
+          :disabled="!selectedPipeline || isExecuting || (selectedPipelineInfo && selectedPipelineInfo.requiresInputDataset && !demoUploadResult)"
           @click="executePipeline"
         >
           <span v-if="isExecuting" class="loading-spinner"></span>
@@ -343,12 +400,12 @@
                   <p class="hint">Enter EAN codes separated by commas or one per line</p>
                 </div>
                 <div class="button-group">
-                  <button 
-                    class="btn btn-primary"
-                    :disabled="!eanConfig.query.trim() || isQueryingEAN"
-                    @click="queryEANResults"
-                  >
-                    <span v-if="isQueryingEAN" class="loading-spinner"></span>
+                <button 
+                  class="btn btn-primary"
+                  :disabled="!eanConfig.query.trim() || isQueryingEAN"
+                  @click="queryEANResults"
+                >
+                  <span v-if="isQueryingEAN" class="loading-spinner"></span>
                     {{ isQueryingEAN ? 'Querying...' : 'Query Results' }}
                   </button>
                   <button 
@@ -358,7 +415,7 @@
                   >
                     <span v-if="isFetchingImages" class="loading-spinner"></span>
                     {{ isFetchingImages ? 'Loading...' : 'Get Images List' }}
-                  </button>
+                </button>
                 </div>
               </div>
             </div>
@@ -433,13 +490,31 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 
 // Pipeline execution state
 const selectedPipeline = ref('')
 const selectedPipelineInfo = ref(null)
 const isExecuting = ref(false)
 const executionResult = ref(null)
+const loadingPipelines = ref(false)
+const pipelinesError = ref(null)
+
+// CSV upload state for demo pipelines
+const demoUploadFile = ref(null)
+const isUploadingDemoDataset = ref(false)
+const demoUploadResult = ref(null)
+const demoUploadError = ref(null)
+
+// JWT authentication state for demo endpoints
+const demoJwtToken = ref(null)
+const isAuthenticatingDemo = ref(false)
+const demoAuthError = ref(null)
+
+// Demo credentials
+const DEMO_EMAIL = 'demo@webrobot.eu'
+const DEMO_PASSWORD = 'demo2026'
+const STRAPI_URL = import.meta.env.VITE_STRAPI_URL || 'https://strapi.webrobot.eu'
 
 // Pipeline generation state
 const generationConfig = ref({
@@ -538,49 +613,23 @@ const eanImagesList = ref(null) // Lista immagini matchate con EAN code
 const eanTableColumns = ref([])
 const eanError = ref(null)
 
-// Available pipelines from documentation (matching Redocly structure)
-const availablePipelines = ref([
-  {
-    id: 'llm-finetuning-dataset',
-    name: 'LLM Fine-tuning Dataset',
-    description: 'Scrape and prepare datasets for LLM fine-tuning from public domain sources',
-    source: 'examples/pipelines/23-llm-finetuning-dataset.yaml',
-    docLink: 'https://docs.webrobot.eu/guides/vertical-llm-finetuning',
-    stages: ['load_csv', 'visit', 'iextract', 'store']
-  },
-  {
-    id: 'price-comparison',
-    name: 'Price Comparison (5 Sites)',
-    description: 'Compare product prices across multiple e-commerce sites',
-    source: 'examples/pipelines/19-price-comparison-5-sites.yaml',
-    docLink: 'https://docs.webrobot.eu/guides/vertical-price-comparison',
-    stages: ['visit', 'iextract', 'union_with', 'store']
-  },
-  {
-    id: 'sports-betting',
-    name: 'Sports Betting Surebet Detection',
-    description: 'Detect arbitrage opportunities across multiple bookmakers',
-    source: 'examples/pipelines/21-surebet-intelligent-extraction.yaml',
-    docLink: 'https://docs.webrobot.eu/guides/vertical-sports-betting',
-    stages: ['visit', 'iextract', 'store']
-  },
-  {
-    id: 'real-estate',
-    name: 'Real Estate Property Scraping',
-    description: 'Extract property listings with intelligent extraction',
-    source: 'examples/pipelines/22-real-estate-arbitrage-clustering.yaml',
-    docLink: 'https://docs.webrobot.eu/guides/vertical-real-estate',
-    stages: ['visit', 'iextract', 'propertyCluster', 'store']
-  },
-  {
-    id: 'portfolio-management',
-    name: 'Portfolio Management (90d Prediction)',
-    description: 'Analyze portfolio data for 90-day predictions',
-    source: 'examples/pipelines/24-portfolio-management-90d-prediction.yaml',
-    docLink: 'https://docs.webrobot.eu/guides/vertical-portfolio-management',
-    stages: ['load_csv', 'visit', 'iextract', 'store']
+// Available pipelines - loaded dynamically from backend
+const availablePipelines = ref([])
+
+// Initialize: try to load stored JWT token and auto-authenticate on mount
+onMounted(async () => {
+  const storedToken = localStorage.getItem('demo_jwt_token')
+  if (storedToken) {
+    demoJwtToken.value = storedToken
   }
-])
+  // Auto-authenticate and load pipelines on mount
+  try {
+    await authenticateDemo()
+    await loadPipelines()
+  } catch (error) {
+    console.error('Failed to initialize demo:', error)
+  }
+})
 
 // Computed properties
 const canGenerate = computed(() => {
@@ -589,69 +638,292 @@ const canGenerate = computed(() => {
 })
 
 // Methods
+// Authenticate with Strapi and get JWT token for demo endpoints
+async function authenticateDemo() {
+  // Check if token is already stored in localStorage
+  const storedToken = localStorage.getItem('demo_jwt_token')
+  if (storedToken) {
+    demoJwtToken.value = storedToken
+    return storedToken
+  }
+  
+  isAuthenticatingDemo.value = true
+  demoAuthError.value = null
+  
+  try {
+    // Login to Strapi to get JWT token
+    const loginResponse = await fetch(`${STRAPI_URL}/api/auth/local`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        identifier: DEMO_EMAIL,
+        password: DEMO_PASSWORD
+      })
+    })
+    
+    if (!loginResponse.ok) {
+      throw new Error(`Failed to authenticate: ${loginResponse.statusText}`)
+    }
+    
+    const loginData = await loginResponse.json()
+    const token = loginData.jwt || loginData.data?.jwt
+    
+    if (!token) {
+      throw new Error('JWT token not found in login response')
+    }
+    
+    // Store token in localStorage and state
+    localStorage.setItem('demo_jwt_token', token)
+    demoJwtToken.value = token
+    
+    return token
+  } catch (error) {
+    console.error('Demo authentication error:', error)
+    demoAuthError.value = error instanceof Error ? error.message : 'Failed to authenticate'
+    throw error
+  } finally {
+    isAuthenticatingDemo.value = false
+  }
+}
+
+// Helper function to get JWT token (authenticates if needed)
+async function getDemoJwtToken() {
+  if (demoJwtToken.value) {
+    return demoJwtToken.value
+  }
+  return await authenticateDemo()
+}
+
+// Helper function to make authenticated fetch requests
+async function authenticatedDemoFetch(url: string, options: RequestInit = {}) {
+  try {
+    const token = await getDemoJwtToken()
+    
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+      ...(options.headers || {})
+    }
+    
+    const response = await fetch(url, {
+      ...options,
+      headers
+    })
+    
+    // If 401, try to re-authenticate once
+    if (response.status === 401) {
+      localStorage.removeItem('demo_jwt_token')
+      demoJwtToken.value = null
+      const newToken = await authenticateDemo()
+      
+      headers['Authorization'] = `Bearer ${newToken}`
+      
+      return await fetch(url, {
+        ...options,
+        headers
+      })
+    }
+    
+    return response
+  } catch (error) {
+    console.error('Authenticated fetch error:', error)
+    throw error
+  }
+}
+
+// Load available pipelines from backend
+async function loadPipelines() {
+  loadingPipelines.value = true
+  pipelinesError.value = null
+  
+  try {
+    const response = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/list`, {
+      method: 'GET'
+    })
+    
+    if (!response.ok) {
+      throw new Error(`Failed to load pipelines: ${response.statusText}`)
+    }
+    
+    const data = await response.json()
+    const demos = data.demos || []
+    
+    // Map backend demo format to frontend format
+    availablePipelines.value = demos.map((demo: any) => ({
+      id: demo.pipeline_name || demo.name,
+      name: demo.display_name || demo.name || demo.pipeline_name,
+      description: demo.description || 'No description available',
+      source: demo.source || demo.pipeline_name,
+      docLink: demo.doc_link || `https://docs.webrobot.eu`,
+      stages: demo.stages || [],
+      requiresInputDataset: demo.requires_input_dataset || false,
+      csvFormatDescription: demo.csv_format_description || null
+    }))
+    
+  } catch (error) {
+    console.error('Error loading pipelines:', error)
+    pipelinesError.value = error instanceof Error ? error.message : 'Failed to load pipelines'
+    // Fallback to empty array - user will see error message
+    availablePipelines.value = []
+  } finally {
+    loadingPipelines.value = false
+  }
+}
+
 function onPipelineSelected() {
   const pipeline = availablePipelines.value.find(p => p.id === selectedPipeline.value)
   selectedPipelineInfo.value = pipeline || null
   executionResult.value = null
+  // Reset upload state when selecting a new pipeline
+  demoUploadFile.value = null
+  demoUploadResult.value = null
+  demoUploadError.value = null
 }
 
-function executePipeline() {
+function handleDemoFileSelect(event: Event) {
+  const target = event.target as HTMLInputElement
+  if (target.files && target.files.length > 0) {
+    demoUploadFile.value = target.files[0]
+    demoUploadError.value = null
+  }
+}
+
+async function uploadDemoDataset() {
+  if (!demoUploadFile.value || !selectedPipeline.value) return
+  
+  isUploadingDemoDataset.value = true
+  demoUploadError.value = null
+  
+  try {
+    const token = await getDemoJwtToken()
+    const formData = new FormData()
+    formData.append('file', demoUploadFile.value)
+    
+    const pipelineName = selectedPipeline.value
+    const response = await fetch(`${API_BASE_URL}/api/webrobot/api/demo/upload-dataset/${encodeURIComponent(pipelineName)}`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      body: formData
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(errorData.error || `Upload failed: ${response.statusText}`)
+    }
+    
+    const result = await response.json()
+    demoUploadResult.value = result
+  } catch (error) {
+    console.error('Upload error:', error)
+    demoUploadError.value = error instanceof Error ? error.message : 'Failed to upload dataset'
+  } finally {
+    isUploadingDemoDataset.value = false
+  }
+}
+
+async function executePipeline() {
   if (!selectedPipeline.value) return
   
   isExecuting.value = true
   executionResult.value = null
   
-  // Simulate API call (will be replaced with actual backend integration)
-  setTimeout(() => {
-    isExecuting.value = false
-    executionResult.value = {
-      status: 'success',
-      recordsProcessed: 8,
-      executionTime: 12.5,
-      preview: [
-        { id: 1, name: 'Product A', price: 29.99 },
-        { id: 2, name: 'Product B', price: 49.99 },
-        { id: 3, name: 'Product C', price: 19.99 }
-      ]
+  try {
+    // Get pipeline name from selected pipeline
+    const pipelineName = selectedPipeline.value
+    
+    // Build request body with parameters
+    const requestBody: any = {
+      parameters: {
+        limit: 10 // Demo limit
+      }
     }
-  }, 2000)
+    
+    // If pipeline requires input dataset and we have upload result, include datasetId
+    if (selectedPipelineInfo.value && selectedPipelineInfo.value.requiresInputDataset && demoUploadResult.value && demoUploadResult.value.datasetId) {
+      requestBody.parameters.datasetId = demoUploadResult.value.datasetId
+    }
+    
+    // Call backend API to execute demo pipeline
+    const response = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/execute/${encodeURIComponent(pipelineName)}`, {
+      method: 'POST',
+      body: JSON.stringify(requestBody)
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(errorData.error || `Execution failed: ${response.statusText}`)
+    }
+    
+    const result = await response.json()
+    
+    // Format result for display
+    executionResult.value = {
+      status: result.status || 'success',
+      jobId: result.job_id,
+      agentId: result.agent_id,
+      recordsProcessed: result.record_limit || 10,
+      executionTime: result.execution_time || 0,
+      message: result.message || 'Pipeline executed successfully',
+      preview: result.preview || [],
+      note: result.note || ''
+    }
+    
+  } catch (error) {
+    console.error('Execution error:', error)
+    executionResult.value = {
+      status: 'error',
+      error: error instanceof Error ? error.message : 'Failed to execute pipeline'
+    }
+  } finally {
+    isExecuting.value = false
+  }
 }
 
-function generatePipeline() {
+async function generatePipeline() {
   if (!canGenerate.value) return
   
   isGenerating.value = true
   generatedPipeline.value = null
   
-  // Simulate API call (will be replaced with actual backend integration)
-  setTimeout(() => {
+  try {
+    // Call backend API to generate pipeline from natural language
+    const response = await fetch(`${API_BASE_URL}/api/webrobot/api/demo/generate-pipeline`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': generationConfig.value.apiKey.trim()
+      },
+      body: JSON.stringify({
+        prompt: generationConfig.value.prompt,
+        provider: generationConfig.value.provider
+      })
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(errorData.error || `Generation failed: ${response.statusText}`)
+    }
+    
+    const result = await response.json()
+    
+    // Extract pipeline YAML from result
+    generatedPipeline.value = result.pipeline_yaml || result.yaml || result.pipeline || ''
+    
+    if (!generatedPipeline.value) {
+      throw new Error('No pipeline YAML returned from API')
+    }
+    
+  } catch (error) {
+    console.error('Generation error:', error)
+    alert(error instanceof Error ? error.message : 'Failed to generate pipeline')
+    generatedPipeline.value = null
+  } finally {
     isGenerating.value = false
-    generatedPipeline.value = `# Generated Pipeline YAML
-# Source: ${generationConfig.value.prompt}
-# Provider: ${generationConfig.value.provider}
-
-pipeline:
-  name: generated-pipeline-${Date.now()}
-  stages:
-    - type: visit
-      url: "https://example.com/products"
-      waitFor: "body"
-    
-    - type: iextract
-      attributes:
-        - name: product_name
-          selector: ".product-title"
-        - name: price
-          selector: ".price"
-        - name: image_url
-          selector: ".product-image img"
-          attribute: "src"
-    
-    - type: store
-      format: json
-      path: "/output/products.json"
-`
-  }, 3000)
+  }
 }
 
 function formatPreview(preview) {
@@ -677,8 +949,46 @@ function downloadYAML() {
   URL.revokeObjectURL(url)
 }
 
-function saveAndExecute() {
-  alert('This will save the pipeline and execute it. Backend integration pending.')
+async function saveAndExecute() {
+  if (!generatedPipeline.value) {
+    alert('No pipeline to save. Please generate a pipeline first.')
+    return
+  }
+  
+  try {
+    const apiKey = getAuthenticatedApiKey()
+    if (!apiKey) {
+      alert('Please authenticate first to save and execute pipelines.')
+      return
+    }
+    
+    // Extract pipeline name from YAML or generate one
+    const pipelineName = `generated-pipeline-${Date.now()}`
+    
+    // Call backend API to save the generated pipeline
+    const response = await authenticatedFetch(`/api/webrobot/api/demo/save-generated-pipeline`, {
+      method: 'POST',
+      body: JSON.stringify({
+        pipeline_name: pipelineName,
+        pipeline_yaml: generatedPipeline.value
+      })
+    })
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({ error: response.statusText }))
+      throw new Error(errorData.error || `Failed to save pipeline: ${response.statusText}`)
+    }
+    
+    const result = await response.json()
+    alert(`Pipeline saved successfully!\nPipeline Name: ${result.pipeline_name || pipelineName}\nAgent ID: ${result.agent_id || 'N/A'}`)
+    
+    // Optionally reload pipelines list to show the new one
+    await loadPipelines()
+    
+  } catch (error) {
+    console.error('Save error:', error)
+    alert(error instanceof Error ? error.message : 'Failed to save pipeline')
+  }
 }
 
 // Private Demo Authentication
@@ -773,8 +1083,8 @@ async function authenticate() {
     // Update user demos list
     user.demos = filteredDemos.map(demo => demo.id)
     
-    isAuthenticated.value = true
-    authenticatedUser.value = user
+      isAuthenticated.value = true
+      authenticatedUser.value = user
     
     // Store API key and organization_id in sessionStorage
     sessionStorage.setItem('webrobot_api_key', authConfig.value.apiKey.trim())
@@ -1065,8 +1375,11 @@ async function authenticatedFetch(url, options = {}) {
   })
 }
 
-// Check for existing session on mount
+// Load pipelines and check for existing session on mount
 if (typeof window !== 'undefined') {
+  // Load available pipelines from backend
+  loadPipelines()
+  
   const storedKey = sessionStorage.getItem('webrobot_api_key')
   const storedOrgId = sessionStorage.getItem('webrobot_org_id')
   if (storedKey) {
@@ -1259,6 +1572,19 @@ if (typeof window !== 'undefined') {
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+.loading-state {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  color: var(--vp-c-text-2);
+}
+
+.loading-state .loading-spinner {
+  border-color: var(--vp-c-divider);
+  border-top-color: var(--vp-c-brand-1);
 }
 
 .results-card {
