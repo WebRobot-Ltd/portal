@@ -573,6 +573,7 @@ const demoUploadResult = ref(null)
 const demoUploadError = ref(null)
 const showUploadModal = ref(false)
 const showPipelineYaml = ref(false)
+const showPipelineStages = ref(false)
 
 // JWT authentication state for demo endpoints
 const demoJwtToken = ref(null)
