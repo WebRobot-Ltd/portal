@@ -129,7 +129,30 @@
                 </div>
               </div>
               
+              <!-- CSV Input Mode Toggle -->
               <div class="form-group">
+                <div class="input-mode-toggle">
+                  <button 
+                    type="button"
+                    class="toggle-btn"
+                    :class="{ active: csvInputMode === 'file' }"
+                    @click="csvInputMode = 'file'"
+                  >
+                    📁 Upload File
+                  </button>
+                  <button 
+                    type="button"
+                    class="toggle-btn"
+                    :class="{ active: csvInputMode === 'manual' }"
+                    @click="csvInputMode = 'manual'"
+                  >
+                    ✏️ Manual Entry
+                  </button>
+                </div>
+              </div>
+              
+              <!-- File Upload Input -->
+              <div v-if="csvInputMode === 'file'" class="form-group">
                 <label for="demo-csv-file-modal">CSV File:</label>
                 <input 
                   type="file"
@@ -139,6 +162,24 @@
                   class="file-input"
                 />
                 <p v-if="demoUploadFile" class="file-name">{{ demoUploadFile.name }}</p>
+                <p class="input-hint">Select a CSV file from your computer</p>
+              </div>
+              
+              <!-- Manual CSV Entry -->
+              <div v-if="csvInputMode === 'manual'" class="form-group">
+                <label for="demo-csv-text">CSV Data:</label>
+                <textarea
+                  id="demo-csv-text"
+                  v-model="demoCsvText"
+                  placeholder="Enter CSV data here, e.g.&#10;url&#10;https://example.com/page1&#10;https://example.com/page2"
+                  class="csv-textarea"
+                  rows="8"
+                ></textarea>
+                <p class="input-hint">Enter CSV data directly. First line should be headers (e.g., "url")</p>
+                <div v-if="demoCsvText" class="csv-preview">
+                  <strong>Preview ({{ getCsvRowCount(demoCsvText) }} rows):</strong>
+                  <pre class="csv-preview-text">{{ demoCsvText.split('\n').slice(0, 5).join('\n') }}{{ demoCsvText.split('\n').length > 5 ? '\n...' : '' }}</pre>
+                </div>
               </div>
 
               <div v-if="demoUploadError" class="error-content">
@@ -160,7 +201,7 @@
               </button>
               <button 
                 class="btn btn-primary"
-                :disabled="!demoUploadFile || isUploadingDemoDataset"
+                :disabled="(!demoUploadFile && csvInputMode === 'file') || (csvInputMode === 'manual' && !demoCsvText.trim()) || isUploadingDemoDataset"
                 @click="uploadAndExecute"
               >
                 <span v-if="isUploadingDemoDataset" class="loading-spinner"></span>
@@ -568,6 +609,8 @@ const pipelinesError = ref(null)
 
 // CSV upload state for demo pipelines
 const demoUploadFile = ref(null)
+const demoCsvText = ref('')
+const csvInputMode = ref('file') // 'file' or 'manual'
 const isUploadingDemoDataset = ref(false)
 const demoUploadResult = ref(null)
 const demoUploadError = ref(null)
@@ -879,8 +922,18 @@ function handleDemoFileSelect(event) {
   }
 }
 
+function getCsvRowCount(csvText) {
+  if (!csvText || !csvText.trim()) return 0
+  const lines = csvText.trim().split('\n').filter(line => line.trim().length > 0)
+  return lines.length
+}
+
 async function uploadDemoDataset() {
-  if (!demoUploadFile.value || !selectedPipeline.value) return
+  if (!selectedPipeline.value) return
+  
+  // Validate input based on mode
+  if (csvInputMode.value === 'file' && !demoUploadFile.value) return
+  if (csvInputMode.value === 'manual' && (!demoCsvText.value || !demoCsvText.value.trim())) return
   
   isUploadingDemoDataset.value = true
   demoUploadError.value = null
@@ -888,7 +941,18 @@ async function uploadDemoDataset() {
   try {
     const token = await getDemoJwtToken()
     const formData = new FormData()
-    formData.append('file', demoUploadFile.value)
+    
+    // Prepare file based on input mode
+    let fileToUpload
+    if (csvInputMode.value === 'file') {
+      fileToUpload = demoUploadFile.value
+    } else {
+      // Convert manual CSV text to File
+      const csvBlob = new Blob([demoCsvText.value], { type: 'text/csv' })
+      fileToUpload = new File([csvBlob], 'manual-input.csv', { type: 'text/csv' })
+    }
+    
+    formData.append('file', fileToUpload)
     
     const pipelineName = selectedPipeline.value
     const response = await fetch(`${API_BASE_URL}/api/webrobot/api/demo/upload-dataset/${encodeURIComponent(pipelineName)}`, {
@@ -926,9 +990,11 @@ function handleExecutePipeline() {
       // Show upload modal
       showPipelineYaml.value = false // Reset YAML visibility when opening modal
       showPipelineStages.value = false // Reset stages visibility when opening modal
+      csvInputMode.value = 'file' // Reset to file mode
       showUploadModal.value = true
       // Reset upload state
       demoUploadFile.value = null
+      demoCsvText.value = ''
       demoUploadResult.value = null
       demoUploadError.value = null
     }
@@ -942,7 +1008,9 @@ function closeUploadModal() {
   showUploadModal.value = false
   showPipelineYaml.value = false // Reset YAML visibility when closing modal
   showPipelineStages.value = false // Reset stages visibility when closing modal
+  csvInputMode.value = 'file' // Reset to file mode
   demoUploadFile.value = null
+  demoCsvText.value = ''
   demoUploadResult.value = null
   demoUploadError.value = null
 }
@@ -2148,6 +2216,89 @@ if (typeof window !== 'undefined') {
   color: var(--vp-c-text-2);
   font-size: 0.9rem;
   line-height: 1.5;
+}
+
+.input-mode-toggle {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.toggle-btn {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: 2px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.toggle-btn:hover {
+  border-color: var(--vp-c-brand);
+  background: var(--vp-c-bg-soft);
+}
+
+.toggle-btn.active {
+  border-color: var(--vp-c-brand);
+  background: var(--vp-c-brand);
+  color: white;
+}
+
+.input-hint {
+  margin-top: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--vp-c-text-2);
+  font-style: italic;
+}
+
+.csv-textarea {
+  width: 100%;
+  padding: 0.75rem;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 8px;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.875rem;
+  line-height: 1.5;
+  resize: vertical;
+  min-height: 150px;
+}
+
+.csv-textarea:focus {
+  outline: none;
+  border-color: var(--vp-c-brand);
+  box-shadow: 0 0 0 3px rgba(var(--vp-c-brand-rgb), 0.1);
+}
+
+.csv-preview {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  background: var(--vp-c-bg-soft);
+  border-radius: 8px;
+  border: 1px solid var(--vp-c-divider);
+}
+
+.csv-preview strong {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+  color: var(--vp-c-text-1);
+}
+
+.csv-preview-text {
+  margin: 0;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.8rem;
+  color: var(--vp-c-text-2);
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 100px;
+  overflow-y: auto;
 }
 
 .pipeline-stages-section {
