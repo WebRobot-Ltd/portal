@@ -4,25 +4,31 @@ Get started with WebRobot in minutes!
 
 ## Prerequisites
 
-- Java 11 or higher
-- Apache Spark 3.x
-- Node.js 16+ (for CLI tools)
+- Java 17+ (for the CLI)
 - API Key (get one from your organization admin)
 
 ## Installation
 
-### Option 1: Using Docker
+### Install the CLI
 
 ```bash
-docker pull webrobot/webrobot:latest
-docker run -p 8080:8080 webrobot/webrobot:latest
+# Download CLI jar
+curl -L https://github.com/WebRobot-Ltd/webrobot-cli/releases/latest/download/webrobot-cli.jar \
+  -o ~/.local/share/webrobot-cli/webrobot-cli.jar
+
+# Create launcher
+cat > ~/.local/bin/webrobot << 'EOF'
+#!/usr/bin/env bash
+java -jar "$HOME/.local/share/webrobot-cli/webrobot-cli.jar" "$@" 2> >(grep -v "^SLF4J:" >&2)
+EOF
+chmod +x ~/.local/bin/webrobot
 ```
 
-### Option 2: Using CLI
+Create `config.cfg` in your working directory:
 
-```bash
-npm install -g @webrobot/cli
-webrobot init
+```ini
+api_endpoint=https://api.webrobot.eu
+apikey=your-api-key
 ```
 
 ## Your First Pipeline
@@ -44,32 +50,25 @@ stages:
 
 ## Execute the Pipeline
 
-### Using CLI
-
 ```bash
-webrobot run pipeline.yaml
+# Apply manifest (create/update project, agent, dataset, job) then run
+webrobot pipeline run -f pipeline.yaml --follow
 ```
 
-### Using API
+Or step by step:
 
 ```bash
-curl -X POST https://api.webrobot.eu/api/pipelines/execute \
-  -H "X-API-Key: your-api-key" \
-  -H "Content-Type: application/json" \
-  -d @pipeline.yaml
+webrobot project add -n "my-project"
+webrobot category add -n "my-agents"
+webrobot agent add -c <categoryId> -n "first-pipeline" -f pipeline.yaml
+webrobot dataset add -n "trigger-input"
+webrobot job add -p <projectId> -n "run" -a <agentId> -i <datasetId>
+webrobot job execute -p <projectId> -j <jobId> --follow
 ```
-
-## View Results
-
-Results are stored in your project's storage. Access them via:
-
-- **API**: `GET /api/jobs/{jobId}/results`
-- **CLI**: `webrobot results {jobId}`
-- **Dashboard**: Visit the WebRobot dashboard
 
 ## Next Steps
 
+- [CLI Reference](/docs/cli) - Full command reference
 - [Pipeline Stages](/docs/pipeline-stages) - Explore available stages
-- [Intelligent Stages](/docs/intelligent-stages) - Use AI-powered stages
-- [API Reference](/api/authentication) - Learn about the API
+- [API Reference](/api/authentication) - REST API documentation
 

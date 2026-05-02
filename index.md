@@ -59,11 +59,12 @@ WebRobot is a **next-generation ETL platform** that combines the power of Apache
 Start building your first agentic ETL pipeline in minutes:
 
 ```bash
-# Install WebRobot CLI
-npm install -g @webrobot/cli
+# Download CLI (requires Java 17+)
+curl -L https://github.com/WebRobot-Ltd/webrobot-cli/releases/latest/download/webrobot-cli.jar \
+  -o ~/.local/share/webrobot-cli/webrobot-cli.jar
 
-# Create a new pipeline
-webrobot init my-pipeline
+# Run a pipeline from a YAML manifest
+webrobot pipeline run -f pipeline.yaml --follow
 ```
 
 ### Learn More

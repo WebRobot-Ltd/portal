@@ -1,367 +1,582 @@
-# Plugin SDK
+# Plugin Development
 
-WebroBot supports two layers of extensibility. You can extend the ETL engine with custom Spark stages (Scala JARs) and extend the REST API with domain-specific endpoints and orchestration logic (Java/Jersey). Both types are packaged as plugins and managed through the plugin registry.
+WebroBot supports two layers of extensibility. You can extend the ETL engine with custom Spark stages (Scala JARs) and extend the REST API with domain-specific endpoints and orchestration logic (Java/Jersey). Both are packaged as plugins and managed through the plugin registry.
+
+**Reference repositories:**
+
+| Repo | Description |
+|------|-------------|
+| [WebRobot-Ltd/webrobot-plugin-sdk](https://github.com/WebRobot-Ltd/webrobot-plugin-sdk) | ETL plugin SDK (Scala traits, zero ETL dependencies) |
+| [WebRobot-Ltd/webrobot-example-plugin](https://github.com/WebRobot-Ltd/webrobot-example-plugin) | Complete working ETL plugin example (Gradle) |
+| [WebRobot-Ltd/webrobot-jersey-plugin-sdk](https://github.com/WebRobot-Ltd/webrobot-jersey-plugin-sdk) | REST API plugin SDK (Java, JAX-RS) |
+| [WebRobot-Ltd/webrobot-example-jersey-plugin](https://github.com/WebRobot-Ltd/webrobot-example-jersey-plugin) | Complete working REST API plugin example (Maven) |
 
 ---
 
 ## Plugin Types
 
-### ETL Plugin (Scala)
+### ETL Plugin (Scala + Gradle)
 
 A Scala JAR that registers one or more custom pipeline stages. These stages run inside the Spark execution context. Use this when you need:
 
-- Access to Spark DataFrames or RDDs directly
-- JDBC operations with transactional semantics
-- MinIO/S3 storage access from within the pipeline
-- Custom aggregation, filtering, or source logic
+- Custom row transforms, filters, aggregations, or source logic
+- JDBC operations with DB access via `WebroStageContext`
+- MinIO/S3 object storage access from within the pipeline
+- Direct Spark DataFrame access (via `PipelineStage`)
 
-### REST API Plugin (Java/Jersey)
+### REST API Plugin (Java + Maven)
 
-A JAR that registers Jersey resource classes (REST endpoints) and orchestration logic. Use this when you need:
+A JAR that registers Jersey resource classes and orchestration logic. Use this when you need:
 
 - New HTTP endpoints on the WebroBot API
 - Domain models with Flyway-managed DB migrations
 - Business logic that ties together multiple pipeline runs
+- LLM or object storage access from the API layer
 
 Both types can coexist in the same JAR. The `pluginType` field in the manifest controls registration behaviour.
 
 ---
 
-## Plugin Manifest
+## Quickstart with the CLI
 
-Every plugin ships a `manifest.json` at the root of its JAR (or in the plugin directory). The platform reads this on startup and on plugin reload.
+The CLI includes a `plugin` command group that scaffolds all boilerplate:
 
-```json
-{
-  "pluginId": "my-plugin",
-  "version": "1.0.0",
-  "pluginType": "api",
-  "displayName": "My Plugin",
-  "mainClass": "com.example.MyPlugin",
-  "bootstrapMethod": "bootstrap",
-  "dbMigrations": {
-    "enabled": true,
-    "location": "db/migration/my_plugin"
-  },
-  "stages": [
-    {
-      "stage_name": "my_stage",
-      "description": "Short description of what this stage does",
-      "arg_schema": [
-        { "name": "param1", "type": "string", "default": "" },
-        { "name": "param2", "type": "integer", "default": "0" }
-      ]
+```bash
+webrobot plugin new my-etl-plugin --group com.mycompany
+cd my-etl-plugin
+
+webrobot plugin add stage ExtractPrice --type transform
+webrobot plugin add stage FilterEmpty  --type filter
+webrobot plugin add resolver EurPrice
+webrobot plugin add action  Sleep
+```
+
+Each `add` command generates the Scala source file and updates the corresponding `META-INF/services` entry automatically.
+
+---
+
+## ETL Plugin
+
+### Project Structure
+
+```
+my-etl-plugin/
+├── build.gradle.kts
+├── settings.gradle.kts
+├── manifest.json
+└── src/
+    └── main/
+        ├── scala/
+        │   └── com/mycompany/
+        │       └── stages/
+        │           ├── ExtractPriceStage.scala
+        │           └── FilterEmptyStage.scala
+        └── resources/
+            └── META-INF/services/
+                ├── eu.webrobot.plugin.sdk.WTransformStage
+                └── eu.webrobot.plugin.sdk.WFilterStage
+```
+
+### `build.gradle.kts`
+
+```kotlin
+plugins {
+    id("scala")
+    id("java-library")
+}
+
+group   = "com.mycompany"
+version = "0.1.0"
+
+repositories {
+    mavenCentral()
+    maven {
+        name = "GitHubPackages"
+        url  = uri("https://maven.pkg.github.com/WebRobot-Ltd/webrobot-plugin-sdk")
+        credentials {
+            username = System.getenv("GITHUB_ACTOR") ?: "webroboteu"
+            password = System.getenv("GITHUB_TOKEN")
+                ?: throw GradleException("GITHUB_TOKEN env var required")
+        }
     }
-  ],
-  "organizationIds": [],
-  "enabled": true
 }
+
+dependencies {
+    // Only dependency — ETL engine provides both at runtime
+    compileOnly("eu.webrobot:webrobot-plugin-sdk:0.2.0")
+    compileOnly("org.scala-lang:scala-library:2.12.18")
+
+    testImplementation("org.scalatest:scalatest_2.12:3.2.18")
+}
+
+tasks.withType<Jar> { duplicatesStrategy = DuplicatesStrategy.EXCLUDE }
+tasks.test { useJUnitPlatform() }
 ```
 
-**Manifest fields:**
+### Build
 
-| Field             | Type    | Description                                                                    |
-|-------------------|---------|--------------------------------------------------------------------------------|
-| `pluginId`        | string  | Unique identifier. Used in stage names and DB migration paths                  |
-| `version`         | string  | Semver. Used for display and upgrade tracking                                  |
-| `pluginType`      | string  | `"api"`, `"etl"`, or `"both"`                                                  |
-| `displayName`     | string  | Human-readable name shown in the admin UI                                      |
-| `mainClass`       | string  | Fully qualified class that implements the plugin entry point                   |
-| `bootstrapMethod` | string  | Static method on `mainClass` called once on plugin enable                      |
-| `dbMigrations`    | object  | `enabled` flag and `location` path inside the JAR's resources directory        |
-| `stages`          | array   | Stage descriptors. Synced to the stage catalog on plugin enable/reload         |
-| `organizationIds` | array   | Restricts plugin visibility to listed org IDs. Empty = available to all orgs   |
-| `enabled`         | boolean | Whether the plugin is active. Can be toggled via the admin API                 |
-
-The `stages[]` array is the authoritative source for the CLI stage catalog. When a plugin is enabled or reloaded, the platform upserts these descriptors into Strapi (or the internal catalog store) so that the CLI, IDE plugins, and AI skills are aware of the new stages.
+```bash
+GITHUB_TOKEN=<your-token> ./gradlew jar
+# Output: build/libs/my-etl-plugin-0.1.0.jar
+```
 
 ---
 
-## ETL Plugin SDK Traits
+## ETL Stage Types
 
-Implement one of the following traits for each stage type. Each class is discovered via Java ServiceLoader (see registration below).
+### `WTransformStage` — row-by-row transform
 
-### `WTransformStage`
-
-Transforms a single row. Returns a modified copy of the row. The most common stage type.
+Most common type. Receives one row, returns one row (modified or unchanged).
 
 ```scala
-import eu.webrobot.plugin.sdk._
+import eu.webrobot.plugin.sdk.{WArgs, WRow, WTransformStage}
 
-class MyTransformStage extends WTransformStage {
-  override val stageName: String = "my_transform"
+class UpperCaseStage extends WTransformStage {
+  override def name: String = "upper_case"
 
-  override def transform(row: WRow, args: WArgs, ctx: WebroStageContext): WRow = {
-    val rawPrice = row.str("raw_price").getOrElse("0")
-    val price = rawPrice.replaceAll("[^\\d.]", "").toDoubleOption.getOrElse(0.0)
-    row.set("price_normalized", price.toString)
+  override def transform(row: WRow, args: WArgs): WRow = {
+    val field = args.string(0, "text")
+    row.str(field).fold(row)(v => row.set(field, v.toUpperCase))
+  }
+}
+```
+
+Register in `META-INF/services/eu.webrobot.plugin.sdk.WTransformStage`:
+```
+com.mycompany.stages.UpperCaseStage
+```
+
+Pipeline YAML:
+```yaml
+- stage: upper_case
+  args:
+    - text
+```
+
+---
+
+### `WFilterStage` — keep or drop rows
+
+Return `true` to keep, `false` to drop.
+
+```scala
+import eu.webrobot.plugin.sdk.{WArgs, WRow, WFilterStage}
+
+class FilterNonEmptyStage extends WFilterStage {
+  override def name: String = "filter_non_empty"
+
+  override def include(row: WRow, args: WArgs): Boolean = {
+    val field = args.string(0, "value")
+    row.str(field).exists(_.trim.nonEmpty)
   }
 }
 ```
 
 ---
 
-### `WFilterStage`
+### `WSourceStage` — produce rows from an external source
 
-Filters rows. Return `true` to keep the row, `false` to drop it.
-
-```scala
-class ActiveProductFilter extends WFilterStage {
-  override val stageName: String = "filter_active"
-
-  override def filter(row: WRow, args: WArgs, ctx: WebroStageContext): Boolean = {
-    row.str("status").exists(_ == "active")
-  }
-}
-```
-
----
-
-### `WSinkStage`
-
-Consumes rows without passing them downstream. Use for writes to external systems.
+Called once by the engine. The result is parallelized across Spark executors. Use for DB queries, REST API calls, or any custom data source.
 
 ```scala
-class MySinkStage extends WSinkStage {
-  override val stageName: String = "my_sink"
+import eu.webrobot.plugin.sdk.{WArgs, WRow, WSourceStage, WebroStageContext}
 
-  override def sink(row: WRow, args: WArgs, ctx: WebroStageContext): Unit = {
-    val ean = row.str("ean").getOrElse("")
-    val price = row.double("price").map(java.lang.Double.valueOf).orNull
-    ctx.execute(
-      "INSERT INTO my_table (ean, price) VALUES (?, ?) ON CONFLICT (ean) DO UPDATE SET price = EXCLUDED.price",
-      Seq(ean, price)
-    )
-  }
-}
-```
-
----
-
-### `WSourceStage`
-
-Produces rows from scratch, replacing the default seed rows. Use for custom data sources.
-
-```scala
-class MySourceStage extends WSourceStage {
-  override val stageName: String = "my_source"
+class DbLoadStage extends WSourceStage {
+  override def name: String = "db_load_example"
 
   override def produce(args: WArgs, ctx: WebroStageContext): Iterator[WRow] = {
-    val table = args.str(0).getOrElse("products")
-    ctx.query(s"SELECT ean, product_name FROM $table WHERE active = true", Seq.empty)
+    val table  = args.string(0, "items")
+    val status = args.string(1, "active")
+    val limit  = args.int(2, 1000)
+    ctx.log(s"[$name] Loading $limit rows from $table where status=$status")
+    ctx.query(s"SELECT * FROM $table WHERE status = ? LIMIT ?", Seq(status, limit))
+  }
+}
+```
+
+Register in `META-INF/services/eu.webrobot.plugin.sdk.WSourceStage`.
+
+---
+
+### `WSinkStage` — write to an external destination
+
+Each row passes through unchanged (pipeline continues). Use for DB writes, HTTP pushes, or file exports.
+
+```scala
+import eu.webrobot.plugin.sdk.{WArgs, WRow, WSinkStage, WebroStageContext}
+
+class DbSaveStage extends WSinkStage {
+  override def name: String = "db_save_example"
+
+  override def consume(row: WRow, args: WArgs, ctx: WebroStageContext): WRow = {
+    val idField    = args.string(0, "id")
+    val valueField = args.string(1, "value")
+    val table      = args.string(2, "results")
+    val id    = row.str(idField).getOrElse("")
+    val value = row.str(valueField).getOrElse("")
+    if (id.nonEmpty && value.nonEmpty)
+      ctx.execute(
+        s"INSERT INTO $table (id, value, saved_at) VALUES (?, ?, NOW()) ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value, saved_at = NOW()",
+        Seq(id, value)
+      )
+    else
+      ctx.warn(s"[$name] Skipping row: missing $idField or $valueField")
+    row.set("_saved", true)
   }
 }
 ```
 
 ---
 
-### `WAggregateStage`
+### `WAggregateStage` — pairwise fold (like `reduceByKey`)
 
-Receives the full iterator of rows and returns a new iterator. Use for grouping, deduplication, or bulk operations that require seeing all rows at once.
+Groups rows by key and combines them two at a time.
 
 ```scala
-class DeduplicateByEan extends WAggregateStage {
-  override val stageName: String = "deduplicate_ean"
+import eu.webrobot.plugin.sdk.{WArgs, WRow, WAggregateStage}
 
-  override def aggregate(
-    rows: Iterator[WRow],
-    args: WArgs,
-    ctx: WebroStageContext
+class SumByKeyStage extends WAggregateStage {
+  override def name: String = "sum_by_key"
+
+  override def groupBy(row: WRow): String =
+    row.str("category").getOrElse("")
+
+  override def combine(left: WRow, right: WRow, args: WArgs): WRow = {
+    val field = args.string(0, "amount")
+    val sum   = left.double(field).getOrElse(0.0) + right.double(field).getOrElse(0.0)
+    left.set(field, sum)
+  }
+}
+```
+
+---
+
+### `WGroupStage` — full group aggregation
+
+Receives the complete group as an `Iterable`. Use for min/max/avg or best-match selection where pairwise folding isn't sufficient.
+
+```scala
+import eu.webrobot.plugin.sdk.{WArgs, WRow, WGroupStage, WebroStageContext}
+
+class BestPriceStage extends WGroupStage {
+  override def name: String = "best_price"
+  override def groupBy(row: WRow): String = row.str("ean").getOrElse("")
+
+  override def aggregate(rows: Iterable[WRow], args: WArgs, ctx: WebroStageContext): WRow = {
+    val priceField = args.string(0, "price")
+    val mode       = args.string(1, "min")
+    val rowList    = rows.toList
+    val withPrice  = rowList.flatMap(r => r.double(priceField).map(_ -> r))
+    val best = if (mode == "max") withPrice.maxBy(_._1)._2 else withPrice.minBy(_._1)._2
+    best.set("site_count", rowList.size)
+  }
+}
+```
+
+---
+
+### `WPartitionStage` — whole-partition operation
+
+Operates on an entire Spark partition at once (`mapPartitions`). Use for:
+- Batch DB writes (single INSERT batch for N rows)
+- ANN index lookups (load index once per partition, process all rows)
+- Partition-local deduplication
+
+```scala
+import eu.webrobot.plugin.sdk.{WArgs, WRow, WPartitionStage, WebroStageContext}
+
+class BatchSaveStage extends WPartitionStage {
+  override def name: String = "batch_save"
+
+  override def transformPartition(
+    rows: Iterator[WRow], args: WArgs, ctx: WebroStageContext
   ): Iterator[WRow] = {
-    rows.toList.groupBy(_.str("ean")).values.map(_.head).iterator
+    val table = args.string(0, "results")
+    val batch = rows.toList
+    if (batch.nonEmpty) {
+      val placeholders = batch.map(_ => "(?, ?, NOW())").mkString(", ")
+      val params = batch.flatMap(r => Seq(
+        r.str("id").getOrElse(""),
+        r.str("value").getOrElse("")
+      ))
+      ctx.execute(s"INSERT INTO $table (id, value, created_at) VALUES $placeholders ON CONFLICT DO NOTHING", params)
+    }
+    batch.iterator
   }
 }
 ```
 
 ---
 
-## WebroStageContext
+### `WResolver` — attribute extractor
 
-The `ctx` object is injected into every stage call. It provides access to the JDBC data source, configuration, logging, and object storage.
-
-### Database Access
+Extracts a value from the text content of an HTML element. Used in `extract` stage attribute resolvers.
 
 ```scala
-// Query — returns Iterator[WRow]
-val rows = ctx.query(
-  "SELECT id, ean, price FROM products WHERE org_id = ?",
-  Seq(orgId)
-)
-// Eagerly materialize before crossing Spark partition boundaries
-val list = rows.toList
+import eu.webrobot.plugin.sdk.WResolver
 
-// Execute — for INSERT / UPDATE / DELETE
-ctx.execute(
-  "UPDATE products SET price = ? WHERE ean = ?",
-  Seq(java.lang.Double.valueOf(price), ean)
-)
+class PriceResolver extends WResolver {
+  override def name: String = "price_resolver"
 
-// Transactional block
+  private val pattern = """([0-9]+(?:[.,][0-9]{1,2})?)""".r
+
+  override def extract(text: String): Option[String] =
+    pattern.findFirstIn(text).map(_.replace(',', '.'))
+}
+```
+
+Register in `META-INF/services/eu.webrobot.plugin.sdk.WResolver`.
+
+---
+
+### `WAction` — browser automation action
+
+Produces a browser action descriptor from named parameters.
+
+```scala
+import eu.webrobot.plugin.sdk.{ActionSpec, WAction, WActionArgs}
+
+class SleepAction extends WAction {
+  override def name: String = "sleep"
+
+  override def build(args: WActionArgs): ActionSpec =
+    ActionSpec(actionType = "sleep", params = Map("ms" -> args.int("ms", 500)))
+}
+```
+
+Register in `META-INF/services/eu.webrobot.plugin.sdk.WAction`.
+
+---
+
+## WebroStageContext API
+
+The `ctx` object is injected into context-aware stages (`WSourceStage`, `WSinkStage`, `WGroupStage`, `WPartitionStage`).
+
+### Database
+
+```scala
+// Query — returns Iterator[WRow] (materialize with .toList before crossing partition boundaries)
+val rows: List[WRow] = ctx.query("SELECT id, ean, price FROM products WHERE org_id = ?", Seq(orgId)).toList
+
+// Execute — INSERT / UPDATE / DELETE
+ctx.execute("UPDATE products SET price = ? WHERE ean = ?", Seq(java.lang.Double.valueOf(price), ean))
+
+// Transaction
 ctx.transaction { conn =>
-  conn.prepareStatement("DELETE FROM staging WHERE org_id = ?")
-    .tap(_.setString(1, orgId))
-    .execute()
-  conn.prepareStatement("INSERT INTO products SELECT * FROM staging WHERE org_id = ?")
-    .tap(_.setString(1, orgId))
-    .execute()
+  conn.prepareStatement("DELETE FROM staging WHERE org_id = ?").tap(_.setString(1, orgId)).execute()
+  conn.prepareStatement("INSERT INTO products SELECT * FROM staging WHERE org_id = ?").tap(_.setString(1, orgId)).execute()
 }
 ```
 
 ### Configuration
 
 ```scala
-// Read Spark conf values (set by the WebroBot platform at job start)
-val orgId = ctx.config("webrobot.org.id")
+val orgId = ctx.config("webrobot.org.id")   // set by platform at job start
 val jobId = ctx.config("webrobot.job.id")
+val env   = ctx.buildType                   // "development" / "staging" / "production"
+```
+
+### Object Storage (MinIO / S3)
+
+```scala
+val bytes = ctx.storageGet("path/to/file.csv")           // Download → Array[Byte]
+ctx.storagePut("path/to/output.csv", data, "text/csv")   // Upload
+val exists = ctx.storageExists("path/to/file.csv")
+val keys   = ctx.storageList("path/prefix/")
 ```
 
 ### Logging
 
 ```scala
 ctx.log("Processing EAN: " + ean)
-ctx.warn("Price value missing for row: " + row.str("id"))
+ctx.warn("Price value missing for row: " + rowId)
 ctx.error("Failed to parse price: " + ex.getMessage)
 ```
 
-### Object Storage (MinIO / S3)
-
-```scala
-// Download a file from object storage to a local temp path
-val localPath = ctx.storageGet("bucket-name", "path/to/file.csv")
-
-// Upload a local file to object storage
-ctx.storagePut("bucket-name", "path/to/output.csv", "/tmp/local-output.csv")
-```
-
 ---
 
-## WRow and WArgs
+## WRow and WArgs API
 
-### WRow — Row Access
-
-`WRow` is an immutable map-like structure representing a single data row.
+### WRow
 
 ```scala
-// Read fields (all return Option)
-val ean: Option[String]  = row.str("ean")
-val price: Option[Double] = row.double("price")
-val qty: Option[Int]     = row.int("quantity")
+val ean:   Option[String]  = row.str("ean")
+val price: Option[Double]  = row.double("price")
+val qty:   Option[Int]     = row.int("quantity")
+val flag:  Option[Boolean] = row.bool("active")
 
-// Set a field — returns a new WRow (immutable)
-val updated = row.set("price_eur", "12.99")
-
-// Remove a field
+val updated = row.set("price_eur", 12.99)     // returns new WRow
 val cleaned = row.remove("temp_field")
-
-// Check field existence
-val hasEan = row.has("ean")
+val renamed = row.rename("old_name", "new_name")
+val names   = row.fieldNames                   // Set[String]
+val has     = row.hasField("ean")
 ```
 
-### WArgs — Stage Argument Access
-
-`WArgs` provides access to the args list from the pipeline YAML. Args can be positional (a list of values) or named (a map).
+### WArgs (positional stage arguments)
 
 ```scala
-// Positional args — args.str(index)
-val targetTable = args.str(0).getOrElse("default_table")
-val maxRows     = args.double(1, 1000.0).toInt
-
-// Named (map) args — args.str("key")
-val dbtable  = args.str("dbtable").getOrElse("")
-val fetchSize = args.str("fetchsize").map(_.toInt).getOrElse(1000)
+val table    = args.string(0, "products")   // positional arg at index 0
+val maxRows  = args.int(1, 1000)
+val minPrice = args.double(2, 0.0)
+val active   = args.bool(3, true)
+val count    = args.size
 ```
 
 ---
 
-## ServiceLoader Registration
+## Plugin Manifest
 
-Plugins are discovered via the standard Java `ServiceLoader` mechanism. For each trait you implement, add a registration file under `META-INF/services/` in your JAR resources.
+Every plugin ships a `manifest.json` at the root of its JAR. The platform reads this on startup and on plugin reload.
 
-**File locations and contents:**
-
-```
-# src/main/resources/META-INF/services/eu.webrobot.plugin.sdk.WTransformStage
-com.example.MyTransformStage
-
-# src/main/resources/META-INF/services/eu.webrobot.plugin.sdk.WFilterStage
-com.example.ActiveProductFilter
-
-# src/main/resources/META-INF/services/eu.webrobot.plugin.sdk.WSinkStage
-com.example.MySinkStage
-
-# src/main/resources/META-INF/services/eu.webrobot.plugin.sdk.WSourceStage
-com.example.MySourceStage
-
-# src/main/resources/META-INF/services/eu.webrobot.plugin.sdk.WAggregateStage
-com.example.DeduplicateByEan
-```
-
-Multiple implementations can be listed in the same file, one per line.
-
----
-
-## Native PipelineStage (Spark-level Operations)
-
-For stages that need direct Spark DataFrame access (e.g. reading via a Spark connector, writing to Delta Lake), implement `PipelineStage` instead of the SDK traits. This gives you full access to the `SpookyContext` and `SpookyPlanAPI`.
-
-```scala
-import eu.webrobot.etl.stage.PipelineStage
-import eu.webrobot.etl.SpookyContext
-import eu.webrobot.etl.SpookyPlanAPI
-
-class LoadDbStage(spooky: SpookyContext) extends PipelineStage {
-  override val stageName: String = "load_db"
-
-  override def apply(plan: SpookyPlanAPI, args: Seq[Any]): SpookyPlanAPI = {
-    val argsMap = args.head.asInstanceOf[Map[String, String]]
-    val dbtable = argsMap("dbtable")
-
-    val opts = Map(
-      "dbtable"  -> dbtable,
-      "url"      -> argsMap.getOrElse("url", sys.env.getOrElse("JDBC_URL", "")),
-      "user"     -> argsMap.getOrElse("user", sys.env.getOrElse("DB_USER", "")),
-      "password" -> argsMap.getOrElse("password", sys.env.getOrElse("DB_PASSWORD", ""))
-    ) ++ argsMap.filterKeys(k => Set("partitionColumn","lowerBound","upperBound","numPartitions","fetchsize").contains(k))
-
-    val df = spooky.sqlContext.read.format("jdbc").options(opts).load()
-    spooky.create(df)
+```json
+{
+  "pluginId": "my-plugin",
+  "version": "1.0.0",
+  "pluginType": "etl",
+  "displayName": "My Plugin",
+  "mainClass": "com.mycompany.MyPlugin",
+  "bootstrapMethod": "bootstrap",
+  "enabled": true,
+  "organizationIds": [],
+  "stages": [
+    {
+      "stage_name": "my_transform",
+      "description": "Normalizes price values to EUR",
+      "extensionType": "stage",
+      "arg_schema": [
+        { "name": "field", "type": "string", "required": true, "description": "Field containing the raw price" },
+        { "name": "currency", "type": "string", "required": false, "default": "EUR" }
+      ]
+    }
+  ],
+  "dbMigrations": {
+    "enabled": false,
+    "location": "db/migration/my_plugin"
   }
 }
 ```
 
-**Register in your plugin's `registerAll()` method:**
-
-```scala
-object MyPlugin {
-  def bootstrap(spooky: SpookyContext): Unit = {
-    StageRegistry.register(classOf[LoadDbStage])
-    StageRegistry.register(classOf[SaveDbStage])
-  }
-}
-```
-
-Reference the `bootstrapMethod` in `manifest.json` so the platform calls it on plugin enable.
+| Field | Description |
+|-------|-------------|
+| `pluginId` | Unique identifier. Namespace your stage names with this to avoid conflicts |
+| `pluginType` | `"etl"`, `"api"`, or `"both"` |
+| `mainClass` | Entry point class — for ETL plugins, the object with `bootstrap()` |
+| `bootstrapMethod` | Static method on `mainClass` called once when the plugin is enabled |
+| `stages[]` | Stage descriptors synced to the stage catalog on enable/reload — used by CLI, IDE tools, and AI skills |
+| `organizationIds` | Restrict plugin to specific orgs. Empty = available to all |
 
 ---
 
-## Multi-tenancy
+## REST API Plugin
 
-Every plugin that handles data must correctly scope it to the requesting organization.
+### Project Structure
 
-**In ETL stages:** Always read the org ID from Spark config, never from row data or stage args.
-
-```scala
-val orgId: String = ctx.config("webrobot.org.id")
+```
+my-jersey-plugin/
+├── pom.xml
+├── manifest.json
+└── src/main/
+    ├── java/com/mycompany/
+    │   └── MyPlugin.java
+    └── resources/
+        └── db/migration/my_plugin/
+            └── V1__init.sql
 ```
 
-**In REST API endpoints:** Read the org ID from the validated JWT, never from the request body.
+### `pom.xml` dependency
+
+```xml
+<repositories>
+  <repository>
+    <id>jitpack.io</id>
+    <url>https://jitpack.io</url>
+  </repository>
+</repositories>
+
+<dependencies>
+  <!-- Public REST API SDK — no internal engine classes -->
+  <dependency>
+    <groupId>com.github.WebRobot-Ltd</groupId>
+    <artifactId>webrobot-jersey-plugin-sdk</artifactId>
+    <version>v0.1.0</version>
+    <scope>provided</scope>
+  </dependency>
+  <!-- JAX-RS and Jackson provided by the platform at runtime -->
+  <dependency>
+    <groupId>jakarta.ws.rs</groupId>
+    <artifactId>jakarta.ws.rs-api</artifactId>
+    <version>2.1.6</version>
+    <scope>provided</scope>
+  </dependency>
+</dependencies>
+```
+
+### Plugin class
+
+```java
+import eu.webrobot.plugin.jersey.WebroPlugin;
+import eu.webrobot.plugin.jersey.WebroPluginContext;
+import javax.ws.rs.*;
+import javax.ws.rs.core.*;
+
+@Path("/webrobot/api/my-plugin")
+@Produces(MediaType.APPLICATION_JSON)
+public class MyPlugin extends WebroPlugin {
+
+    private WebroPluginContext ctx;
+
+    @Override
+    public String pluginId() { return "my-plugin"; }
+
+    @Override
+    public void bootstrap(WebroPluginContext context) {
+        this.ctx = context;
+        // Flyway migrations in manifest.json dbMigrations.location run automatically
+    }
+
+    @GET
+    @Path("/status")
+    public Response status() {
+        return Response.ok(Map.of(
+            "pluginId", pluginId(),
+            "buildType", ctx.buildType()
+        )).build();
+    }
+
+    @POST
+    @Path("/process")
+    @Consumes(MediaType.APPLICATION_JSON)
+    public Response process(Map<String, Object> payload) {
+        String orgId = OrganizationContextHelper.getOrganizationId(req);
+        // DB, storage, and LLM available via ctx
+        return Response.ok(Map.of("status", "ok")).build();
+    }
+}
+```
+
+### `WebroPluginContext` API (REST API plugins)
+
+| Method | Description |
+|--------|-------------|
+| `ctx.db().query(sql, params)` | SELECT → `List<Map<String, Object>>` |
+| `ctx.db().execute(sql, params)` | INSERT/UPDATE/DELETE |
+| `ctx.storage().upload(path, bytes, contentType)` | Upload to MinIO/S3 |
+| `ctx.storage().download(path)` | Download → `byte[]` |
+| `ctx.storage().exists(path)` | Check object |
+| `ctx.llm().isAvailable()` | Whether an LLM provider is configured |
+| `ctx.llm().infer(prompt)` | Call LLM, returns response String |
+| `ctx.buildType()` | `"development"` / `"staging"` / `"production"` |
+
+### Multi-tenancy in REST API plugins
+
+Always read the org ID from the validated JWT — never from the request body.
 
 ```java
 import eu.webrobot.api.security.OrganizationContextHelper;
 
 @GET
-@Path("/my-resource")
-public Response getResource(@Context HttpServletRequest req) {
+@Path("/items")
+public Response getItems(@Context HttpServletRequest req) {
     String orgId = OrganizationContextHelper.getOrganizationId(req);
     // use orgId for all DB queries
 }
@@ -373,20 +588,18 @@ public Response getResource(@Context HttpServletRequest req) {
 
 ## DB Migrations (Flyway)
 
-Plugins manage their own schema with Flyway. Migration SQL files live inside the JAR under the path declared in `manifest.json`.
+Plugins manage their own schema with Flyway. SQL files live inside the JAR at the path declared in `manifest.json`.
 
-**File naming:** `V{version}__{description}.sql` (two underscores before the description).
+File naming: `V{version}__{description}.sql` (two underscores).
 
 ```
 src/main/resources/db/migration/my_plugin/
   V1__init.sql
   V2__add_confidence_column.sql
-  V3__add_indexes.sql
 ```
 
-**Example `V1__init.sql`:**
-
 ```sql
+-- V1__init.sql
 CREATE TABLE IF NOT EXISTS my_plugin_results (
     id          BIGSERIAL PRIMARY KEY,
     org_id      TEXT NOT NULL,
@@ -394,11 +607,50 @@ CREATE TABLE IF NOT EXISTS my_plugin_results (
     result_data JSONB,
     created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
-
 CREATE INDEX my_plugin_results_org_ean_idx ON my_plugin_results (org_id, ean);
 ```
 
-Migrations are applied automatically when the plugin is enabled or when the platform starts with a new plugin version. The `location` in `manifest.json` must match the resource directory path exactly.
+Migrations run automatically when the plugin is enabled or when the platform starts with a new plugin version.
+
+---
+
+## Jenkins CI/CD
+
+The ETL repository ships a `Jenkinsfile` that handles build, ProGuard obfuscation, MinIO upload, and plugin DB registration. For partner plugins, configure a Jenkins pipeline with:
+
+```groovy
+environment {
+    GITHUB_TOKEN = credentials('github-token')
+    SKIP_OBFUSCATION = "false"        // set "true" for dev builds
+    PLUGIN_ID = "my-etl-plugin"
+}
+
+stages {
+    stage('Build') {
+        steps {
+            sh 'GITHUB_TOKEN=$GITHUB_TOKEN ./gradlew jar'
+        }
+    }
+    stage('Upload') {
+        steps {
+            sh '''
+              mc cp build/libs/${PLUGIN_ID}-*.jar \
+                minio/plugins/${PLUGIN_ID}/latest.jar --insecure
+            '''
+        }
+    }
+    stage('Register') {
+        steps {
+            // POST to WebroBot API to update plugin JAR path in registry
+            sh '''
+              curl -X PUT ${WEBROBOT_API}/api/admin/plugins/${PLUGIN_ID} \
+                -H "X-API-Key: ${WEBROBOT_API_KEY}" \
+                -d '{"jarPath": "plugins/${PLUGIN_ID}/latest.jar"}'
+            '''
+        }
+    }
+}
+```
 
 ---
 
@@ -406,10 +658,10 @@ Migrations are applied automatically when the plugin is enabled or when the plat
 
 **1. `Option[Double].orNull` compile error**
 
-`Double` is a primitive and cannot be null directly. Box it to the Java wrapper type:
+`Double` is a primitive and cannot be null. Box it to the Java wrapper:
 
 ```scala
-// Wrong — won't compile
+// Wrong
 val price: java.lang.Double = row.double("price").orNull
 
 // Correct
@@ -418,27 +670,21 @@ val price: java.lang.Double = row.double("price").map(java.lang.Double.valueOf).
 
 **2. ResultSet closes across Spark partition boundaries**
 
-`ctx.query(...)` returns a lazy `Iterator[WRow]` backed by an open `ResultSet`. If you pass this iterator across a Spark partition boundary (e.g. inside a `mapPartitions` lambda), the connection will be closed before the iterator is consumed.
+`ctx.query(...)` returns a lazy `Iterator[WRow]` backed by an open JDBC `ResultSet`. Materialize eagerly before leaving the call site:
 
 ```scala
-// Wrong — iterator will be exhausted/closed before use
+// Wrong — ResultSet closed before iterator is consumed
 val rows = ctx.query("SELECT ...", Seq.empty)
-someRdd.mapPartitions(_ => rows)   // ResultSet already closed here
+someRdd.mapPartitions(_ => rows)
 
-// Correct — materialize eagerly before leaving the JDBC call site
+// Correct
 val rows: List[WRow] = ctx.query("SELECT ...", Seq.empty).toList
 ```
 
-**3. `setOrganizationId` takes String, not Long**
+**3. Stage name collisions**
 
-```scala
-// Wrong
-builder.setOrganizationId(123L)
+Namespace your stage names with your plugin ID: `my_plugin_transform` not just `transform`.
 
-// Correct
-builder.setOrganizationId("123")
-```
+**4. Multi-tenancy — org ID from JWT not from args**
 
-**4. Stage name collisions**
-
-If two plugins register the same `stageName`, the last one loaded wins. Namespace your stage names with your plugin ID to avoid conflicts: `my_plugin_transform` not just `transform`.
+Never trust the org ID from stage args or request body. Always read from `ctx.config("webrobot.org.id")` in ETL stages and from `OrganizationContextHelper.getOrganizationId(req)` in REST API endpoints.

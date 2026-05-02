@@ -29,7 +29,8 @@ export default defineConfig({
           text: 'Getting Started',
           items: [
             { text: 'Introduction', link: '/docs/introduction' },
-            { text: 'Quick Start', link: '/docs/quick-start' }
+            { text: 'Quick Start', link: '/docs/quick-start' },
+            { text: 'CLI Reference', link: '/docs/cli' }
           ]
         },
         {
