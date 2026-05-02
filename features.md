@@ -95,7 +95,21 @@ WebRobot provides a comprehensive set of features for building and managing agen
 - **Testing**: Built-in testing and validation tools
 - **Documentation**: Comprehensive documentation and examples
 
+### AI-Assisted Development
+
+- **Claude Code Plugin**: MCP server + skill set for AI-assisted pipeline building and administration
+- **Cursor IDE Support**: Native MCP tool integration — list jobs, run pipelines, inspect logs from your editor
+- **Skills**: `/webrobot-admin`, `/webrobot-pipeline`, `/webrobot-plugin-dev`, `/webrobot-python-extension`
+- **AI Agent Workflow**: Generate Python Extensions at runtime, register via API, reference in YAML — no compilation
+
+### Partner Plugin System
+
+- **Plugin Marketplace**: Technical partners can upload custom ETL and API plugins
+- **Plugin SDK**: Scala traits (`WSourceStage`, `WTransformStage`, `WSinkStage`, `WFilterStage`, `WAggregateStage`) + Java REST API plugin interface
+- **CI/CD Integration**: Jenkins pipeline with automatic JAR upload to MinIO and DB registration
+- **Plugin Manifest**: Declarative `manifest.json` with stage schema, Flyway migrations, and org scoping
+
 ## What's Next?
 
-Check out our [documentation](https://docs.webrobot.eu) to see all features and improvements.
+Check out our [documentation](/docs/introduction) to see all features and improvements.
 

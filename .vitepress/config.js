@@ -16,13 +16,12 @@ export default defineConfig({
     nav: [
       { text: 'Home', link: '/' },
       { text: 'Features', link: '/features' },
+      { text: 'Docs', link: '/docs/introduction' },
       { text: 'Demo', link: '/demo' },
-      { text: 'Documentation', link: 'https://docs.webrobot.eu/' },
-      { text: 'API Reference', link: 'https://docs.webrobot.eu/#-api-reference' },
       { text: 'Use Cases', link: '/use-cases' },
       { text: 'About', link: '/about' }
     ],
-    
+
     // Sidebar
     sidebar: {
       '/docs/': [
@@ -30,37 +29,40 @@ export default defineConfig({
           text: 'Getting Started',
           items: [
             { text: 'Introduction', link: '/docs/introduction' },
-            { text: 'Quick Start', link: '/docs/quick-start' },
-            { text: 'Installation', link: '/docs/installation' }
+            { text: 'Quick Start', link: '/docs/quick-start' }
           ]
         },
         {
-          text: 'Guides',
+          text: 'Building Pipelines',
           items: [
             { text: 'Pipeline Stages', link: '/docs/pipeline-stages' },
-            { text: 'Intelligent Stages', link: '/docs/intelligent-stages' },
-            { text: 'Python Extensions', link: '/docs/python-extensions' },
-            { text: 'Plugins & Extensibility', link: '/docs/plugins' }
+            { text: 'Python Extensions', link: '/docs/python-extensions' }
+          ]
+        },
+        {
+          text: 'Plugin Development',
+          items: [
+            { text: 'Plugins & SDK', link: '/docs/plugins' }
+          ]
+        },
+        {
+          text: 'AI Tools',
+          items: [
+            { text: 'Claude Code & Cursor', link: '/docs/ai-tools' }
           ]
         },
         {
           text: 'Vertical Solutions',
           items: [
-            { text: 'LLM Fine-tuning', link: '/docs/vertical-llm-finetuning' },
-            { text: 'Price Comparison', link: '/docs/vertical-price-comparison' },
-            { text: 'Sports Betting', link: '/docs/vertical-sports-betting' },
-            { text: 'Real Estate', link: '/docs/vertical-real-estate' }
+            { text: 'Price Comparison', link: '/docs/vertical-price-comparison' }
           ]
         }
       ],
       '/api/': [
         {
-          text: 'API Overview',
+          text: 'API Reference',
           items: [
-            { text: 'Authentication', link: '/api/authentication' },
-            { text: 'Projects', link: '/api/projects' },
-            { text: 'Pipelines', link: '/api/pipelines' },
-            { text: 'Jobs', link: '/api/jobs' }
+            { text: 'Authentication', link: '/api/authentication' }
           ]
         }
       ]
