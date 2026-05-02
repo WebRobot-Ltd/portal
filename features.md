@@ -97,7 +97,7 @@ WebRobot provides a comprehensive set of features for building and managing agen
 
 ### AI-Assisted Development
 
-- **Claude Code Plugin**: MCP server + skill set for AI-assisted pipeline building and administration
+- **Claude Code Plugin**: MCP server + skill set for AI-assisted pipeline building and administration. Claude Code is our recommended environment for vibe coding, particularly for the development of technical partner plugins.
 - **Cursor IDE Support**: Native MCP tool integration — list jobs, run pipelines, inspect logs from your editor
 - **Skills**: `/webrobot-admin`, `/webrobot-pipeline`, `/webrobot-plugin-dev`, `/webrobot-python-extension`
 - **AI Agent Workflow**: Generate Python Extensions at runtime, register via API, reference in YAML — no compilation
@@ -108,6 +108,38 @@ WebRobot provides a comprehensive set of features for building and managing agen
 - **Plugin SDK**: Scala traits (`WSourceStage`, `WTransformStage`, `WSinkStage`, `WFilterStage`, `WAggregateStage`) + Java REST API plugin interface
 - **CI/CD Integration**: Jenkins pipeline with automatic JAR upload to MinIO and DB registration
 - **Plugin Manifest**: Declarative `manifest.json` with stage schema, Flyway migrations, and org scoping
+
+---
+
+## Ray Platform *(coming soon)*
+
+WebroBot is extending its backend with a Ray-based distributed computing layer, complementing the existing Spark engine with capabilities tailored for AI workloads and real-time event-driven architectures.
+
+### Training & Fine-tuning
+
+Ray Train and Ray Data will power distributed model training and LLM fine-tuning pipelines, integrated with the same project/job model used for ETL workloads.
+
+### Inference & Agentic Execution
+
+Ray Serve will host inference endpoints for custom models. Ray's actor model will support distributed agentic workflows — long-running agents that coordinate across multiple nodes, consume events, and drive pipeline executions autonomously.
+
+### Distributed Trading Engine
+
+The Ray layer will serve as the backbone for real-time trading and arbitrage use cases, enabling low-latency event processing and coordination across geographically distributed workers.
+
+### Sports Betting — Real-Time Odds Pipeline
+
+The surebet detection vertical will use Ray to monitor live odds from multiple bookmakers in real time. Detected events feed a Kafka queue, which in turn drives a Spark Structured Streaming job for continuous arbitrage calculation and alerting.
+
+```
+Bookmaker APIs → Ray workers (real-time odds collection)
+                       ↓
+                  Kafka topic
+                       ↓
+           Spark Structured Streaming
+                       ↓
+          Surebet detection & alerts
+```
 
 ## What's Next?
 

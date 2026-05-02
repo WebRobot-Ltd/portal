@@ -51,7 +51,9 @@ Detect arbitrage opportunities and surebets across multiple bookmakers.
 - Odds comparison
 - Betting strategy optimization
 
-[Learn More →](https://docs.webrobot.eu/guides/vertical-sports-betting)
+**Coming soon — Ray-powered real-time pipeline:** Ray workers continuously collect live odds from bookmaker APIs and push events to a Kafka topic, which feeds a Spark Structured Streaming job for continuous surebet detection and low-latency alerting.
+
+[Learn More →](/docs/vertical-price-comparison)
 
 ## Real Estate
 

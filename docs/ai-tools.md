@@ -2,6 +2,8 @@
 
 WebroBot ships a first-class AI integration layer: an MCP (Model Context Protocol) server and a set of Claude Code skills designed for building pipelines, developing plugins, and administering the platform without leaving your editor.
 
+**Claude Code is our recommended environment for vibe coding.** For technically demanding tasks — in particular the development of custom ETL and REST API plugins for technical partners — Claude Code with the `/webrobot-plugin-dev` skill is the most effective development experience. The skill carries full knowledge of the plugin SDK trait hierarchy, multi-tenancy patterns, Flyway conventions, and common pitfalls, making it possible to go from description to a working plugin in a single session.
+
 ---
 
 ## Claude Code MCP Plugin

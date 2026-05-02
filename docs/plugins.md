@@ -2,6 +2,10 @@
 
 WebroBot supports two layers of extensibility. You can extend the ETL engine with custom Spark stages (Scala JARs) and extend the REST API with domain-specific endpoints and orchestration logic (Java/Jersey). Both are packaged as plugins and managed through the plugin registry.
 
+:::tip Recommended: Claude Code for plugin development
+Use [Claude Code](/docs/ai-tools) with the `/webrobot-plugin-dev` skill to scaffold and implement plugins. The skill knows the full SDK, multi-tenancy requirements, Flyway conventions, and common pitfalls — you describe the business logic and it produces ready-to-compile code.
+:::
+
 **Reference repositories:**
 
 | Repo | Description |
