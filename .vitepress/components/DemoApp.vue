@@ -220,7 +220,7 @@
             {{ executionResult.status }}
           </span>
         </div>
-        <div v-if="executionResult.status === 'success'" class="results-content">
+        <div v-if="executionResult.status === 'success' || executionResult.status === 'SUBMITTED'" class="results-content">
           <div class="result-stats">
             <div class="stat-item">
               <span class="stat-label">Records Processed:</span>
@@ -230,6 +230,17 @@
               <span class="stat-label">Execution Time:</span>
               <span class="stat-value">{{ executionResult.executionTime }}s</span>
             </div>
+            <div v-if="executionResult.outputDatasetId" class="stat-item">
+              <span class="stat-label">Output Dataset:</span>
+              <span class="stat-value">#{{ executionResult.outputDatasetId }}</span>
+            </div>
+          </div>
+          <div v-if="executionResult.polling" class="polling-banner">
+            <span class="polling-spinner">⏳</span>
+            {{ executionResult.pollingMessage || 'Waiting for Spark job to finish…' }}
+          </div>
+          <div v-else-if="executionResult.pollingMessage" class="polling-banner polling-done">
+            {{ executionResult.pollingMessage }}
           </div>
           <div class="result-preview">
             <h4>Preview Data ({{ executionResult.preview.length }} records):</h4>
@@ -1075,7 +1086,7 @@ async function executePipeline(datasetIdParam = null) {
     }
     
     const result = await response.json()
-    
+
     // Format result for display
     executionResult.value = {
       status: result.status || 'success',
@@ -1085,9 +1096,34 @@ async function executePipeline(datasetIdParam = null) {
       executionTime: result.execution_time || 0,
       message: result.message || 'Pipeline executed successfully',
       preview: result.preview || [],
-      note: result.note || ''
+      note: result.note || '',
+      outputDatasetId: result.output_dataset_id,
+      polling: false
     }
-    
+
+    // /api/demo/execute returns SUBMITTED immediately (async Spark).
+    // When the response has output_dataset_id but no preview rows, poll
+    // the dataset query endpoint until Spark finishes writing parquet +
+    // Trino indexes it. Renders the live records in the table.
+    if (result.output_dataset_id && (!result.preview || result.preview.length === 0)) {
+      executionResult.value.polling = true
+      executionResult.value.pollingMessage = 'Spark job submitted — waiting for results…'
+      try {
+        const previewRows = await pollDemoOutputRecords(result.output_dataset_id, 10)
+        executionResult.value.preview = previewRows
+        executionResult.value.polling = false
+        executionResult.value.pollingMessage = previewRows.length > 0
+          ? `Loaded ${previewRows.length} record(s) from output dataset ${result.output_dataset_id}`
+          : `Job completed but no records returned within the polling window (output dataset ${result.output_dataset_id}).`
+      } catch (pollError) {
+        console.error('Polling error:', pollError)
+        executionResult.value.polling = false
+        executionResult.value.pollingMessage = pollError instanceof Error
+          ? `Polling failed: ${pollError.message}`
+          : 'Polling failed'
+      }
+    }
+
   } catch (error) {
     console.error('Execution error:', error)
     executionResult.value = {
@@ -1097,6 +1133,60 @@ async function executePipeline(datasetIdParam = null) {
   } finally {
     isExecuting.value = false
   }
+}
+
+/**
+ * Trigger Trino indexing for an output dataset and then poll a SELECT
+ * query until rows are available (or the timeout elapses).
+ *
+ * The demo plugin returns SUBMITTED right after Spark submit — actual
+ * parquet write + Trino indexing take 20–90s typical. This helper hides
+ * that asynchrony from the UI: caller just awaits the rows and renders
+ * them. Returns [] if the window elapses without rows.
+ *
+ * @param {string|number} datasetId  output dataset id (numeric, as string)
+ * @param {number} limit             max rows to return
+ * @param {number} timeoutMs         total time budget
+ * @param {number} pollEveryMs       polling interval
+ */
+async function pollDemoOutputRecords(datasetId, limit = 10, timeoutMs = 120000, pollEveryMs = 5000) {
+  // Defensive: trigger Trino indexing once up front. Backend is idempotent
+  // (re-index = no-op if schema is the same). Don't propagate failures —
+  // the index may already have been triggered automatically by the webhook.
+  try {
+    await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/datasets/${encodeURIComponent(datasetId)}/index`, {
+      method: 'POST'
+    })
+  } catch (e) {
+    console.warn(`Index trigger for dataset ${datasetId} failed (continuing): ${e.message || e}`)
+  }
+
+  const deadline = Date.now() + timeoutMs
+  let lastErr = null
+  while (Date.now() < deadline) {
+    try {
+      const queryResp = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/datasets/query`, {
+        method: 'POST',
+        body: JSON.stringify({ sql: `SELECT * FROM [${datasetId}] LIMIT ${limit}` })
+      })
+      if (queryResp.ok) {
+        const queryResult = await queryResp.json()
+        if (queryResult && queryResult.success && Array.isArray(queryResult.data) && queryResult.data.length > 0) {
+          return queryResult.data
+        }
+        lastErr = queryResult && queryResult.error ? queryResult.error : null
+      } else {
+        lastErr = `HTTP ${queryResp.status}`
+      }
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : String(e)
+    }
+    await new Promise(r => setTimeout(r, pollEveryMs))
+  }
+  if (lastErr) {
+    throw new Error(`Polling exhausted (${Math.round(timeoutMs/1000)}s) — last error: ${lastErr}`)
+  }
+  return []
 }
 
 async function generatePipeline() {
@@ -1890,6 +1980,34 @@ if (typeof window !== 'undefined') {
 
 .result-preview h4 {
   margin-bottom: 0.75rem;
+}
+
+.polling-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  border-radius: 6px;
+  background: var(--vp-c-yellow-soft, #fff8e1);
+  color: var(--vp-c-text-1);
+  font-size: 0.95rem;
+  border-left: 3px solid var(--vp-c-yellow, #facc15);
+}
+
+.polling-banner.polling-done {
+  background: var(--vp-c-green-soft, #e6f7ec);
+  border-left-color: var(--vp-c-green, #10b981);
+}
+
+.polling-spinner {
+  display: inline-block;
+  animation: polling-spin 1.4s linear infinite;
+}
+
+@keyframes polling-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
 .code-block {
