@@ -132,7 +132,16 @@
               <!-- CSV Input Mode Toggle -->
               <div class="form-group">
                 <div class="input-mode-toggle">
-                  <button 
+                  <button
+                    type="button"
+                    class="toggle-btn"
+                    :class="{ active: csvInputMode === 'none' }"
+                    @click="csvInputMode = 'none'"
+                    title="Pipelines whose first stage is a literal wget/fetch (e.g. Wikipedia, HN) don't need a real CSV — a 1-row trigger dataset is auto-attached so PipelineParser's load_csv injection has something to consume."
+                  >
+                    🚀 No dataset (auto-trigger)
+                  </button>
+                  <button
                     type="button"
                     class="toggle-btn"
                     :class="{ active: csvInputMode === 'file' }"
@@ -140,7 +149,7 @@
                   >
                     📁 Upload File
                   </button>
-                  <button 
+                  <button
                     type="button"
                     class="toggle-btn"
                     :class="{ active: csvInputMode === 'manual' }"
@@ -149,6 +158,18 @@
                     ✏️ Manual Entry
                   </button>
                 </div>
+              </div>
+
+              <!-- No-dataset mode: explain what the auto-trigger does -->
+              <div v-if="csvInputMode === 'none'" class="form-group no-dataset-info">
+                <p class="input-hint">
+                  Selected pipelines that seed from a literal URL (Wikipedia, HN,
+                  arXiv, ECB, …) don't need user CSV input. A minimal one-row
+                  trigger CSV will be auto-uploaded so the pipeline framework's
+                  <code>load_csv</code> stage has a row to fan-out from.
+                </p>
+                <pre class="csv-preview-text">trigger
+go</pre>
               </div>
               
               <!-- File Upload Input -->
@@ -199,13 +220,17 @@
               >
                 Cancel
               </button>
-              <button 
+              <button
                 class="btn btn-primary"
-                :disabled="(!demoUploadFile && csvInputMode === 'file') || (csvInputMode === 'manual' && !demoCsvText.trim()) || isUploadingDemoDataset"
+                :disabled="(csvInputMode === 'file' && !demoUploadFile) || (csvInputMode === 'manual' && !demoCsvText.trim()) || isUploadingDemoDataset"
                 @click="uploadAndExecute"
               >
                 <span v-if="isUploadingDemoDataset" class="loading-spinner"></span>
-                {{ isUploadingDemoDataset ? 'Uploading...' : (demoUploadResult ? 'Execute Pipeline' : 'Upload & Execute') }}
+                {{ isUploadingDemoDataset
+                    ? (csvInputMode === 'none' ? 'Preparing trigger dataset…' : 'Uploading…')
+                    : (demoUploadResult
+                        ? 'Execute Pipeline'
+                        : (csvInputMode === 'none' ? 'Run with auto-trigger' : 'Upload & Execute')) }}
               </button>
             </div>
           </div>
@@ -621,7 +646,11 @@ const pipelinesError = ref(null)
 // CSV upload state for demo pipelines
 const demoUploadFile = ref(null)
 const demoCsvText = ref('')
-const csvInputMode = ref('file') // 'file' or 'manual'
+// 'none' = auto-attach a 1-row trigger CSV (works for wow-* demos that
+// seed from a literal URL); 'file' = user picks a CSV file; 'manual' =
+// CSV pasted into a textarea. Default to 'none' so the new wow demos
+// run with a single click — legacy EAN-style demos can still toggle.
+const csvInputMode = ref('none')
 const isUploadingDemoDataset = ref(false)
 const demoUploadResult = ref(null)
 const demoUploadError = ref(null)
@@ -941,28 +970,44 @@ function getCsvRowCount(csvText) {
 
 async function uploadDemoDataset() {
   if (!selectedPipeline.value) return
-  
+
   // Validate input based on mode
   if (csvInputMode.value === 'file' && !demoUploadFile.value) return
   if (csvInputMode.value === 'manual' && (!demoCsvText.value || !demoCsvText.value.trim())) return
-  
+  // 'none' mode has no user input to validate — we synthesize a 1-row CSV below
+
   isUploadingDemoDataset.value = true
   demoUploadError.value = null
-  
+
   try {
     const token = await getDemoJwtToken()
     const formData = new FormData()
-    
-    // Prepare file based on input mode
+
+    // Prepare file based on input mode.
+    //   'file'   — user-selected file
+    //   'manual' — textarea contents wrapped as a Blob
+    //   'none'   — synthesize a minimal 1-row CSV ("trigger\ngo"). The
+    //              demo plugin requires an input_dataset for every demo
+    //              (PipelineParser auto-injects load_csv as the first
+    //              stage). Pipelines whose first real stage is a literal
+    //              wget/fetch (Wikipedia, HN, …) ignore the row contents
+    //              — they just need ONE row so the fan-out produces ONE
+    //              seed downstream. This trigger CSV is the smallest
+    //              viable input for that case.
     let fileToUpload
     if (csvInputMode.value === 'file') {
       fileToUpload = demoUploadFile.value
-    } else {
+    } else if (csvInputMode.value === 'manual') {
       // Convert manual CSV text to File
       const csvBlob = new Blob([demoCsvText.value], { type: 'text/csv' })
       fileToUpload = new File([csvBlob], 'manual-input.csv', { type: 'text/csv' })
+    } else {
+      // csvInputMode.value === 'none' — synthesize trigger CSV
+      const triggerCsv = 'trigger\ngo\n'
+      const triggerBlob = new Blob([triggerCsv], { type: 'text/csv' })
+      fileToUpload = new File([triggerBlob], 'trigger.csv', { type: 'text/csv' })
     }
-    
+
     formData.append('file', fileToUpload)
     
     const pipelineName = selectedPipeline.value
@@ -1001,7 +1046,7 @@ function handleExecutePipeline() {
       // Show upload modal
       showPipelineYaml.value = false // Reset YAML visibility when opening modal
       showPipelineStages.value = false // Reset stages visibility when opening modal
-      csvInputMode.value = 'file' // Reset to file mode
+      csvInputMode.value = 'none' // Reset to auto-trigger mode
       showUploadModal.value = true
       // Reset upload state
       demoUploadFile.value = null
@@ -1019,7 +1064,7 @@ function closeUploadModal() {
   showUploadModal.value = false
   showPipelineYaml.value = false // Reset YAML visibility when closing modal
   showPipelineStages.value = false // Reset stages visibility when closing modal
-  csvInputMode.value = 'file' // Reset to file mode
+  csvInputMode.value = 'none' // Reset to auto-trigger mode
   demoUploadFile.value = null
   demoCsvText.value = ''
   demoUploadResult.value = null
@@ -1993,6 +2038,20 @@ if (typeof window !== 'undefined') {
   color: var(--vp-c-text-1);
   font-size: 0.95rem;
   border-left: 3px solid var(--vp-c-yellow, #facc15);
+}
+
+.no-dataset-info {
+  padding: 0.75rem 1rem;
+  border-radius: 6px;
+  background: var(--vp-c-bg-alt, #f6f6f7);
+  border-left: 3px solid var(--vp-c-brand-1, #3b82f6);
+}
+
+.no-dataset-info code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--vp-c-default-soft, #efefef);
+  font-size: 0.9em;
 }
 
 .polling-banner.polling-done {
