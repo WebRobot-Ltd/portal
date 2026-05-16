@@ -1181,13 +1181,18 @@ async function executePipeline(datasetIdParam = null) {
 }
 
 /**
- * Trigger Trino indexing for an output dataset and then poll a SELECT
- * query until rows are available (or the timeout elapses).
+ * Poll a SELECT query against the output dataset until rows are available
+ * (or the timeout elapses).
  *
  * The demo plugin returns SUBMITTED right after Spark submit — actual
- * parquet write + Trino indexing take 20–90s typical. This helper hides
- * that asynchrony from the UI: caller just awaits the rows and renders
- * them. Returns [] if the window elapses without rows.
+ * parquet write + Trino indexing take 20–90s typical. The Spark job's
+ * completion webhook (POST .../jobs/{id}/completion) is what creates and
+ * indexes the Trino table with the real schema, so this helper just
+ * waits on rows.
+ *
+ * Do NOT call POST /datasets/{id}/index from the UI: triggering indexing
+ * before Spark has written the parquet leaves a `_placeholder VARCHAR`
+ * schema stuck on the dataset, which then shadows the real schema.
  *
  * @param {string|number} datasetId  output dataset id (numeric, as string)
  * @param {number} limit             max rows to return
@@ -1195,17 +1200,6 @@ async function executePipeline(datasetIdParam = null) {
  * @param {number} pollEveryMs       polling interval
  */
 async function pollDemoOutputRecords(datasetId, limit = 10, timeoutMs = 120000, pollEveryMs = 5000) {
-  // Defensive: trigger Trino indexing once up front. Backend is idempotent
-  // (re-index = no-op if schema is the same). Don't propagate failures —
-  // the index may already have been triggered automatically by the webhook.
-  try {
-    await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/datasets/${encodeURIComponent(datasetId)}/index`, {
-      method: 'POST'
-    })
-  } catch (e) {
-    console.warn(`Index trigger for dataset ${datasetId} failed (continuing): ${e.message || e}`)
-  }
-
   const deadline = Date.now() + timeoutMs
   let lastErr = null
   while (Date.now() < deadline) {
