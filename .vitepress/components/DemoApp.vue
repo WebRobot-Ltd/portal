@@ -283,43 +283,15 @@ go</pre>
       <h2>🤖 Generate Pipeline from Natural Language</h2>
       <p>
         Describe what you want to scrape or extract, and our AI agent will generate a pipeline YAML for you.
-        <strong>Note: Generated pipelines are not executed automatically.</strong>
+        You can save and execute it right away &mdash; output is capped to 10 records / 10 links per crawl.
       </p>
 
       <div class="generation-card">
         <div class="form-group">
-          <label for="llm-provider">LLM Provider:</label>
-          <select 
-            id="llm-provider" 
-            v-model="generationConfig.provider"
-            class="pipeline-select"
-          >
-            <option value="openai">OpenAI (GPT-4)</option>
-            <option value="anthropic">Anthropic (Claude)</option>
-            <option value="together">Together AI</option>
-            <option value="google">Google (Gemini)</option>
-          </select>
-        </div>
-
-        <div class="form-group">
-          <label for="api-key-input">
-            Your API Key:
-            <span class="hint">(Required, not saved)</span>
-          </label>
-          <input 
-            type="password" 
-            id="api-key-input"
-            v-model="generationConfig.apiKey"
-            placeholder="Enter your API key"
-            class="text-input"
-          />
-        </div>
-
-        <div class="form-group">
           <label for="nl-prompt">
             Describe what you want to extract:
           </label>
-          <textarea 
+          <textarea
             id="nl-prompt"
             v-model="generationConfig.prompt"
             placeholder="Example: Scrape product listings from an e-commerce site, extract product name, price, and image URL"
@@ -328,7 +300,7 @@ go</pre>
           ></textarea>
         </div>
 
-        <button 
+        <button
           class="btn btn-primary"
           :disabled="!canGenerate || isGenerating"
           @click="generatePipeline"
@@ -354,8 +326,31 @@ go</pre>
             Download YAML
           </button>
           <button class="btn btn-primary" @click="saveAndExecute">
-            Save & Execute Pipeline
+            Save &amp; Execute Pipeline
           </button>
+        </div>
+
+        <!-- Execution result for the generated pipeline -->
+        <div v-if="generationExecutionResult" class="result-content" style="margin-top: 1.5rem;">
+          <div v-if="generationExecutionResult.status === 'error'" class="error-content">
+            <p class="error-message">{{ generationExecutionResult.error }}</p>
+          </div>
+          <div v-else>
+            <p>
+              <strong>Status:</strong> {{ generationExecutionResult.status }}
+              <span v-if="generationExecutionResult.jobId"> &mdash; job #{{ generationExecutionResult.jobId }}</span>
+              <span v-if="generationExecutionResult.outputDatasetId"> &mdash; dataset #{{ generationExecutionResult.outputDatasetId }}</span>
+            </p>
+            <p v-if="generationExecutionResult.message">{{ generationExecutionResult.message }}</p>
+            <p v-if="generationExecutionResult.polling || generationExecutionResult.pollingMessage">
+              <span v-if="generationExecutionResult.polling" class="loading-spinner"></span>
+              {{ generationExecutionResult.pollingMessage }}
+            </p>
+            <div v-if="generationExecutionResult.preview && generationExecutionResult.preview.length" class="result-preview">
+              <h4>Preview Data ({{ generationExecutionResult.preview.length }} records):</h4>
+              <pre class="code-block">{{ formatPreview(generationExecutionResult.preview) }}</pre>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -668,14 +663,17 @@ const DEMO_EMAIL = 'demo@webrobot.eu'
 const DEMO_PASSWORD = 'demo2026'
 const STRAPI_URL = import.meta.env.VITE_STRAPI_URL || 'https://strapi.webrobot.eu'
 
-// Pipeline generation state
+// Pipeline generation state. LLM provider + API key are no longer needed
+// here: the backend uses the server's own LLM credential (auto-detected,
+// Groq by default).
 const generationConfig = ref({
-  provider: 'openai',
-  apiKey: '',
   prompt: ''
 })
 const isGenerating = ref(false)
 const generatedPipeline = ref(null)
+// Mirrors executionResult so saveAndExecute can show records under the
+// generated YAML preview.
+const generationExecutionResult = ref(null)
 
 // Private demo authentication state
 const authConfig = ref({
@@ -785,8 +783,7 @@ onMounted(async () => {
 
 // Computed properties
 const canGenerate = computed(() => {
-  return generationConfig.value.apiKey.trim() !== '' && 
-         generationConfig.value.prompt.trim() !== ''
+  return generationConfig.value.prompt.trim() !== ''
 })
 
 // Methods
@@ -1230,38 +1227,34 @@ async function pollDemoOutputRecords(datasetId, limit = 10, timeoutMs = 120000, 
 
 async function generatePipeline() {
   if (!canGenerate.value) return
-  
+
   isGenerating.value = true
   generatedPipeline.value = null
-  
+  generationExecutionResult.value = null
+
   try {
-    // Call backend API to generate pipeline from natural language
-    const response = await fetch(`${API_BASE_URL}/api/webrobot/api/demo/generate-pipeline`, {
+    const response = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/generate-pipeline`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-API-Key': generationConfig.value.apiKey.trim()
-      },
       body: JSON.stringify({
-        prompt: generationConfig.value.prompt,
-        provider: generationConfig.value.provider
+        prompt: generationConfig.value.prompt
       })
     })
-    
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: response.statusText }))
       throw new Error(errorData.error || `Generation failed: ${response.statusText}`)
     }
-    
+
     const result = await response.json()
-    
-    // Extract pipeline YAML from result
+    if (result && result.error) {
+      throw new Error(result.error)
+    }
+
     generatedPipeline.value = result.pipeline_yaml || result.yaml || result.pipeline || ''
-    
+
     if (!generatedPipeline.value) {
       throw new Error('No pipeline YAML returned from API')
     }
-    
   } catch (error) {
     console.error('Generation error:', error)
     alert(error instanceof Error ? error.message : 'Failed to generate pipeline')
@@ -1310,40 +1303,69 @@ async function saveAndExecute() {
     alert('No pipeline to save. Please generate a pipeline first.')
     return
   }
-  
+
+  generationExecutionResult.value = {
+    status: 'submitting',
+    message: 'Saving pipeline and submitting Spark job…',
+    polling: false
+  }
+
   try {
-    const apiKey = getAuthenticatedApiKey()
-    if (!apiKey) {
-      alert('Please authenticate first to save and execute pipelines.')
-      return
-    }
-    
-    // Extract pipeline name from YAML or generate one
     const pipelineName = `generated-pipeline-${Date.now()}`
-    
-    // Call backend API to save the generated pipeline
-    const response = await authenticatedFetch(`/api/webrobot/api/demo/save-generated-pipeline`, {
+
+    const response = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/save-generated-pipeline`, {
       method: 'POST',
       body: JSON.stringify({
         pipeline_name: pipelineName,
-        pipeline_yaml: generatedPipeline.value
+        pipeline_yaml: generatedPipeline.value,
+        execute: true
       })
     })
-    
+
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: response.statusText }))
-      throw new Error(errorData.error || `Failed to save pipeline: ${response.statusText}`)
+      throw new Error(errorData.error || `Save & execute failed: ${response.statusText}`)
     }
-    
+
     const result = await response.json()
-    alert(`Pipeline saved successfully!\nPipeline Name: ${result.pipeline_name || pipelineName}\nAgent ID: ${result.agent_id || 'N/A'}`)
-    
-    // Optionally reload pipelines list to show the new one
-    await loadPipelines()
-    
+    const exec = result.execution || {}
+
+    generationExecutionResult.value = {
+      status: result.status || 'saved-and-executed',
+      jobId: exec.job_id,
+      agentId: result.agent_id,
+      outputDatasetId: exec.output_dataset_id,
+      pipelineName: result.pipeline_name || pipelineName,
+      message: result.message || 'Pipeline saved and execution submitted.',
+      preview: exec.preview || [],
+      polling: false,
+      pollingMessage: null
+    }
+
+    if (exec.output_dataset_id && (!exec.preview || exec.preview.length === 0)) {
+      generationExecutionResult.value.polling = true
+      generationExecutionResult.value.pollingMessage = 'Spark job submitted — waiting for results…'
+      try {
+        const previewRows = await pollDemoOutputRecords(exec.output_dataset_id, 10)
+        generationExecutionResult.value.preview = previewRows
+        generationExecutionResult.value.polling = false
+        generationExecutionResult.value.pollingMessage = previewRows.length > 0
+          ? `Loaded ${previewRows.length} record(s) from output dataset ${exec.output_dataset_id}`
+          : `Job completed but no records returned within the polling window (output dataset ${exec.output_dataset_id}).`
+      } catch (pollError) {
+        console.error('Polling error:', pollError)
+        generationExecutionResult.value.polling = false
+        generationExecutionResult.value.pollingMessage = pollError instanceof Error
+          ? `Polling failed: ${pollError.message}`
+          : 'Polling failed'
+      }
+    }
   } catch (error) {
-    console.error('Save error:', error)
-    alert(error instanceof Error ? error.message : 'Failed to save pipeline')
+    console.error('Save & execute error:', error)
+    generationExecutionResult.value = {
+      status: 'error',
+      error: error instanceof Error ? error.message : 'Failed to save & execute pipeline'
+    }
   }
 }
 
