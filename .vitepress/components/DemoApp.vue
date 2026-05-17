@@ -1,6 +1,14 @@
 <template>
   <div class="demo-app">
 
+    <!-- Scope banner: this demo runs on the Spark ETL subsystem only.
+         The Ray agentic runtime is not yet in production. -->
+    <div class="scope-banner">
+      ⚙️ This demo runs on the <strong>Apache Spark ETL subsystem</strong> only.
+      The agentic <strong>Ray</strong> runtime (multi-agent crews, adaptive pipelines, LLM oracle cascade)
+      is currently in development and <strong>not yet in production</strong>.
+    </div>
+
     <!-- Section 1: Execute Existing Pipelines -->
     <div class="demo-section">
       <h2>📋 Execute Example Pipelines</h2>
@@ -278,78 +286,163 @@ go</pre>
       </div>
     </div>
 
-    <!-- Section 2: Generate Pipeline from Natural Language -->
-    <div class="demo-section">
-      <h2>🤖 Generate Pipeline from Natural Language</h2>
-      <p>
-        Describe what you want to scrape or extract, and our AI agent will generate a pipeline YAML for you.
-        You can save and execute it right away &mdash; output is capped to 10 records / 10 links per crawl.
-      </p>
-
-      <div class="generation-card">
-        <div class="form-group">
-          <label for="nl-prompt">
-            Describe what you want to extract:
-          </label>
-          <textarea
-            id="nl-prompt"
-            v-model="generationConfig.prompt"
-            placeholder="Example: Scrape product listings from an e-commerce site, extract product name, price, and image URL"
-            class="textarea-input"
-            rows="5"
-          ></textarea>
+    <!-- Live execution panel — status + log tail + output preview.
+         Visible whenever there is a known execution_id (fresh from submit
+         OR restored from localStorage on page reload — "reattach"). -->
+    <div v-if="executionState" class="demo-section exec-panel">
+      <div class="exec-panel-header">
+        <h2>⏱️ Execution status</h2>
+        <div class="exec-panel-actions">
+          <button class="btn btn-secondary btn-sm" @click="refreshExecutionPanel">Refresh</button>
+          <button v-if="isExecutionRunning" class="btn btn-danger btn-sm" @click="cancelCurrentExecution">Cancel</button>
+          <button class="btn btn-ghost btn-sm" @click="detachExecution">Forget run</button>
         </div>
-
-        <button
-          class="btn btn-primary"
-          :disabled="!canGenerate || isGenerating"
-          @click="generatePipeline"
-        >
-          <span v-if="isGenerating" class="loading-spinner"></span>
-          {{ isGenerating ? 'Generating...' : 'Generate Pipeline' }}
-        </button>
       </div>
 
-      <!-- Generation Results -->
-      <div v-if="generatedPipeline" class="results-card">
-        <div class="results-header">
-          <h3>Generated Pipeline YAML</h3>
-          <button class="btn btn-secondary" @click="copyToClipboard">
-            Copy YAML
-          </button>
+      <div class="exec-summary">
+        <div><strong>Pipeline:</strong> {{ executionState.pipeline_name || '—' }}</div>
+        <div v-if="statusData">
+          <strong>Status:</strong>
+          <span class="status-pill" :style="{ background: statusBadgeColor }">{{ statusData.status || '—' }}</span>
+          <span v-if="statusData.duration_seconds != null"> · <strong>Duration:</strong> {{ statusData.duration_seconds }}s</span>
+          <span v-if="statusData.records_output != null"> · <strong>Records out:</strong> {{ statusData.records_output }}</span>
+          <span v-else-if="statusData.records_processed != null"> · <strong>Records processed:</strong> {{ statusData.records_processed }}</span>
         </div>
-        <div class="generated-yaml">
-          <pre class="code-block yaml-block">{{ generatedPipeline }}</pre>
+        <div v-if="statusData && statusData.error_message" class="exec-error">
+          <strong>Error:</strong> <code>{{ statusData.error_message.slice(0, 600) }}</code>
         </div>
-        <div class="generation-actions">
-          <button class="btn btn-secondary" @click="downloadYAML">
-            Download YAML
-          </button>
-          <button class="btn btn-primary" @click="saveAndExecute">
-            Save &amp; Execute Pipeline
-          </button>
+      </div>
+
+      <!-- Output preview table — appears when run is terminal + successful. -->
+      <div v-if="outputPreview" class="exec-output">
+        <h3>📊 Output preview</h3>
+        <div class="exec-output-meta">
+          Format: {{ outputPreview.format || 'unknown' }} ·
+          {{ (outputPreview.rows || []).length }} rows{{ outputPreview.truncated ? ' (truncated to 10)' : '' }}
+          <span v-if="outputPreview.note"> — {{ outputPreview.note }}</span>
+        </div>
+        <div v-if="outputPreview.columns && outputPreview.columns.length && outputPreview.rows && outputPreview.rows.length" class="exec-output-table-wrap">
+          <table class="exec-output-table">
+            <thead>
+              <tr>
+                <th v-for="col in outputPreview.columns" :key="col">{{ col }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, ri) in outputPreview.rows" :key="ri">
+                <td v-for="(col, ci) in outputPreview.columns" :key="ci">
+                  {{ (row[ci] == null ? '' : String(row[ci])).slice(0, 200) }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-else class="exec-output-empty">(no rows yet)</div>
+      </div>
+
+      <h3 class="exec-logs-title">Live log tail (driver) — sanitized</h3>
+      <pre class="exec-logs">{{ logsText || '(no logs yet — waiting for Spark driver to start)' }}</pre>
+    </div>
+
+    <!-- Section 2: Build your pipeline — CLI-style wizard (catalog +
+         editor + YAML preview). Replaces the old NL→full-YAML generator;
+         no API key required, no LLM call from the UI, every stage chosen
+         explicitly by the user from the live Strapi catalog. -->
+    <div class="demo-section">
+      <h2>🛠️ Build your pipeline</h2>
+      <p>
+        Pick stages from the live catalog and assemble them step by step — same shape as
+        <code>webrobot pipeline add-stage</code> on the CLI. No black-box generation.
+      </p>
+
+      <div class="wizard-card">
+        <div class="wizard-meta">
+          <div class="form-group">
+            <label for="wiz-pipeline-name">Pipeline name:</label>
+            <input id="wiz-pipeline-name" v-model="wizPipelineName" type="text" class="text-input" placeholder="e.g. my-books-scraper" />
+          </div>
+          <div class="form-group">
+            <label for="wiz-intent">Intent (optional):</label>
+            <input id="wiz-intent" v-model="wizIntent" type="text" class="text-input" placeholder="e.g. scrape product cards from a static catalog" />
+          </div>
         </div>
 
-        <!-- Execution result for the generated pipeline -->
-        <div v-if="generationExecutionResult" class="result-content" style="margin-top: 1.5rem;">
-          <div v-if="generationExecutionResult.status === 'error'" class="error-content">
-            <p class="error-message">{{ generationExecutionResult.error }}</p>
-          </div>
-          <div v-else>
-            <p>
-              <strong>Status:</strong> {{ generationExecutionResult.status }}
-              <span v-if="generationExecutionResult.jobId"> &mdash; job #{{ generationExecutionResult.jobId }}</span>
-              <span v-if="generationExecutionResult.outputDatasetId"> &mdash; dataset #{{ generationExecutionResult.outputDatasetId }}</span>
-            </p>
-            <p v-if="generationExecutionResult.message">{{ generationExecutionResult.message }}</p>
-            <p v-if="generationExecutionResult.polling || generationExecutionResult.pollingMessage">
-              <span v-if="generationExecutionResult.polling" class="loading-spinner"></span>
-              {{ generationExecutionResult.pollingMessage }}
-            </p>
-            <div v-if="generationExecutionResult.preview && generationExecutionResult.preview.length" class="result-preview">
-              <h4>Preview Data ({{ generationExecutionResult.preview.length }} records):</h4>
-              <pre class="code-block">{{ formatPreview(generationExecutionResult.preview) }}</pre>
+        <div class="wizard-cols">
+          <!-- Catalog browser -->
+          <div class="wizard-pane">
+            <h4>📚 Stage catalog</h4>
+            <div class="wizard-filters">
+              <select v-model="wizPluginFilter" class="text-input">
+                <option value="">All plugins</option>
+                <option v-for="p in wizPluginIds" :key="p" :value="p">{{ p }}</option>
+              </select>
+              <input v-model="wizSearch" type="text" class="text-input" placeholder="Search…" />
             </div>
+            <div class="wizard-catalog-list">
+              <div v-if="wizFilteredCatalog.length === 0" class="wizard-empty">no stages match the filters</div>
+              <div
+                v-for="s in wizFilteredCatalog"
+                :key="s.id"
+                class="wizard-catalog-row"
+                :title="'Click to append to your pipeline'"
+                @click="addStageToPipeline(s.stage_name)"
+              >
+                <div class="wizard-catalog-row-top">
+                  <strong>{{ s.stage_name }}</strong>
+                  <span class="wizard-catalog-row-tag">{{ s.plugin_id || '' }} · {{ s.plugin_type || '' }}</span>
+                </div>
+                <div class="wizard-catalog-row-desc">{{ (s.description || '').slice(0, 120) }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Pipeline editor -->
+          <div class="wizard-pane">
+            <h4>🧩 Pipeline</h4>
+            <div class="wizard-editor">
+              <div v-if="wizPipeline.length === 0" class="wizard-empty">empty — click a stage in the catalog to add it.</div>
+              <div v-for="(row, idx) in wizPipeline" :key="idx" class="wizard-editor-row">
+                <div class="wizard-editor-row-head">
+                  <strong>{{ idx + 1 }}. {{ row.stage }}</strong>
+                  <div class="wizard-editor-row-actions">
+                    <button class="btn btn-ghost btn-xs" :disabled="idx === 0" @click="moveStage(idx, -1)">↑</button>
+                    <button class="btn btn-ghost btn-xs" :disabled="idx === wizPipeline.length - 1" @click="moveStage(idx, 1)">↓</button>
+                    <button class="btn btn-danger btn-xs" @click="removeStage(idx)">✕</button>
+                  </div>
+                </div>
+                <div v-if="(findStageSpec(row.stage) && findStageSpec(row.stage).arg_schema || []).length === 0" class="wizard-empty">
+                  no args defined for this stage
+                </div>
+                <div
+                  v-for="a in (findStageSpec(row.stage) && findStageSpec(row.stage).arg_schema || [])"
+                  :key="a.name"
+                  class="wizard-editor-arg"
+                >
+                  <label>
+                    <strong>{{ a.name }}</strong><span v-if="a.required"> *</span>
+                    <span class="wizard-arg-type">({{ a.type || 'any' }})</span>
+                  </label>
+                  <input
+                    type="text"
+                    :value="row.args[a.name] != null ? row.args[a.name] : ''"
+                    :placeholder="(a.description || '').slice(0, 80)"
+                    class="text-input wizard-arg-input"
+                    @input="updateStageArg(idx, a.name, $event.target.value)"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <h4>📄 YAML preview</h4>
+        <pre class="wizard-yaml">{{ wizYamlPreview }}</pre>
+
+        <div class="wizard-actions">
+          <button class="btn btn-primary" @click="wizardSaveAndRun">Save &amp; Run</button>
+          <button class="btn btn-secondary" @click="wizardReset">Reset</button>
+          <div v-if="wizStatus.kind" :class="['wizard-status', 'wizard-status-' + wizStatus.kind]">
+            {{ wizStatus.text }}
           </div>
         </div>
       </div>
@@ -628,7 +721,7 @@ go</pre>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
 // Pipeline execution state
 const selectedPipeline = ref('')
@@ -779,6 +872,22 @@ onMounted(async () => {
   } catch (error) {
     console.error('Failed to initialize demo:', error)
   }
+
+  // Wizard catalog (independent of the demo list).
+  loadStageCatalog()
+
+  // Reattach any in-flight execution from a previous session. localStorage
+  // carries execution_id + pipeline_name + output_dataset_id; if the run
+  // is already terminal the panel still renders but polling self-stops.
+  const restored = loadExecutionState()
+  if (restored && restored.execution_id) {
+    executionState.value = restored
+    startExecPolling()
+  }
+})
+
+onBeforeUnmount(() => {
+  stopExecPolling()
 })
 
 // Computed properties
@@ -1129,41 +1238,24 @@ async function executePipeline(datasetIdParam = null) {
     
     const result = await response.json()
 
-    // Format result for display
+    // Brief acknowledgement — the live execution panel below takes over
+    // for status / logs / output preview. No more long-poll blocking the
+    // submit call.
     executionResult.value = {
       status: result.status || 'success',
       jobId: result.job_id,
       agentId: result.agent_id,
       recordsProcessed: result.record_limit || 10,
-      executionTime: result.execution_time || 0,
-      message: result.message || 'Pipeline executed successfully',
-      preview: result.preview || [],
+      executionTime: 0,
+      message: result.message || 'Pipeline submitted — see Execution status below.',
+      preview: [],
       note: result.note || '',
       outputDatasetId: result.output_dataset_id,
       polling: false
     }
 
-    // /api/demo/execute returns SUBMITTED immediately (async Spark).
-    // When the response has output_dataset_id but no preview rows, poll
-    // the dataset query endpoint until Spark finishes writing parquet +
-    // Trino indexes it. Renders the live records in the table.
-    if (result.output_dataset_id && (!result.preview || result.preview.length === 0)) {
-      executionResult.value.polling = true
-      executionResult.value.pollingMessage = 'Spark job submitted — waiting for results…'
-      try {
-        const previewRows = await pollDemoOutputRecords(result.output_dataset_id, 10)
-        executionResult.value.preview = previewRows
-        executionResult.value.polling = false
-        executionResult.value.pollingMessage = previewRows.length > 0
-          ? `Loaded ${previewRows.length} record(s) from output dataset ${result.output_dataset_id}`
-          : `Job completed but no records returned within the polling window (output dataset ${result.output_dataset_id}).`
-      } catch (pollError) {
-        console.error('Polling error:', pollError)
-        executionResult.value.polling = false
-        executionResult.value.pollingMessage = pollError instanceof Error
-          ? `Polling failed: ${pollError.message}`
-          : 'Polling failed'
-      }
+    if (result.execution_id) {
+      attachToExecution(result.execution_id, pipelineName, result.output_dataset_id)
     }
 
   } catch (error) {
@@ -1337,28 +1429,15 @@ async function saveAndExecute() {
       outputDatasetId: exec.output_dataset_id,
       pipelineName: result.pipeline_name || pipelineName,
       message: result.message || 'Pipeline saved and execution submitted.',
-      preview: exec.preview || [],
+      preview: [],
       polling: false,
       pollingMessage: null
     }
 
-    if (exec.output_dataset_id && (!exec.preview || exec.preview.length === 0)) {
-      generationExecutionResult.value.polling = true
-      generationExecutionResult.value.pollingMessage = 'Spark job submitted — waiting for results…'
-      try {
-        const previewRows = await pollDemoOutputRecords(exec.output_dataset_id, 10)
-        generationExecutionResult.value.preview = previewRows
-        generationExecutionResult.value.polling = false
-        generationExecutionResult.value.pollingMessage = previewRows.length > 0
-          ? `Loaded ${previewRows.length} record(s) from output dataset ${exec.output_dataset_id}`
-          : `Job completed but no records returned within the polling window (output dataset ${exec.output_dataset_id}).`
-      } catch (pollError) {
-        console.error('Polling error:', pollError)
-        generationExecutionResult.value.polling = false
-        generationExecutionResult.value.pollingMessage = pollError instanceof Error
-          ? `Polling failed: ${pollError.message}`
-          : 'Polling failed'
-      }
+    // Hand off to the live Execution panel — same as the executePipeline
+    // path. The previous inline long-poll is gone.
+    if (exec.execution_id) {
+      attachToExecution(exec.execution_id, pipelineName, exec.output_dataset_id)
     }
   } catch (error) {
     console.error('Save & execute error:', error)
@@ -1367,6 +1446,271 @@ async function saveAndExecute() {
       error: error instanceof Error ? error.message : 'Failed to save & execute pipeline'
     }
   }
+}
+
+// ─── Reattach + live status / logs / output preview ─────────────────
+// Mirrors the in-flight execution UX from the Jersey-bundled demo SPA:
+// localStorage persists the run id across tab closes; polling resumes
+// on mount. No long-poll inside the submit call — submit hands off to
+// attachToExecution() and the panel takes over.
+
+const LS_KEY = 'webrobot.demo.activeExecution'
+const TERMINAL_STATUSES = new Set(['COMPLETED', 'SUCCEEDED', 'FAILED', 'CANCELLED'])
+const STATUS_POLL_MS = 5000
+const LOGS_POLL_MS   = 8000
+
+const executionState = ref(null)   // {execution_id, pipeline_name, output_dataset_id, started_at}
+const statusData     = ref(null)   // latest /status response
+const logsText       = ref('')     // sanitized log blob
+const outputPreview  = ref(null)   // {format, columns, rows, truncated, note}
+let statusTimerId = null
+let logsTimerId   = null
+
+function loadExecutionState() {
+  try { const raw = localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : null }
+  catch { return null }
+}
+function saveExecutionStateLs(s) {
+  executionState.value = s
+  try { localStorage.setItem(LS_KEY, JSON.stringify(s)) } catch {}
+}
+function clearExecutionState() {
+  executionState.value = null
+  statusData.value = null
+  logsText.value = ''
+  outputPreview.value = null
+  try { localStorage.removeItem(LS_KEY) } catch {}
+}
+
+function stopExecPolling() {
+  if (statusTimerId) { clearInterval(statusTimerId); statusTimerId = null }
+  if (logsTimerId)   { clearInterval(logsTimerId);   logsTimerId   = null }
+}
+function startExecPolling() {
+  stopExecPolling()
+  pollStatusOnce()
+  pollLogsOnce()
+  statusTimerId = setInterval(pollStatusOnce, STATUS_POLL_MS)
+  logsTimerId   = setInterval(pollLogsOnce,   LOGS_POLL_MS)
+}
+
+async function pollStatusOnce() {
+  if (!executionState.value) return
+  try {
+    const url = `${API_BASE_URL}/api/webrobot/api/demo/executions/${encodeURIComponent(executionState.value.execution_id)}/status`
+    const r = await authenticatedDemoFetch(url)
+    if (!r.ok) return
+    const s = await r.json()
+    statusData.value = s
+    if (s.status && TERMINAL_STATUSES.has(s.status)) {
+      stopExecPolling()
+      pollLogsOnce()
+      if (s.status === 'COMPLETED' || s.status === 'SUCCEEDED') fetchOutputPreview()
+    }
+  } catch (e) { console.warn('status poll:', e) }
+}
+
+async function pollLogsOnce() {
+  if (!executionState.value) return
+  try {
+    const url = `${API_BASE_URL}/api/webrobot/api/demo/executions/${encodeURIComponent(executionState.value.execution_id)}/logs?tail=200`
+    const r = await authenticatedDemoFetch(url)
+    if (!r.ok) return
+    const j = await r.json()
+    logsText.value = j.logs || ''
+  } catch (e) { console.warn('logs poll:', e) }
+}
+
+async function fetchOutputPreview() {
+  if (!executionState.value) return
+  try {
+    const params = new URLSearchParams()
+    params.set('limit', '10')
+    if (executionState.value.output_dataset_id) {
+      params.set('datasetId', String(executionState.value.output_dataset_id))
+    }
+    const url = `${API_BASE_URL}/api/webrobot/api/demo/executions/${encodeURIComponent(executionState.value.execution_id)}/output?${params}`
+    const r = await authenticatedDemoFetch(url)
+    if (!r.ok) return
+    outputPreview.value = await r.json()
+  } catch (e) { console.warn('output preview:', e) }
+}
+
+function refreshExecutionPanel() {
+  pollStatusOnce()
+  pollLogsOnce()
+  if (statusData.value && TERMINAL_STATUSES.has(statusData.value.status)) {
+    fetchOutputPreview()
+  }
+}
+
+async function cancelCurrentExecution() {
+  if (!executionState.value) return
+  if (!window.confirm('Cancel this run?')) return
+  try {
+    const url = `${API_BASE_URL}/api/webrobot/api/demo/executions/${encodeURIComponent(executionState.value.execution_id)}`
+    await authenticatedDemoFetch(url, { method: 'DELETE' })
+    pollStatusOnce()
+  } catch (e) { alert('Cancel failed: ' + e.message) }
+}
+
+function detachExecution() {
+  stopExecPolling()
+  clearExecutionState()
+}
+
+function attachToExecution(execId, pipelineName, outputDatasetId) {
+  saveExecutionStateLs({
+    execution_id: execId,
+    pipeline_name: pipelineName,
+    output_dataset_id: outputDatasetId || null,
+    started_at: new Date().toISOString(),
+  })
+  outputPreview.value = null
+  startExecPolling()
+}
+
+const statusBadgeColor = computed(() => {
+  const s = statusData.value && statusData.value.status
+  return ({
+    RUNNING: '#2196f3', SUBMITTED: '#ff9800',
+    COMPLETED: '#43a047', SUCCEEDED: '#43a047',
+    FAILED: '#e53935', CANCELLED: '#9e9e9e',
+    UNKNOWN: '#9e9e9e',
+  })[s] || '#555'
+})
+const isExecutionRunning = computed(() => {
+  const s = statusData.value && statusData.value.status
+  return s === 'RUNNING' || s === 'SUBMITTED'
+})
+
+// ─── CLI-style pipeline wizard ──────────────────────────────────────
+// Mirrors `webrobot pipeline stages list/describe` + `pipeline add-stage`
+// from the CLI. Catalog comes from the dynamic Strapi-backed endpoint
+// /demo/catalog/stages so every newly-synced stage shows up here without
+// a portal rebuild.
+
+const wizCatalog       = ref([])
+const wizPipeline      = ref([])   // [{stage, args: {name: value, …}}]
+const wizPipelineName  = ref('')
+const wizIntent        = ref('')
+const wizPluginFilter  = ref('')
+const wizSearch        = ref('')
+const wizStatus        = ref({ kind: null, text: '' })
+
+const wizPluginIds = computed(() =>
+  Array.from(new Set(wizCatalog.value.map(s => s.plugin_id).filter(Boolean))).sort()
+)
+const wizFilteredCatalog = computed(() => {
+  const plugin = wizPluginFilter.value
+  const q = wizSearch.value.trim().toLowerCase()
+  return wizCatalog.value.filter(s => {
+    if (plugin && s.plugin_id !== plugin) return false
+    if (!q) return true
+    const hay = `${s.stage_name} ${(s.aliases || []).join(' ')} ${s.description || ''}`.toLowerCase()
+    return hay.includes(q)
+  })
+})
+const wizYamlPreview = computed(() => buildYamlFromPipeline(wizPipeline.value, wizCatalog.value))
+
+function findStageSpec(name) {
+  return wizCatalog.value.find(s => s.stage_name === name || (s.aliases || []).includes(name))
+}
+function addStageToPipeline(stageName) {
+  wizPipeline.value = [...wizPipeline.value, { stage: stageName, args: {} }]
+}
+function removeStage(idx) {
+  const next = [...wizPipeline.value]; next.splice(idx, 1); wizPipeline.value = next
+}
+function moveStage(idx, dir) {
+  const j = idx + dir
+  if (j < 0 || j >= wizPipeline.value.length) return
+  const next = [...wizPipeline.value]
+  const tmp = next[idx]; next[idx] = next[j]; next[j] = tmp
+  wizPipeline.value = next
+}
+function updateStageArg(idx, argName, value) {
+  const row = wizPipeline.value[idx]
+  if (!row) return
+  row.args = { ...row.args, [argName]: value }
+  wizPipeline.value = [...wizPipeline.value]
+}
+function yamlScalar(v) {
+  if (typeof v === 'number') return String(v)
+  const s = String(v)
+  if (/^-?\d+(\.\d+)?$/.test(s)) return s
+  if (/^(true|false)$/i.test(s)) return s.toLowerCase()
+  return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
+}
+function buildYamlFromPipeline(pipeline, catalog) {
+  if (!pipeline || pipeline.length === 0) return '(add at least one stage)'
+  const findSpec = (n) => catalog.find(s => s.stage_name === n || (s.aliases || []).includes(n))
+  const lines = ['pipeline:']
+  for (const row of pipeline) {
+    lines.push(`  - stage: ${row.stage}`)
+    const spec = findSpec(row.stage)
+    const orderedArgNames = (spec && spec.arg_schema || []).map(a => a.name)
+    const filled = []
+    for (const n of orderedArgNames) {
+      if (row.args[n] != null && row.args[n] !== '') filled.push([n, row.args[n]])
+    }
+    if (filled.length === 0) lines.push('    args: []')
+    else {
+      lines.push('    args:')
+      for (const [n, v] of filled) lines.push(`      - ${yamlScalar(v)}    # ${n}`)
+    }
+  }
+  lines.push('output:')
+  lines.push('  format: parquet')
+  lines.push('  mode: overwrite')
+  return lines.join('\n')
+}
+
+async function loadStageCatalog() {
+  try {
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/catalog/stages`)
+    if (!r.ok) throw new Error('catalog fetch failed: ' + r.status)
+    const j = await r.json()
+    wizCatalog.value = j.data || []
+  } catch (e) {
+    console.warn('wiz catalog load failed:', e)
+  }
+}
+
+async function wizardSaveAndRun() {
+  const name = wizPipelineName.value.trim()
+  if (!name) { wizStatus.value = { kind: 'error', text: 'Please provide a pipeline name.' }; return }
+  if (wizPipeline.value.length === 0) {
+    wizStatus.value = { kind: 'error', text: 'Add at least one stage before running.' }; return
+  }
+  wizStatus.value = { kind: 'info', text: 'Saving + submitting…' }
+  try {
+    const yamlText = wizYamlPreview.value
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/save-generated-pipeline`, {
+      method: 'POST',
+      body: JSON.stringify({ pipeline_name: name, pipeline_yaml: yamlText, execute: true })
+    })
+    const j = await r.json()
+    if (!r.ok) throw new Error(j.error || 'Save failed')
+    const execId = j.execution && j.execution.execution_id
+    const dsId   = j.execution && j.execution.output_dataset_id
+    if (execId) attachToExecution(execId, name, dsId)
+    wizStatus.value = {
+      kind: 'success',
+      text: 'Saved + submitted. Watch the Execution status panel above.'
+    }
+    // Refresh demo selector so the new pipeline appears.
+    loadPipelines()
+  } catch (e) {
+    wizStatus.value = { kind: 'error', text: 'Error: ' + (e.message || String(e)) }
+  }
+}
+
+function wizardReset() {
+  wizPipeline.value = []
+  wizPipelineName.value = ''
+  wizIntent.value = ''
+  wizStatus.value = { kind: null, text: '' }
 }
 
 // Private Demo Authentication
@@ -2816,6 +3160,283 @@ if (typeof window !== 'undefined') {
   display: flex;
   gap: 1rem;
   flex-wrap: wrap;
+}
+
+/* ─── Scope banner ─────────────────────────────────────────── */
+.scope-banner {
+  background: rgba(102, 126, 234, 0.08);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+  color: #333;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+
+/* ─── Live execution panel ─────────────────────────────────── */
+.exec-panel {
+  border-left: 4px solid #2196f3;
+}
+.exec-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.exec-panel-header h2 { margin: 0; }
+.exec-panel-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.exec-summary {
+  color: #444;
+  line-height: 1.7;
+  margin-bottom: 12px;
+}
+.status-pill {
+  display: inline-block;
+  color: white;
+  font-size: 0.8em;
+  font-weight: 600;
+  padding: 2px 10px;
+  border-radius: 999px;
+  margin: 0 4px;
+}
+.exec-error {
+  margin-top: 8px;
+  color: #b00020;
+}
+.exec-error code {
+  background: #fff0f0;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+.exec-output { margin-top: 18px; }
+.exec-output h3 { margin: 0 0 6px 0; }
+.exec-output-meta {
+  color: #888;
+  font-size: 0.85em;
+  margin-bottom: 8px;
+}
+.exec-output-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: white;
+}
+.exec-output-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.exec-output-table th {
+  text-align: left;
+  padding: 8px 12px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #fafbfc;
+  font-size: 0.85em;
+  color: #555;
+}
+.exec-output-table td {
+  padding: 6px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 0.85em;
+  color: #333;
+  vertical-align: top;
+}
+.exec-output-empty {
+  padding: 12px;
+  color: #888;
+}
+.exec-logs-title {
+  margin-top: 18px;
+}
+.exec-logs {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 14px;
+  border-radius: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
+/* ─── Pipeline wizard ──────────────────────────────────────── */
+.wizard-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 20px;
+}
+.wizard-meta {
+  display: grid;
+  gap: 15px;
+  grid-template-columns: 1fr 1fr;
+  margin-bottom: 20px;
+}
+@media (max-width: 720px) { .wizard-meta { grid-template-columns: 1fr; } }
+.wizard-cols {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin-bottom: 20px;
+}
+@media (max-width: 720px) { .wizard-cols { grid-template-columns: 1fr; } }
+.wizard-pane {
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 15px;
+  background: #fafbfc;
+}
+.wizard-pane h4 {
+  margin: 0 0 10px 0;
+  color: #333;
+}
+.wizard-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.wizard-filters .text-input { flex: 1; min-width: 120px; }
+.wizard-catalog-list,
+.wizard-editor {
+  max-height: 380px;
+  overflow-y: auto;
+  border-top: 1px solid #eee;
+  padding-top: 10px;
+}
+.wizard-empty {
+  color: #888;
+  font-size: 0.9em;
+  font-style: italic;
+}
+.wizard-catalog-row {
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.wizard-catalog-row:hover {
+  border-color: #2196f3;
+}
+.wizard-catalog-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.wizard-catalog-row-tag {
+  font-size: 0.75em;
+  color: #888;
+}
+.wizard-catalog-row-desc {
+  color: #666;
+  font-size: 0.9em;
+  margin-top: 4px;
+}
+.wizard-editor-row {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
+}
+.wizard-editor-row-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.wizard-editor-row-actions {
+  display: flex;
+  gap: 4px;
+}
+.wizard-editor-arg {
+  margin-top: 6px;
+}
+.wizard-editor-arg label {
+  font-size: 0.85em;
+  color: #555;
+  display: block;
+  margin-bottom: 3px;
+}
+.wizard-arg-type {
+  color: #999;
+  font-weight: normal;
+}
+.wizard-arg-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 0.9em;
+}
+.wizard-yaml {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 14px;
+  border-radius: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  margin: 0 0 15px 0;
+}
+.wizard-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.wizard-status {
+  margin-left: 8px;
+  font-size: 0.9em;
+}
+.wizard-status-error   { color: #b00020; }
+.wizard-status-success { color: #43a047; }
+.wizard-status-info    { color: #444; }
+
+/* ─── Small / ghost / danger button variants ──────────────── */
+.btn-sm  { padding: 6px 12px; font-size: 0.85rem; }
+.btn-xs  { padding: 2px 8px;  font-size: 0.8rem; }
+.btn-ghost {
+  background: #eee;
+  color: #333;
+}
+.btn-ghost:hover { background: #ddd; }
+.btn-danger {
+  background: #c0392b;
+  color: white;
+}
+.btn-danger:hover { background: #a83227; }
+.btn-danger:disabled { background: #d0d0d0; cursor: not-allowed; }
+
+.text-input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 2px solid #e0e0e0;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 0.95rem;
+  background: white;
+}
+.text-input:focus {
+  border-color: #2196f3;
+  outline: none;
 }
 </style>
 
