@@ -462,12 +462,61 @@ go</pre>
               </div>
               <div v-for="(row, idx) in wizPipeline" :key="idx" class="wizard-editor-row">
                 <div class="wizard-editor-row-head">
-                  <strong>{{ idx + 1 }}. {{ row.stage }}</strong>
+                  <strong>
+                    {{ idx + 1 }}. {{ row.stage }}
+                    <span v-if="row._trace && row._trace.length" class="wizard-trace-badge" :title="row._trace.length + ' actions in trace'">
+                      🎬 {{ row._trace.length }}
+                    </span>
+                  </strong>
                   <div class="wizard-editor-row-actions">
                     <button class="btn btn-ghost btn-xs" :disabled="idx === 0" @click="moveStage(idx, -1)">↑</button>
                     <button class="btn btn-ghost btn-xs" :disabled="idx === wizPipeline.length - 1" @click="moveStage(idx, 1)">↓</button>
+                    <button class="btn btn-secondary btn-xs" @click="openTraceRecorder(idx)" title="Record a sequence of click/type/scroll actions to run as this stage's trace">⏺</button>
                     <button class="btn btn-danger btn-xs" @click="removeStage(idx)">✕</button>
                   </div>
+                </div>
+
+                <!-- Structured editor for extract / flatSelect — both
+                     consume a list of {selector, as, method} field maps.
+                     For flatSelect the `selector` arg above (the segment
+                     container) is filled via the normal arg path. -->
+                <div v-if="isStructuredFieldsStage(row.stage)" class="wizard-fields-block">
+                  <div class="wizard-fields-head">
+                    <strong>📋 Fields ({{ (row._fields || []).length }})</strong>
+                    <div class="wizard-fields-actions">
+                      <button class="btn btn-secondary btn-xs" @click="openMultiFieldPicker(idx)" title="Open the picker in multi-field mode — click each field on the page">🎯 Pick fields</button>
+                      <button class="btn btn-ghost btn-xs" @click="addField(idx)">+ Add empty</button>
+                    </div>
+                  </div>
+                  <table v-if="(row._fields || []).length" class="wizard-fields-table">
+                    <thead>
+                      <tr><th></th><th>as (column)</th><th>method</th><th>selector</th><th>sample</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(f, fIdx) in row._fields" :key="fIdx">
+                        <td><span class="wizard-field-dot" :style="{background: f._color || '#bbb'}"></span></td>
+                        <td><input type="text" class="text-input" :value="f.as" @input="updateFieldProp(idx, fIdx, 'as', $event.target.value)" placeholder="column"></td>
+                        <td>
+                          <select class="text-input" :value="f.method" @change="updateFieldProp(idx, fIdx, 'method', $event.target.value)">
+                            <option value="text">text</option>
+                            <option value="html">html</option>
+                            <option value="attr:href">attr:href</option>
+                            <option value="attr:src">attr:src</option>
+                            <option value="attr:title">attr:title</option>
+                            <option value="attr:alt">attr:alt</option>
+                          </select>
+                        </td>
+                        <td>
+                          <div class="wizard-arg-input-row">
+                            <input type="text" class="text-input" :value="f.selector" @input="updateFieldProp(idx, fIdx, 'selector', $event.target.value)" placeholder="CSS selector">
+                            <button class="btn btn-secondary btn-xs" @click="openFieldPicker(idx, fIdx)">🎯</button>
+                          </div>
+                        </td>
+                        <td class="wizard-field-sample" :title="f._sample">{{ (f._sample || '').slice(0, 40) }}</td>
+                        <td><button class="btn btn-danger btn-xs" @click="removeField(idx, fIdx)">✕</button></td>
+                      </tr>
+                    </tbody>
+                  </table>
                 </div>
                 <div v-if="(findStageSpec(row.stage) && findStageSpec(row.stage).arg_schema || []).length === 0" class="wizard-empty">
                   no args defined for this stage
@@ -589,6 +638,32 @@ go</pre>
           </div>
         </div>
 
+        <!-- Multi-field picker info + auto-suggest. Visible when the
+             modal was opened from a structured stage's "🎯 Pick fields"
+             button. Every click in the iframe adds a row directly to
+             the stage's _fields; the count badge lives in the wizard. -->
+        <div v-if="pickerMode === 'multi-field'" class="picker-result picker-multi">
+          <div class="picker-multi-head">
+            <strong>🎯 Multi-field picker</strong>
+            <span v-if="pickerTargetStageIdx != null" class="picker-multi-target">
+              → fills {{ (wizPipeline[pickerTargetStageIdx] || {}).stage }} row #{{ pickerTargetStageIdx + 1 }}
+            </span>
+          </div>
+          <div class="picker-multi-row">
+            <input v-model="aiIntent" type="text" class="text-input" placeholder="describe the fields (e.g. name, price, rating, link)"
+              @keyup.enter="runAutoSuggestFields">
+            <button class="btn btn-primary btn-sm" :disabled="aiLoading || !aiIntent.trim()" @click="runAutoSuggestFields">
+              <span v-if="aiLoading" class="loading-spinner"></span>
+              {{ aiLoading ? 'Thinking…' : '🪄 Auto-suggest fields' }}
+            </button>
+            <button class="btn btn-secondary btn-sm" @click="closePicker">✅ Done</button>
+          </div>
+          <div v-if="aiError" class="picker-ai-err">{{ aiError }}</div>
+          <div class="picker-multi-hint">
+            Click each field on the page to add it. Auto-suggest pre-fills the field rows from your description. Edit names + methods in the stage editor.
+          </div>
+        </div>
+
         <!-- AI Magic panel -->
         <div v-if="pickerMode === 'ai-magic'" class="picker-result picker-ai">
           <div class="picker-ai-row">
@@ -666,6 +741,9 @@ go</pre>
           </div>
           <pre v-if="pickerActionsYaml" class="picker-actions-yaml">{{ pickerActionsYaml }}</pre>
           <div v-if="pickerActionsYaml" class="picker-actions">
+            <button v-if="pickerTargetArgName === '__stage_trace__' && pickerTargetStageIdx != null" class="btn btn-primary btn-sm" @click="applyRecordingToStageTrace">
+              ✅ Apply to {{ (wizPipeline[pickerTargetStageIdx] || {}).stage }}'s trace
+            </button>
             <button class="btn btn-primary btn-sm" @click="copyPickerActions">Copy YAML</button>
             <button class="btn btn-ghost btn-sm" @click="pickerActions = []">Clear</button>
           </div>
@@ -1970,11 +2048,49 @@ function onPickerMessage(ev) {
       sampleHtml: d.sampleHtml,
       mode: d.mode,
     }
-    // LCA refinement: when there are AI Magic highlights up, the
-    // picker computes the longest-common-ancestor selector between the
-    // first highlight and the user's click. We expose this as a 3rd-tier
-    // blue "refined" suggestion the user can apply with one button.
     aiPickedRefined.value = d.refinedFromHighlight || null
+    // Field-row picker (single click from a specific field's 🎯 Pick).
+    // The target arg name is encoded as "__field_selector__:<idx>" so
+    // we can route the pick back to the right row.
+    if (typeof pickerTargetArgName.value === 'string' &&
+        pickerTargetArgName.value.indexOf('__field_selector__:') === 0) {
+      const fIdx = parseInt(pickerTargetArgName.value.split(':')[1], 10)
+      if (!isNaN(fIdx) && pickerTargetStageIdx.value != null) {
+        updateFieldProp(pickerTargetStageIdx.value, fIdx, 'selector', d.selector)
+        closePicker()
+      }
+    }
+  } else if (d.type === 'webrobot-pick-multi-field') {
+    // Multi-field picker accumulates clicks. Each click appends a new
+    // field row on the target stage.
+    if (pickerTargetStageIdx.value != null) {
+      const stageIdx = pickerTargetStageIdx.value
+      const fields = ensureFieldsArray(stageIdx) || []
+      // Auto-suggest a column name from the sample text if it's short
+      // and not numeric — falls back to "field_N".
+      const guess = (() => {
+        const t = (d.sampleText || '').trim()
+        if (!t) return 'field_' + (fields.length + 1)
+        if (/^\d+([.,]\d+)?$/.test(t)) return 'field_' + (fields.length + 1)
+        return t.toLowerCase()
+          .replace(/[^a-z0-9]+/g, '_')
+          .replace(/^_+|_+$/g, '')
+          .slice(0, 24) || ('field_' + (fields.length + 1))
+      })()
+      const method = (() => {
+        if (/href/i.test(d.selector || '')) return 'attr:href'
+        if (/img/i.test(d.selector || '')) return 'attr:src'
+        return 'text'
+      })()
+      wizPipeline.value[stageIdx]._fields = [
+        ...fields,
+        { selector: d.selector, as: guess, method, _color: d.color, _sample: d.sampleText },
+      ]
+      wizPipeline.value = [...wizPipeline.value]
+    }
+  } else if (d.type === 'webrobot-picker-multi-warn') {
+    // Surface the warning briefly (e.g. clicked outside flatSelect container).
+    wizStatus.value = { kind: 'error', text: d.warn || 'click was outside the segment container' }
   } else if (d.type === 'webrobot-pick-actions') {
     pickerActions.value = Array.isArray(d.actions) ? d.actions : []
   } else if (d.type === 'webrobot-picker-navigation') {
@@ -2008,6 +2124,60 @@ function clearHighlightInIframe() {
 // fetch (server-side) but the layered highlights make the difference
 // visible to the user (yellow first if we ever split — for v1 we just
 // paint both together when the response lands).
+// Multi-field AI auto-suggest. Calls /wizard/infer-fields, then replaces
+// the target stage's _fields with the returned list. Uses the stage's
+// flatSelect segment selector as container_selector when present, so
+// the LLM returns RELATIVE selectors.
+async function runAutoSuggestFields() {
+  if (pickerTargetStageIdx.value == null) return
+  if (!pickerLoadedUrl.value) {
+    wizStatus.value = { kind: 'error', text: 'Load a target URL in the picker first.' }
+    return
+  }
+  const intent = aiIntent.value.trim()
+  if (!intent) {
+    wizStatus.value = { kind: 'error', text: 'Describe which fields to extract in the intent box.' }
+    return
+  }
+  aiLoading.value = true
+  aiError.value = null
+  try {
+    const row = wizPipeline.value[pickerTargetStageIdx.value]
+    const body = {
+      url: pickerLoadedUrl.value,
+      intent,
+      stage_name: row && row.stage,
+    }
+    if (row && row.stage === 'flatSelect' && row.args && row.args.selector) {
+      body.container_selector = row.args.selector
+    }
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-fields`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+    const j = await r.json()
+    if (!r.ok || j.error) throw new Error(j.error || 'infer-fields failed')
+    const fields = (j.llm && j.llm.length ? j.llm : j.algo) || []
+    replaceFields(pickerTargetStageIdx.value, fields)
+    // Push highlights for visual confirmation in the iframe.
+    const palette = ['#10b981','#3b82f6','#f59e0b','#ec4899','#8b5cf6','#ef4444','#14b8a6','#eab308']
+    const layers = fields.map((f, i) => ({ selector: f.selector, color: palette[i % palette.length], label: f.as }))
+    if (body.container_selector) {
+      // For flatSelect, the LLM returned RELATIVE selectors — we need to
+      // compose them with the container for the in-iframe highlight to
+      // hit anything.
+      const composed = layers.map(L => ({ ...L, selector: `${body.container_selector} ${L.selector}` }))
+      sendHighlightToIframe(composed)
+    } else {
+      sendHighlightToIframe(layers)
+    }
+  } catch (e) {
+    aiError.value = 'Error: ' + (e.message || String(e))
+  } finally {
+    aiLoading.value = false
+  }
+}
+
 async function runAiMagic() {
   if (!pickerLoadedUrl.value) {
     aiError.value = 'Load a target URL first.'
@@ -2194,6 +2364,102 @@ function updateStageArg(idx, argName, value) {
   row.args = { ...row.args, [argName]: value }
   wizPipeline.value = [...wizPipeline.value]
 }
+
+// ─── Structured editor for extract / flatSelect ─────────────────
+// These stages take a list of {selector, as, method} field maps.
+// We render them as a tabbed field-row editor on the stage, separate
+// from the generic arg inputs.
+
+function isStructuredFieldsStage(stageName) {
+  return stageName === 'extract' || stageName === 'flatSelect'
+}
+
+function ensureFieldsArray(idx) {
+  const row = wizPipeline.value[idx]
+  if (!row) return null
+  if (!Array.isArray(row._fields)) {
+    row.args = row.args || {}
+    row._fields = []
+    wizPipeline.value = [...wizPipeline.value]
+  }
+  return row._fields
+}
+function addField(idx) {
+  const f = ensureFieldsArray(idx)
+  if (!f) return
+  wizPipeline.value[idx]._fields = [...f, { selector: '', as: '', method: 'text' }]
+  wizPipeline.value = [...wizPipeline.value]
+}
+function removeField(idx, fieldIdx) {
+  const row = wizPipeline.value[idx]
+  if (!row || !row._fields) return
+  row._fields = row._fields.filter((_, i) => i !== fieldIdx)
+  wizPipeline.value = [...wizPipeline.value]
+}
+function updateFieldProp(idx, fieldIdx, prop, value) {
+  const row = wizPipeline.value[idx]
+  if (!row || !row._fields || !row._fields[fieldIdx]) return
+  row._fields[fieldIdx] = { ...row._fields[fieldIdx], [prop]: value }
+  wizPipeline.value = [...wizPipeline.value]
+}
+function replaceFields(idx, newFields) {
+  const row = wizPipeline.value[idx]
+  if (!row) return
+  row._fields = (newFields || []).map(f => ({
+    selector: String(f.selector || ''),
+    as: String(f.as || ''),
+    method: String(f.method || 'text'),
+  }))
+  wizPipeline.value = [...wizPipeline.value]
+}
+
+// Open picker focused on filling a SINGLE field row's selector — both
+// for extract.fields[i].selector and flatSelect.fields[i].selector.
+function openFieldPicker(stageIdx, fieldIdx) {
+  pickerTargetStageIdx.value = stageIdx
+  pickerTargetArgName.value  = '__field_selector__:' + fieldIdx
+  pickerMode.value = 'selector-single'
+  pickerSelected.value = null
+  pickerOpen.value = true
+}
+
+// Open picker in multi-field mode for batch field picking. When the
+// stage is flatSelect with a segment selector already set, configure
+// the picker to constrain clicks to descendants of that container.
+function openMultiFieldPicker(stageIdx) {
+  pickerTargetStageIdx.value = stageIdx
+  pickerTargetArgName.value  = '__fields_multi__'
+  pickerMode.value = 'multi-field'
+  pickerOpen.value = true
+  // If the stage is flatSelect AND has a segment selector set, push it
+  // to picker.js so it constrains clicks to descendants of one segment
+  // and produces RELATIVE selectors for the fields.
+  const row = wizPipeline.value[stageIdx]
+  if (row && row.stage === 'flatSelect' && row.args && row.args.selector) {
+    setTimeout(() => {
+      const ifr = document.getElementById('wr-picker-iframe')
+      try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-multi-config', containerSelector: row.args.selector }, '*') } catch (_) {}
+    }, 600)
+  }
+}
+
+// Open picker in action-record mode tied to a specific stage row.
+// When the recording is collected we route the action list to
+// row._trace (instead of letting the user copy YAML manually).
+function openTraceRecorder(stageIdx) {
+  pickerTargetStageIdx.value = stageIdx
+  pickerTargetArgName.value  = '__stage_trace__'
+  pickerMode.value = 'action-record'
+  pickerOpen.value = true
+}
+
+function applyRecordingToStageTrace() {
+  if (pickerTargetStageIdx.value == null) return
+  const idx = pickerTargetStageIdx.value
+  wizPipeline.value[idx]._trace = pickerActions.value.slice()
+  wizPipeline.value = [...wizPipeline.value]
+  closePicker()
+}
 function yamlScalar(v) {
   if (typeof v === 'number') return String(v)
   const s = String(v)
@@ -2207,6 +2473,40 @@ function buildYamlFromPipeline(pipeline, catalog) {
   const lines = ['pipeline:']
   for (const row of pipeline) {
     lines.push(`  - stage: ${row.stage}`)
+
+    // ── Structured stages: extract + flatSelect ────────────────
+    // extract.args = list of {selector, as, method}
+    // flatSelect.args = [segmentSelector, [{selector, as, method}, …]]
+    const fields = Array.isArray(row._fields) ? row._fields.filter(f => (f.selector || '').trim() !== '') : []
+    if (row.stage === 'extract') {
+      if (fields.length === 0) {
+        lines.push('    args: []')
+      } else {
+        lines.push('    args:')
+        for (const f of fields) {
+          lines.push(`      - { selector: ${yamlScalar(f.selector)}, method: ${yamlScalar(f.method || 'text')}, as: ${yamlScalar(f.as || '')} }`)
+        }
+      }
+      // (no trace concept for extract)
+      continue
+    }
+    if (row.stage === 'flatSelect') {
+      const seg = (row.args && row.args.selector) || ''
+      lines.push('    args:')
+      lines.push(`      - ${yamlScalar(seg)}    # segment selector`)
+      if (fields.length === 0) {
+        lines.push('      - []    # extractors (empty)')
+      } else {
+        lines.push('      -')
+        for (const f of fields) {
+          lines.push(`        - { selector: ${yamlScalar(f.selector)}, method: ${yamlScalar(f.method || 'text')}, as: ${yamlScalar(f.as || '')} }`)
+        }
+      }
+      maybeEmitTrace(row, lines)
+      continue
+    }
+
+    // ── Generic stages: positional args from catalog arg_schema ───
     const spec = findSpec(row.stage)
     const orderedArgNames = (spec && spec.arg_schema || []).map(a => a.name)
     const filled = []
@@ -2218,11 +2518,28 @@ function buildYamlFromPipeline(pipeline, catalog) {
       lines.push('    args:')
       for (const [n, v] of filled) lines.push(`      - ${yamlScalar(v)}    # ${n}`)
     }
+    maybeEmitTrace(row, lines)
   }
   lines.push('output:')
   lines.push('  format: parquet')
   lines.push('  mode: overwrite')
   return lines.join('\n')
+}
+
+// Emit a trace: block under the current stage when row._trace is set
+// (from the ⏺ Record-trace flow on the stage row).
+function maybeEmitTrace(row, lines) {
+  const t = Array.isArray(row._trace) ? row._trace : []
+  if (t.length === 0) return
+  lines.push('    trace:')
+  for (const a of t) {
+    const sel = (a.selector || '').replace(/"/g, '\\"')
+    const txt = (a.text     || '').replace(/"/g, '\\"')
+    if (a.type === 'Click'  && sel) lines.push(`      - Click("${sel}")`)
+    else if (a.type === 'Type' && sel) lines.push(`      - Type("${sel}", "${txt}")`)
+    else if (a.type === 'Wait')   lines.push(`      - Wait(${a.ms || 1000})`)
+    else if (a.type === 'Scroll') lines.push(`      - Scroll(${a.y || 0})`)
+  }
 }
 
 async function wizardSuggestFromIntent() {
@@ -4427,6 +4744,97 @@ if (typeof window !== 'undefined') {
 .picker-ai-refine {
   background: #eff6ff;
   border-color: #bfdbfe;
+}
+
+/* ─── Structured fields editor (extract / flatSelect) ──────── */
+.wizard-fields-block {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: #f7fafc;
+  border: 1px solid #e0e6ee;
+  border-radius: 6px;
+}
+.wizard-fields-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.wizard-fields-actions {
+  display: flex;
+  gap: 6px;
+}
+.wizard-fields-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+.wizard-fields-table th {
+  text-align: left;
+  padding: 4px 6px;
+  font-size: 0.75em;
+  color: #777;
+  font-weight: 600;
+}
+.wizard-fields-table td {
+  padding: 4px 6px;
+  vertical-align: middle;
+}
+.wizard-fields-table .text-input {
+  padding: 4px 6px;
+  font-size: 0.85em;
+}
+.wizard-field-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.wizard-field-sample {
+  color: #888;
+  font-size: 0.75em;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wizard-trace-badge {
+  background: #1f2937;
+  color: white;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.7em;
+  font-weight: 600;
+  margin-left: 6px;
+}
+
+/* ─── Multi-field picker panel ─────────────────────────────── */
+.picker-multi {
+  background: #fff7ed;
+  border-top: 1px solid #fed7aa;
+}
+.picker-multi-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+.picker-multi-target {
+  color: #555;
+  font-size: 0.85em;
+}
+.picker-multi-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.picker-multi-row .text-input { flex: 1; min-width: 200px; }
+.picker-multi-hint {
+  color: #888;
+  font-size: 0.78em;
 }
 </style>
 
