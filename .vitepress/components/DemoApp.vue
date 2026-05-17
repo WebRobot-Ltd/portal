@@ -369,9 +369,50 @@ go</pre>
             <input id="wiz-pipeline-name" v-model="wizPipelineName" type="text" class="text-input" placeholder="e.g. my-books-scraper" />
           </div>
           <div class="form-group">
-            <label for="wiz-intent">Intent (optional):</label>
-            <input id="wiz-intent" v-model="wizIntent" type="text" class="text-input" placeholder="e.g. scrape product cards from a static catalog" />
+            <label for="wiz-intent">Intent (optional, used by ✨ Suggest):</label>
+            <div class="wizard-intent-row">
+              <input
+                id="wiz-intent"
+                v-model="wizIntent"
+                type="text"
+                class="text-input"
+                placeholder="e.g. scrape product cards from a static catalog"
+                @keyup.enter="wizardSuggestFromIntent"
+              />
+              <button
+                class="btn btn-secondary btn-sm wizard-suggest-btn"
+                :disabled="wizSuggesterLoading || !wizIntent.trim()"
+                @click="wizardSuggestFromIntent"
+                title="Ask the server LLM to pick relevant stages from the live catalog"
+              >
+                <span v-if="wizSuggesterLoading" class="loading-spinner"></span>
+                {{ wizSuggesterLoading ? 'Thinking…' : '✨ Suggest' }}
+              </button>
+            </div>
           </div>
+        </div>
+
+        <!-- Suggested-pipeline panel: appears after a successful ✨ Suggest.
+             Shows the LLM's ordered choice as a chain of clickable chips,
+             plus an "Add all" shortcut. Adding is still per-click /
+             per-batch — never auto-applied. -->
+        <div v-if="wizSuggested.length || wizSuggesterError" class="wizard-suggested">
+          <div v-if="wizSuggesterError" class="wizard-suggested-err">{{ wizSuggesterError }}</div>
+          <template v-else>
+            <div class="wizard-suggested-head">
+              <strong>💡 AI suggested pipeline:</strong>
+              <button class="btn btn-primary btn-sm" @click="addAllSuggested">Add all →</button>
+            </div>
+            <div class="wizard-suggested-chain">
+              <template v-for="(name, i) in wizSuggested" :key="i">
+                <button class="wizard-chip wizard-chip-ai" @click="addStageToPipeline(name)" :title="'Add ' + name">
+                  ⭐ {{ name }}
+                </button>
+                <span v-if="i < wizSuggested.length - 1" class="wizard-suggested-arrow">→</span>
+              </template>
+            </div>
+            <div class="wizard-suggested-hint">click a chip to add just that stage, or use Add all.</div>
+          </template>
         </div>
 
         <div class="wizard-cols">
@@ -1636,6 +1677,13 @@ const wizPluginFilter  = ref('')
 const wizSearch        = ref('')
 const wizStatus        = ref({ kind: null, text: '' })
 
+// AI suggester (server-side LLM call) — given the intent, returns up to
+// 5 stage names from the live catalog as the suggested order.
+const wizSuggested        = ref([])      // ordered array of stage_names
+const wizSuggesterLoading = ref(false)
+const wizSuggesterError   = ref(null)
+const wizSuggestedSet = computed(() => new Set(wizSuggested.value))
+
 const wizPluginIds = computed(() =>
   Array.from(new Set(wizCatalog.value.map(s => s.plugin_id).filter(Boolean))).sort()
 )
@@ -1735,6 +1783,44 @@ function buildYamlFromPipeline(pipeline, catalog) {
   lines.push('  format: parquet')
   lines.push('  mode: overwrite')
   return lines.join('\n')
+}
+
+async function wizardSuggestFromIntent() {
+  const intent = wizIntent.value.trim()
+  if (!intent) {
+    wizSuggesterError.value = 'Describe what you want to build (intent box above).'
+    return
+  }
+  wizSuggesterLoading.value = true
+  wizSuggesterError.value = null
+  try {
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/suggest`, {
+      method: 'POST',
+      body: JSON.stringify({ intent }),
+    })
+    const j = await r.json()
+    if (!r.ok) throw new Error(j.error || 'suggest failed')
+    if (j.error) {
+      wizSuggesterError.value = j.error
+      wizSuggested.value = []
+    } else {
+      wizSuggested.value = j.suggested || []
+      if (wizSuggested.value.length === 0) {
+        wizSuggesterError.value = 'LLM did not return any usable stage names. Try a clearer intent.'
+      }
+    }
+  } catch (e) {
+    wizSuggesterError.value = 'Error: ' + (e.message || String(e))
+    wizSuggested.value = []
+  } finally {
+    wizSuggesterLoading.value = false
+  }
+}
+
+function addAllSuggested() {
+  for (const name of wizSuggested.value) {
+    addStageToPipeline(name)
+  }
 }
 
 async function loadStageCatalog() {
@@ -3643,6 +3729,57 @@ if (typeof window !== 'undefined') {
   margin: 2px 0;
 }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+/* ─── Wizard: AI suggester ─────────────────────────────────── */
+.wizard-intent-row {
+  display: flex;
+  gap: 8px;
+}
+.wizard-intent-row .text-input { flex: 1; }
+.wizard-suggest-btn { white-space: nowrap; }
+.wizard-suggested {
+  background: rgba(102, 126, 234, 0.06);
+  border: 1px solid rgba(102, 126, 234, 0.25);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+}
+.wizard-suggested-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.wizard-suggested-chain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.wizard-suggested-arrow {
+  color: #888;
+  font-weight: 600;
+}
+.wizard-chip-ai {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.18), rgba(118, 75, 162, 0.18));
+  color: #2c4cb0;
+  border-color: rgba(102, 126, 234, 0.45);
+  font-weight: 600;
+}
+.wizard-chip-ai:hover {
+  background: linear-gradient(135deg, rgba(102, 126, 234, 0.30), rgba(118, 75, 162, 0.30));
+}
+.wizard-suggested-hint {
+  color: #888;
+  font-size: 0.75em;
+  margin-top: 6px;
+}
+.wizard-suggested-err {
+  color: #b00020;
+  font-size: 0.9em;
+}
 </style>
 
 
