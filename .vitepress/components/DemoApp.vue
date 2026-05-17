@@ -545,6 +545,7 @@ go</pre>
             <button :class="['picker-tab', pickerMode === 'selector-single' && 'active']" @click="setPickerMode('selector-single')">🎯 Single</button>
             <button :class="['picker-tab', pickerMode === 'selector-list'   && 'active']" @click="setPickerMode('selector-list')">📋 List</button>
             <button :class="['picker-tab', pickerMode === 'action-record'   && 'active']" @click="setPickerMode('action-record')">⏺ Record actions</button>
+            <button :class="['picker-tab', pickerMode === 'ai-magic'        && 'active']" @click="setPickerMode('ai-magic')">🪄 AI Magic</button>
           </div>
           <button class="btn btn-ghost btn-sm" @click="closePicker">✕ Close</button>
         </div>
@@ -585,6 +586,75 @@ go</pre>
               {{ pickerTargetArgName ? `Use this selector for "${pickerTargetArgName}"` : 'Open this from an arg to apply' }}
             </button>
             <button class="btn btn-ghost btn-sm" @click="pickerSelected = null">Clear</button>
+          </div>
+        </div>
+
+        <!-- AI Magic panel -->
+        <div v-if="pickerMode === 'ai-magic'" class="picker-result picker-ai">
+          <div class="picker-ai-row">
+            <select v-model="aiMode" class="text-input picker-ai-mode">
+              <option value="selector">Find selector</option>
+              <option value="actions">Build action sequence</option>
+            </select>
+            <input
+              v-model="aiIntent"
+              type="text"
+              class="text-input"
+              :placeholder="aiMode === 'actions' ? 'e.g. search for laptops and click submit' : 'e.g. the next-page link at the bottom of the catalogue'"
+              @keyup.enter="runAiMagic"
+            />
+            <button class="btn btn-primary btn-sm" :disabled="aiLoading || !pickerLoadedUrl" @click="runAiMagic">
+              <span v-if="aiLoading" class="loading-spinner"></span>
+              {{ aiLoading ? 'Thinking…' : '🪄 Suggest' }}
+            </button>
+          </div>
+          <div v-if="aiError" class="picker-ai-err">{{ aiError }}</div>
+
+          <!-- Algorithmic candidates (yellow) -->
+          <div v-if="aiAlgoResults.length" class="picker-ai-section">
+            <strong class="picker-ai-tag algo">⚡ Algo</strong>
+            <div v-for="(c, i) in aiAlgoResults" :key="'a'+i" class="picker-ai-card">
+              <div class="picker-ai-card-top">
+                <code>{{ c.selector || (c.type + (c.selector ? '("'+c.selector+'")' : '')) }}</code>
+                <span class="picker-ai-conf">conf {{ Math.round((c.confidence || 0) * 100) }}%</span>
+              </div>
+              <div class="picker-ai-why">{{ c.why || '' }}</div>
+              <button v-if="aiMode === 'selector' && c.selector" class="btn btn-secondary btn-xs" @click="applyAiCandidate(c)">
+                Use this
+              </button>
+            </div>
+          </div>
+
+          <!-- LLM candidates (green) -->
+          <div v-if="aiLlmResults.length" class="picker-ai-section">
+            <strong class="picker-ai-tag llm">🔥 AI refined</strong>
+            <div v-for="(c, i) in aiLlmResults" :key="'l'+i" class="picker-ai-card">
+              <div class="picker-ai-card-top">
+                <code>{{ c.selector || (c.type + (c.selector ? '("'+c.selector+'")' : '')) }}</code>
+                <span class="picker-ai-conf">conf {{ Math.round((c.confidence || 0) * 100) }}%</span>
+              </div>
+              <div class="picker-ai-why">{{ c.why || '' }}</div>
+              <button v-if="aiMode === 'selector' && c.selector" class="btn btn-primary btn-xs" @click="applyAiCandidate(c)">
+                Use this
+              </button>
+            </div>
+            <button v-if="aiMode === 'actions'" class="btn btn-primary btn-sm" style="margin-top:8px;" @click="applyAiCandidate(aiLlmResults[0])">
+              Copy action YAML
+            </button>
+          </div>
+
+          <!-- LCA refine from a click -->
+          <div v-if="aiPickedRefined" class="picker-ai-section picker-ai-refine">
+            <strong class="picker-ai-tag refine">💎 Refined from your click</strong>
+            <div class="picker-ai-card">
+              <code>{{ aiPickedRefined.selector }}</code>
+              <div class="picker-ai-why">{{ aiPickedRefined.why }}</div>
+              <button class="btn btn-primary btn-xs" @click="applyRefinedFromHighlight">Use refined</button>
+            </div>
+          </div>
+
+          <div v-if="!aiAlgoResults.length && !aiLlmResults.length && !aiLoading && !aiError" class="picker-empty-small">
+            Load a URL above, then describe what you want and press Suggest. Algo guesses appear instantly (yellow), AI refines (green). Click in the iframe to refine further (blue).
           </div>
         </div>
 
@@ -1777,11 +1847,23 @@ const wizSuggestedSet = computed(() => new Set(wizSuggested.value))
 const pickerOpen          = ref(false)
 const pickerUrl           = ref('https://books.toscrape.com/')
 const pickerLoadedUrl     = ref(null)
-const pickerMode          = ref('selector-single')  // selector-single | selector-list | action-record
-const pickerSelected      = ref(null)               // { selector, matches, sampleText, sampleHtml }
+const pickerMode          = ref('selector-single')  // selector-single | selector-list | action-record | ai-magic
+const pickerSelected      = ref(null)               // { selector, matches, sampleText, sampleHtml, refinedFromHighlight? }
 const pickerActions       = ref([])                 // accumulated action list during recording
 const pickerTargetStageIdx = ref(null)              // wizPipeline index that owns the target arg
 const pickerTargetArgName  = ref(null)              // arg.name in that stage's args
+
+// AI Magic state — intent-driven inference of selectors or actions.
+// The algo result arrives synchronously (~ms); the LLM result fills in
+// after 1-3s and overlays a second-tier highlight in the iframe.
+const aiIntent       = ref('')
+const aiMode         = ref('selector')   // 'selector' | 'actions'
+const aiLoading      = ref(false)
+const aiError        = ref(null)
+const aiAlgoResults  = ref([])           // [{selector|type, confidence, why}]
+const aiLlmResults   = ref([])           // same shape, second tier
+const aiPickedRefined = ref(null)        // LCA refinement from picker click
+const aiRawLlm       = ref(null)
 const pickerProxySrc       = computed(() => {
   if (!pickerLoadedUrl.value) return ''
   return `${API_BASE_URL}/api/webrobot/api/demo/wizard/proxy?url=${encodeURIComponent(pickerLoadedUrl.value)}`
@@ -1815,11 +1897,21 @@ function loadPickerUrl() {
 }
 function setPickerMode(m) {
   pickerMode.value = m
-  // Tell the injected picker.js to switch modes (it listens for this).
+  // Translate the parent's UI mode to one the iframe picker understands.
+  // AI Magic uses selector-single under the hood (so click → LCA-refine works).
+  const ifrMode = m === 'ai-magic' ? 'selector-single' : m
   const ifr = document.getElementById('wr-picker-iframe')
-  try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-mode', mode: m }, '*') } catch (_) {}
+  try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-mode', mode: ifrMode }, '*') } catch (_) {}
   if (m === 'action-record') pickerSelected.value = null
   if (m !== 'action-record')  pickerActions.value = []
+  if (m !== 'ai-magic') {
+    // Drop AI Magic state + highlights when switching away.
+    clearHighlightInIframe()
+    aiAlgoResults.value = []
+    aiLlmResults.value = []
+    aiPickedRefined.value = null
+    aiError.value = null
+  }
 }
 function stopActionRecording() {
   const ifr = document.getElementById('wr-picker-iframe')
@@ -1878,15 +1970,141 @@ function onPickerMessage(ev) {
       sampleHtml: d.sampleHtml,
       mode: d.mode,
     }
+    // LCA refinement: when there are AI Magic highlights up, the
+    // picker computes the longest-common-ancestor selector between the
+    // first highlight and the user's click. We expose this as a 3rd-tier
+    // blue "refined" suggestion the user can apply with one button.
+    aiPickedRefined.value = d.refinedFromHighlight || null
   } else if (d.type === 'webrobot-pick-actions') {
     pickerActions.value = Array.isArray(d.actions) ? d.actions : []
   } else if (d.type === 'webrobot-picker-navigation') {
-    // The proxied page is reloading (action mode). Preserve the actions
-    // accumulated so far — the parent's pickerActions ref already has
-    // them via the last message. Nothing else to do here.
+    // Page is reloading in action mode — buffer already received.
   } else if (d.type === 'webrobot-picker-cancel') {
     closePicker()
   }
+}
+
+// Push a {selectors → colored highlights} layer set to picker.js.
+function sendHighlightToIframe(layers) {
+  const ifr = document.getElementById('wr-picker-iframe')
+  try {
+    ifr && ifr.contentWindow && ifr.contentWindow.postMessage({
+      type: 'webrobot-highlight',
+      layers: layers,
+    }, '*')
+  } catch (_) {}
+}
+function clearHighlightInIframe() {
+  const ifr = document.getElementById('wr-picker-iframe')
+  try {
+    ifr && ifr.contentWindow && ifr.contentWindow.postMessage({
+      type: 'webrobot-highlight-clear',
+    }, '*')
+  } catch (_) {}
+}
+
+// Drives both `infer-selector` and `infer-actions`. Algo result is the
+// immediate fast-path (no LLM); the LLM call is awaited in the same
+// fetch (server-side) but the layered highlights make the difference
+// visible to the user (yellow first if we ever split — for v1 we just
+// paint both together when the response lands).
+async function runAiMagic() {
+  if (!pickerLoadedUrl.value) {
+    aiError.value = 'Load a target URL first.'
+    return
+  }
+  const intent = aiIntent.value.trim()
+  if (!intent) {
+    aiError.value = 'Describe what to find (intent textarea).'
+    return
+  }
+  aiLoading.value = true
+  aiError.value = null
+  aiAlgoResults.value = []
+  aiLlmResults.value = []
+  aiPickedRefined.value = null
+  clearHighlightInIframe()
+
+  const path = aiMode.value === 'actions' ? 'infer-actions' : 'infer-selector'
+  try {
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/${path}`, {
+      method: 'POST',
+      body: JSON.stringify({ url: pickerLoadedUrl.value, intent }),
+    })
+    const j = await r.json()
+    if (!r.ok || j.error) throw new Error(j.error || `${path} failed`)
+
+    aiAlgoResults.value = j.algo || []
+    aiLlmResults.value  = (aiMode.value === 'actions' ? (j.llm || []) : (j.llm || []))
+    aiRawLlm.value      = j.raw_llm || null
+
+    // Highlight algo (yellow) + LLM (green). Only selector mode draws
+    // overlays on the page — action sequences have no single "selector
+    // to highlight", we just show the list in the side panel.
+    if (aiMode.value === 'selector') {
+      const layers = []
+      for (const c of aiAlgoResults.value) {
+        if (c.selector) layers.push({ selector: c.selector, color: '#fbbf24', label: 'algo' })
+      }
+      for (const c of aiLlmResults.value) {
+        if (c.selector) layers.push({ selector: c.selector, color: '#43a047', label: 'AI' })
+      }
+      sendHighlightToIframe(layers)
+    } else {
+      // For actions, highlight the FIRST action's selector if any (gives
+      // the user a visual anchor on where the sequence starts).
+      const first = (aiLlmResults.value[0] || aiAlgoResults.value[0])
+      if (first && first.selector) {
+        sendHighlightToIframe([{ selector: first.selector, color: '#43a047', label: 'first action' }])
+      }
+    }
+  } catch (e) {
+    aiError.value = 'Error: ' + (e.message || String(e))
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+function applyAiCandidate(c) {
+  if (!c) return
+  if (aiMode.value === 'selector' && c.selector) {
+    if (pickerTargetStageIdx.value != null && pickerTargetArgName.value) {
+      updateStageArg(pickerTargetStageIdx.value, pickerTargetArgName.value, c.selector)
+      closePicker()
+    } else {
+      // Picker opened without a target — copy to clipboard as a fallback.
+      navigator.clipboard.writeText(c.selector).catch(() => {})
+    }
+  } else if (aiMode.value === 'actions') {
+    // Apply the full action sequence as a YAML trace snippet copied to
+    // clipboard — the user pastes it into the relevant trace arg.
+    const yaml = actionsToYaml(aiLlmResults.value.length ? aiLlmResults.value : aiAlgoResults.value)
+    navigator.clipboard.writeText(yaml).catch(() => {})
+  }
+}
+
+function applyRefinedFromHighlight() {
+  if (!aiPickedRefined.value || !aiPickedRefined.value.selector) return
+  if (pickerTargetStageIdx.value != null && pickerTargetArgName.value) {
+    updateStageArg(pickerTargetStageIdx.value, pickerTargetArgName.value, aiPickedRefined.value.selector)
+    closePicker()
+  } else {
+    navigator.clipboard.writeText(aiPickedRefined.value.selector).catch(() => {})
+  }
+}
+
+function actionsToYaml(actions) {
+  if (!actions || !actions.length) return ''
+  const lines = ['trace:']
+  for (const a of actions) {
+    const sel = (a.selector || '').replace(/"/g, '\\"')
+    const txt = (a.text     || '').replace(/"/g, '\\"')
+    if (a.type === 'Click' && sel) lines.push(`  - Click("${sel}")`)
+    else if (a.type === 'Type' && sel) lines.push(`  - Type("${sel}", "${txt}")`)
+    else if (a.type === 'Wait') lines.push(`  - Wait(${a.ms || 1000})`)
+    else if (a.type === 'Scroll') lines.push(`  - Scroll(${a.y || 0})`)
+  }
+  return lines.join('\n')
 }
 
 const wizPluginIds = computed(() =>
@@ -4121,6 +4339,77 @@ if (typeof window !== 'undefined') {
   font-size: 12px;
   margin: 6px 0;
   white-space: pre-wrap;
+}
+
+/* ─── AI Magic panel ────────────────────────────────────────── */
+.picker-ai {
+  max-height: 320px;
+}
+.picker-ai-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.picker-ai-mode { flex: 0 0 180px; }
+.picker-ai-row .text-input:not(.picker-ai-mode) { flex: 1; min-width: 200px; }
+.picker-ai-err {
+  color: #b00020;
+  font-size: 0.85em;
+  margin-bottom: 6px;
+}
+.picker-ai-section {
+  margin-top: 8px;
+  padding: 8px;
+  border-radius: 6px;
+  background: #fafbfc;
+  border: 1px solid #eee;
+}
+.picker-ai-tag {
+  display: inline-block;
+  font-size: 0.75em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-bottom: 6px;
+  font-weight: 700;
+}
+.picker-ai-tag.algo   { background: #fef3c7; color: #92400e; }
+.picker-ai-tag.llm    { background: #d1fae5; color: #065f46; }
+.picker-ai-tag.refine { background: #dbeafe; color: #1e40af; }
+.picker-ai-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 6px 8px;
+  margin: 4px 0;
+}
+.picker-ai-card-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.picker-ai-card code {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.78em;
+}
+.picker-ai-conf {
+  color: #888;
+  font-size: 0.75em;
+}
+.picker-ai-why {
+  color: #555;
+  font-size: 0.78em;
+  margin-bottom: 4px;
+}
+.picker-ai-refine {
+  background: #eff6ff;
+  border-color: #bfdbfe;
 }
 </style>
 
