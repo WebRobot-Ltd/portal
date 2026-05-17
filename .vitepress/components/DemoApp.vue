@@ -481,13 +481,21 @@ go</pre>
                     <strong>{{ a.name }}</strong><span v-if="a.required" class="wizard-arg-required" title="required">*</span>
                     <span class="wizard-arg-type">({{ a.type || 'any' }})</span>
                   </label>
-                  <input
-                    type="text"
-                    :value="row.args[a.name] != null ? row.args[a.name] : ''"
-                    :placeholder="(a.description || '').slice(0, 80)"
-                    :class="['text-input', 'wizard-arg-input', a.required && (row.args[a.name] == null || String(row.args[a.name]).trim() === '') ? 'wizard-arg-missing' : '']"
-                    @input="updateStageArg(idx, a.name, $event.target.value)"
-                  />
+                  <div class="wizard-arg-input-row">
+                    <input
+                      type="text"
+                      :value="row.args[a.name] != null ? row.args[a.name] : ''"
+                      :placeholder="(a.description || '').slice(0, 80)"
+                      :class="['text-input', 'wizard-arg-input', a.required && (row.args[a.name] == null || String(row.args[a.name]).trim() === '') ? 'wizard-arg-missing' : '']"
+                      @input="updateStageArg(idx, a.name, $event.target.value)"
+                    />
+                    <button
+                      v-if="isSelectorArg(a)"
+                      class="btn btn-secondary btn-xs wizard-pick-btn"
+                      title="Open the page in the picker and click an element to get a CSS selector"
+                      @click="openPicker(idx, a.name, 'selector-single')"
+                    >🎯 Pick</button>
+                  </div>
                 </div>
                 <div v-if="suggestionsFor(row.stage).length" class="wizard-chips">
                   <span class="wizard-chips-label">Try next:</span>
@@ -519,10 +527,79 @@ go</pre>
         <div class="wizard-actions">
           <button class="btn btn-primary" :disabled="!wizValid" @click="wizardSaveAndRun">Save &amp; Run</button>
           <button class="btn btn-secondary" :disabled="!wizValid" @click="wizardSaveAsDraft" title="Save without running — appears in the selector above">Save (draft)</button>
+          <button class="btn btn-secondary" @click="openPicker(null, null, 'action-record')" title="Record a sequence of click/type/scroll actions on a target page (for fetch/visit trace args)">⏺ Record actions</button>
           <button class="btn btn-ghost" @click="wizardReset">Reset</button>
           <div v-if="wizStatus.kind" :class="['wizard-status', 'wizard-status-' + wizStatus.kind]">
             {{ wizStatus.text }}
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── Picker modal (selector + action recorder) ───────── -->
+    <div v-if="pickerOpen" class="picker-modal-backdrop" @click.self="closePicker">
+      <div class="picker-modal">
+        <div class="picker-modal-header">
+          <strong>🎯 Page picker</strong>
+          <div class="picker-mode-tabs">
+            <button :class="['picker-tab', pickerMode === 'selector-single' && 'active']" @click="setPickerMode('selector-single')">🎯 Single</button>
+            <button :class="['picker-tab', pickerMode === 'selector-list'   && 'active']" @click="setPickerMode('selector-list')">📋 List</button>
+            <button :class="['picker-tab', pickerMode === 'action-record'   && 'active']" @click="setPickerMode('action-record')">⏺ Record actions</button>
+          </div>
+          <button class="btn btn-ghost btn-sm" @click="closePicker">✕ Close</button>
+        </div>
+
+        <div class="picker-modal-url">
+          <input
+            v-model="pickerUrl"
+            type="text"
+            class="text-input"
+            placeholder="https://target-site.example/page"
+            @keyup.enter="loadPickerUrl"
+          />
+          <button class="btn btn-primary btn-sm" @click="loadPickerUrl">Load page</button>
+        </div>
+
+        <div class="picker-modal-body">
+          <div v-if="!pickerLoadedUrl" class="picker-empty">
+            Enter a URL above and click Load. The page renders inside a sandboxed iframe via our server-side proxy.
+          </div>
+          <iframe
+            v-else
+            id="wr-picker-iframe"
+            :src="pickerProxySrc"
+            sandbox="allow-same-origin allow-scripts allow-forms"
+            class="picker-iframe"
+          ></iframe>
+        </div>
+
+        <!-- Selector result panel -->
+        <div v-if="pickerSelected && pickerMode !== 'action-record'" class="picker-result">
+          <div class="picker-result-row">
+            <code class="picker-selector">{{ pickerSelected.selector }}</code>
+            <span class="picker-matches">{{ pickerSelected.matches }} match{{ pickerSelected.matches === 1 ? '' : 'es' }}</span>
+          </div>
+          <div v-if="pickerSelected.sampleText" class="picker-sample">{{ pickerSelected.sampleText }}</div>
+          <div class="picker-actions">
+            <button class="btn btn-primary btn-sm" :disabled="!pickerTargetArgName" @click="applyPickedSelector">
+              {{ pickerTargetArgName ? `Use this selector for "${pickerTargetArgName}"` : 'Open this from an arg to apply' }}
+            </button>
+            <button class="btn btn-ghost btn-sm" @click="pickerSelected = null">Clear</button>
+          </div>
+        </div>
+
+        <!-- Action recorder result panel -->
+        <div v-if="pickerMode === 'action-record'" class="picker-result">
+          <div class="picker-result-row">
+            <strong>Recorded actions: {{ pickerActions.length }}</strong>
+            <button class="btn btn-secondary btn-sm" @click="stopActionRecording">Stop &amp; collect</button>
+          </div>
+          <pre v-if="pickerActionsYaml" class="picker-actions-yaml">{{ pickerActionsYaml }}</pre>
+          <div v-if="pickerActionsYaml" class="picker-actions">
+            <button class="btn btn-primary btn-sm" @click="copyPickerActions">Copy YAML</button>
+            <button class="btn btn-ghost btn-sm" @click="pickerActions = []">Clear</button>
+          </div>
+          <div v-else class="picker-empty-small">Interact with the page above (clicks, typing, scroll), then click "Stop &amp; collect" or press ESC inside the page.</div>
         </div>
       </div>
     </div>
@@ -963,10 +1040,14 @@ onMounted(async () => {
     executionState.value = restored
     startExecPolling()
   }
+
+  // Picker iframe postMessage bridge.
+  window.addEventListener('message', onPickerMessage)
 })
 
 onBeforeUnmount(() => {
   stopExecPolling()
+  window.removeEventListener('message', onPickerMessage)
 })
 
 // Computed properties
@@ -1683,6 +1764,130 @@ const wizSuggested        = ref([])      // ordered array of stage_names
 const wizSuggesterLoading = ref(false)
 const wizSuggesterError   = ref(null)
 const wizSuggestedSet = computed(() => new Set(wizSuggested.value))
+
+// ─── Selector / action picker (proxied iframe + injected JS) ───────
+// Two distinct flows funnel into the same modal:
+//   • SELECTOR pick : click an arg's 🎯 button → modal opens → user
+//     clicks an element in the proxied page → the resulting CSS
+//     selector auto-fills the arg input that opened the modal.
+//   • ACTION RECORD : click "⏺ Record actions" → modal opens in
+//     action mode → user interacts normally → ESC (or Stop) sends the
+//     recorded action list; we render it as YAML the user can copy
+//     into a fetch/visit trace argument.
+const pickerOpen          = ref(false)
+const pickerUrl           = ref('https://books.toscrape.com/')
+const pickerLoadedUrl     = ref(null)
+const pickerMode          = ref('selector-single')  // selector-single | selector-list | action-record
+const pickerSelected      = ref(null)               // { selector, matches, sampleText, sampleHtml }
+const pickerActions       = ref([])                 // accumulated action list during recording
+const pickerTargetStageIdx = ref(null)              // wizPipeline index that owns the target arg
+const pickerTargetArgName  = ref(null)              // arg.name in that stage's args
+const pickerProxySrc       = computed(() => {
+  if (!pickerLoadedUrl.value) return ''
+  return `${API_BASE_URL}/api/webrobot/api/demo/wizard/proxy?url=${encodeURIComponent(pickerLoadedUrl.value)}`
+})
+
+function openPicker(stageIdx, argName, mode) {
+  pickerTargetStageIdx.value = stageIdx != null ? stageIdx : null
+  pickerTargetArgName.value  = argName || null
+  pickerMode.value = mode || 'selector-single'
+  pickerSelected.value = null
+  pickerActions.value  = []
+  pickerOpen.value = true
+}
+function closePicker() {
+  pickerOpen.value = false
+  pickerLoadedUrl.value = null
+  pickerSelected.value = null
+  pickerActions.value  = []
+  pickerTargetStageIdx.value = null
+  pickerTargetArgName.value  = null
+}
+function loadPickerUrl() {
+  const u = (pickerUrl.value || '').trim()
+  if (!u || !(u.startsWith('http://') || u.startsWith('https://'))) {
+    alert('Provide an http(s) URL.')
+    return
+  }
+  pickerSelected.value = null
+  pickerActions.value  = []
+  pickerLoadedUrl.value = u
+}
+function setPickerMode(m) {
+  pickerMode.value = m
+  // Tell the injected picker.js to switch modes (it listens for this).
+  const ifr = document.getElementById('wr-picker-iframe')
+  try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-mode', mode: m }, '*') } catch (_) {}
+  if (m === 'action-record') pickerSelected.value = null
+  if (m !== 'action-record')  pickerActions.value = []
+}
+function stopActionRecording() {
+  const ifr = document.getElementById('wr-picker-iframe')
+  try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-stop-recording' }, '*') } catch (_) {}
+}
+
+function applyPickedSelector() {
+  if (!pickerSelected.value || pickerTargetStageIdx.value == null || !pickerTargetArgName.value) {
+    closePicker(); return
+  }
+  updateStageArg(pickerTargetStageIdx.value, pickerTargetArgName.value, pickerSelected.value.selector)
+  closePicker()
+}
+
+// Render recorded actions as a YAML snippet the user can paste into a
+// fetch/visit `trace` arg. Format mirrors what NativeFetchStage's
+// trace parser accepts.
+const pickerActionsYaml = computed(() => {
+  if (!pickerActions.value.length) return ''
+  const lines = ['trace:']
+  for (const a of pickerActions.value) {
+    if (a.type === 'Click' && a.selector) {
+      lines.push(`  - Click("${a.selector}")`)
+    } else if (a.type === 'Type' && a.selector) {
+      const safe = String(a.text || '').replace(/"/g, '\\"')
+      lines.push(`  - Type("${a.selector}", "${safe}")`)
+    } else if (a.type === 'Scroll') {
+      lines.push(`  - Scroll(${a.y || 0})`)
+    }
+  }
+  return lines.join('\n')
+})
+function copyPickerActions() {
+  navigator.clipboard.writeText(pickerActionsYaml.value).then(
+    () => { /* silent */ },
+    () => alert('clipboard write failed'),
+  )
+}
+
+// Heuristic: is this arg a CSS selector? (drives whether to show the
+// 🎯 button next to it).
+function isSelectorArg(arg) {
+  if (!arg || !arg.name) return false
+  return /selector$/i.test(arg.name) || arg.name.toLowerCase() === 'selector'
+}
+
+// postMessage listener for the proxied iframe.
+function onPickerMessage(ev) {
+  const d = ev.data
+  if (!d || typeof d !== 'object') return
+  if (d.type === 'webrobot-pick-selector') {
+    pickerSelected.value = {
+      selector: d.selector,
+      matches: d.matches,
+      sampleText: d.sampleText,
+      sampleHtml: d.sampleHtml,
+      mode: d.mode,
+    }
+  } else if (d.type === 'webrobot-pick-actions') {
+    pickerActions.value = Array.isArray(d.actions) ? d.actions : []
+  } else if (d.type === 'webrobot-picker-navigation') {
+    // The proxied page is reloading (action mode). Preserve the actions
+    // accumulated so far — the parent's pickerActions ref already has
+    // them via the last message. Nothing else to do here.
+  } else if (d.type === 'webrobot-picker-cancel') {
+    closePicker()
+  }
+}
 
 const wizPluginIds = computed(() =>
   Array.from(new Set(wizCatalog.value.map(s => s.plugin_id).filter(Boolean))).sort()
@@ -3779,6 +3984,143 @@ if (typeof window !== 'undefined') {
 .wizard-suggested-err {
   color: #b00020;
   font-size: 0.9em;
+}
+
+/* ─── Picker modal (selector + action recorder) ────────────── */
+.wizard-arg-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.wizard-arg-input-row .wizard-arg-input { flex: 1; }
+.wizard-pick-btn { white-space: nowrap; }
+
+.picker-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.picker-modal {
+  background: white;
+  border-radius: 12px;
+  width: min(1100px, 100%);
+  height: min(90vh, 800px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+.picker-modal-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #fafbfc;
+  flex-wrap: wrap;
+}
+.picker-mode-tabs {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  justify-content: center;
+}
+.picker-tab {
+  background: #eee;
+  border: 1px solid #d0d0d0;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 0.85em;
+  cursor: pointer;
+}
+.picker-tab.active {
+  background: linear-gradient(135deg, #667eea, #764ba2);
+  color: white;
+  border-color: #667eea;
+}
+.picker-modal-url {
+  display: flex;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #eee;
+}
+.picker-modal-url .text-input { flex: 1; }
+.picker-modal-body {
+  flex: 1;
+  position: relative;
+  background: #f5f5f5;
+  min-height: 0;
+}
+.picker-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+.picker-empty {
+  padding: 32px;
+  text-align: center;
+  color: #888;
+  font-style: italic;
+}
+.picker-empty-small {
+  padding: 8px 14px;
+  color: #888;
+  font-size: 0.85em;
+}
+.picker-result {
+  border-top: 1px solid #e0e0e0;
+  padding: 10px 14px;
+  background: white;
+  max-height: 200px;
+  overflow-y: auto;
+}
+.picker-result-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.picker-selector {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-family: 'Menlo','Monaco','Courier New',monospace;
+  font-size: 0.85em;
+}
+.picker-matches {
+  color: #555;
+  font-size: 0.85em;
+}
+.picker-sample {
+  color: #444;
+  font-size: 0.85em;
+  margin-bottom: 6px;
+  font-style: italic;
+}
+.picker-actions {
+  display: flex;
+  gap: 8px;
+}
+.picker-actions-yaml {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 10px;
+  border-radius: 6px;
+  max-height: 140px;
+  overflow-y: auto;
+  font-family: 'Menlo','Monaco','Courier New',monospace;
+  font-size: 12px;
+  margin: 6px 0;
+  white-space: pre-wrap;
 }
 </style>
 
