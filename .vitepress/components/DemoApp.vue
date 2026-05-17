@@ -117,14 +117,21 @@
                 <div class="yaml-section-header">
                   <h4>Pipeline YAML Configuration</h4>
                   <div class="yaml-section-actions">
-                    <button 
+                    <button
+                      class="btn btn-secondary btn-sm"
+                      @click="cloneToWizard"
+                      title="Load this pipeline into the wizard editor below to customize and re-save"
+                    >
+                      🛠️ Edit in wizard
+                    </button>
+                    <button
                       class="btn btn-secondary btn-sm"
                       @click="copyPipelineYamlToClipboard"
                       title="Copy YAML to clipboard"
                     >
                       📋 Copy YAML
                     </button>
-                    <button 
+                    <button
                       class="btn btn-secondary btn-sm"
                       @click="showPipelineYaml = !showPipelineYaml"
                     >
@@ -400,7 +407,18 @@ go</pre>
           <div class="wizard-pane">
             <h4>🧩 Pipeline</h4>
             <div class="wizard-editor">
-              <div v-if="wizPipeline.length === 0" class="wizard-empty">empty — click a stage in the catalog to add it.</div>
+              <div v-if="wizPipeline.length === 0" class="wizard-empty-state">
+                <div>empty — click a stage in the catalog to add it.</div>
+                <div v-if="starterSuggestions().length" class="wizard-chips">
+                  <span class="wizard-chips-label">Try a starting stage:</span>
+                  <button
+                    v-for="n in starterSuggestions()"
+                    :key="n"
+                    class="wizard-chip"
+                    @click="addStageToPipeline(n)"
+                  >{{ n }}</button>
+                </div>
+              </div>
               <div v-for="(row, idx) in wizPipeline" :key="idx" class="wizard-editor-row">
                 <div class="wizard-editor-row-head">
                   <strong>{{ idx + 1 }}. {{ row.stage }}</strong>
@@ -419,16 +437,25 @@ go</pre>
                   class="wizard-editor-arg"
                 >
                   <label>
-                    <strong>{{ a.name }}</strong><span v-if="a.required"> *</span>
+                    <strong>{{ a.name }}</strong><span v-if="a.required" class="wizard-arg-required" title="required">*</span>
                     <span class="wizard-arg-type">({{ a.type || 'any' }})</span>
                   </label>
                   <input
                     type="text"
                     :value="row.args[a.name] != null ? row.args[a.name] : ''"
                     :placeholder="(a.description || '').slice(0, 80)"
-                    class="text-input wizard-arg-input"
+                    :class="['text-input', 'wizard-arg-input', a.required && (row.args[a.name] == null || String(row.args[a.name]).trim() === '') ? 'wizard-arg-missing' : '']"
                     @input="updateStageArg(idx, a.name, $event.target.value)"
                   />
+                </div>
+                <div v-if="suggestionsFor(row.stage).length" class="wizard-chips">
+                  <span class="wizard-chips-label">Try next:</span>
+                  <button
+                    v-for="n in suggestionsFor(row.stage)"
+                    :key="n"
+                    class="wizard-chip"
+                    @click="addStageToPipeline(n)"
+                  >{{ n }}</button>
                 </div>
               </div>
             </div>
@@ -438,9 +465,20 @@ go</pre>
         <h4>📄 YAML preview</h4>
         <pre class="wizard-yaml">{{ wizYamlPreview }}</pre>
 
+        <!-- Required-arg / shape validation. The Save buttons stay
+             disabled until this is empty. Less rage at Spark error
+             messages when an arg is missing. -->
+        <div v-if="wizValidationErrors.length" class="wizard-validation">
+          <strong>Fix before saving:</strong>
+          <ul>
+            <li v-for="(err, i) in wizValidationErrors" :key="i">{{ err }}</li>
+          </ul>
+        </div>
+
         <div class="wizard-actions">
-          <button class="btn btn-primary" @click="wizardSaveAndRun">Save &amp; Run</button>
-          <button class="btn btn-secondary" @click="wizardReset">Reset</button>
+          <button class="btn btn-primary" :disabled="!wizValid" @click="wizardSaveAndRun">Save &amp; Run</button>
+          <button class="btn btn-secondary" :disabled="!wizValid" @click="wizardSaveAsDraft" title="Save without running — appears in the selector above">Save (draft)</button>
+          <button class="btn btn-ghost" @click="wizardReset">Reset</button>
           <div v-if="wizStatus.kind" :class="['wizard-status', 'wizard-status-' + wizStatus.kind]">
             {{ wizStatus.text }}
           </div>
@@ -1601,6 +1639,39 @@ const wizStatus        = ref({ kind: null, text: '' })
 const wizPluginIds = computed(() =>
   Array.from(new Set(wizCatalog.value.map(s => s.plugin_id).filter(Boolean))).sort()
 )
+
+// Hand-curated suggestion graph. NOT an LLM call — just a small static
+// map used to render "Try next" chips under each stage in the editor.
+// Keys are stage names; values are catalog stage names that typically
+// come next. Missing keys = no suggestions (user picks freely).
+const STAGE_SUGGESTIONS = {
+  'fetch':                  ['intelligentExplore', 'intelligentJoin', 'iextract', 'flatSelect', 'extract'],
+  'visit':                  ['intelligentExplore', 'intelligentJoin', 'visitExplore', 'visitJoin', 'iextract', 'flatSelect'],
+  'wget':                   ['intelligentWgetExplore', 'intelligentWgetJoin', 'wgetExplore', 'wgetJoin', 'iextract', 'extract'],
+  'load_csv':               ['wget', 'visit', 'iextract'],
+  'intelligentExplore':     ['intelligentJoin', 'iextract', 'extract'],
+  'intelligentWgetExplore': ['intelligentWgetJoin', 'iextract', 'extract'],
+  'visitExplore':           ['intelligentJoin', 'visitJoin', 'iextract', 'extract'],
+  'wgetExplore':            ['intelligentJoin', 'wgetJoin', 'iextract', 'extract'],
+  'intelligentJoin':        ['iextract', 'extract'],
+  'intelligentWgetJoin':    ['iextract', 'extract'],
+  'visitJoin':              ['iextract', 'extract'],
+  'wgetJoin':               ['iextract', 'extract'],
+  'iextract':               ['extract', 'save_csv'],
+  'flatSelect':             ['extract', 'save_csv'],
+}
+// Starting points shown when the editor is empty.
+const STAGE_STARTERS = ['fetch', 'visit', 'wget', 'load_csv']
+
+function suggestionsFor(stageName) {
+  // Only return suggestions that actually exist in the live catalog —
+  // a hand-curated list shouldn't show entries the user can't click.
+  const want = STAGE_SUGGESTIONS[stageName] || []
+  return want.filter(n => wizCatalog.value.some(s => s.stage_name === n))
+}
+function starterSuggestions() {
+  return STAGE_STARTERS.filter(n => wizCatalog.value.some(s => s.stage_name === n))
+}
 const wizFilteredCatalog = computed(() => {
   const plugin = wizPluginFilter.value
   const q = wizSearch.value.trim().toLowerCase()
@@ -1677,33 +1748,109 @@ async function loadStageCatalog() {
   }
 }
 
-async function wizardSaveAndRun() {
-  const name = wizPipelineName.value.trim()
-  if (!name) { wizStatus.value = { kind: 'error', text: 'Please provide a pipeline name.' }; return }
-  if (wizPipeline.value.length === 0) {
-    wizStatus.value = { kind: 'error', text: 'Add at least one stage before running.' }; return
+// Client-side validation. Reasons: surface missing required args before
+// hitting Spark (where the error message is opaque), and gate the Save
+// & Run button. Wizard never tries to "guess" defaults — if the catalog
+// says required, the user must fill it.
+const wizValidationErrors = computed(() => {
+  const errs = []
+  if (wizPipelineName.value.trim() === '') errs.push('Pipeline name is required.')
+  if (wizPipeline.value.length === 0) errs.push('Add at least one stage.')
+  for (let i = 0; i < wizPipeline.value.length; i++) {
+    const row = wizPipeline.value[i]
+    const spec = findStageSpec(row.stage)
+    if (!spec) {
+      errs.push(`Stage #${i + 1} "${row.stage}" is not in the live catalog.`)
+      continue
+    }
+    for (const a of (spec.arg_schema || [])) {
+      if (!a.required) continue
+      const v = row.args[a.name]
+      if (v == null || String(v).trim() === '') {
+        errs.push(`Stage #${i + 1} "${row.stage}": required arg "${a.name}" is empty.`)
+      }
+    }
   }
-  wizStatus.value = { kind: 'info', text: 'Saving + submitting…' }
+  return errs
+})
+const wizValid = computed(() => wizValidationErrors.value.length === 0)
+
+async function wizardSubmit(execute) {
+  if (!wizValid.value) {
+    // Keep the existing red status as well so it's visible without
+    // scrolling to the validation panel.
+    wizStatus.value = { kind: 'error', text: 'Fix the validation errors above first.' }
+    return
+  }
+  const name = wizPipelineName.value.trim()
+  wizStatus.value = { kind: 'info', text: execute ? 'Saving + submitting…' : 'Saving as draft…' }
   try {
     const yamlText = wizYamlPreview.value
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/save-generated-pipeline`, {
       method: 'POST',
-      body: JSON.stringify({ pipeline_name: name, pipeline_yaml: yamlText, execute: true })
+      body: JSON.stringify({ pipeline_name: name, pipeline_yaml: yamlText, execute })
     })
     const j = await r.json()
     if (!r.ok) throw new Error(j.error || 'Save failed')
-    const execId = j.execution && j.execution.execution_id
-    const dsId   = j.execution && j.execution.output_dataset_id
-    if (execId) attachToExecution(execId, name, dsId)
-    wizStatus.value = {
-      kind: 'success',
-      text: 'Saved + submitted. Watch the Execution status panel above.'
+    if (execute) {
+      const execId = j.execution && j.execution.execution_id
+      const dsId   = j.execution && j.execution.output_dataset_id
+      if (execId) attachToExecution(execId, name, dsId)
+      wizStatus.value = {
+        kind: 'success',
+        text: 'Saved + submitted. Watch the Execution status panel above.'
+      }
+    } else {
+      wizStatus.value = {
+        kind: 'success',
+        text: `Pipeline "${name}" saved. Find it in the selector above when you want to run it.`
+      }
     }
     // Refresh demo selector so the new pipeline appears.
     loadPipelines()
   } catch (e) {
     wizStatus.value = { kind: 'error', text: 'Error: ' + (e.message || String(e)) }
   }
+}
+function wizardSaveAndRun()  { return wizardSubmit(true) }
+function wizardSaveAsDraft() { return wizardSubmit(false) }
+
+// Clone the currently-selected demo pipeline into the wizard editor.
+// Uses /demo/list's pre-parsed `stages` array (server-side YAML parse)
+// so we don't need a YAML lib in the browser. Positional args get
+// mapped back to named via the catalog's arg_schema order.
+function cloneToWizard() {
+  if (!selectedPipelineInfo.value) return
+  if (wizPipeline.value.length > 0) {
+    if (!window.confirm('This will replace your current pipeline draft. Continue?')) return
+  }
+  const stages = selectedPipelineInfo.value.stages || []
+  const next = []
+  for (const s of stages) {
+    const spec = findStageSpec(s.stage)
+    const argNames = (spec && spec.arg_schema || []).map(a => a.name)
+    const argsObj = {}
+    if (Array.isArray(s.args)) {
+      // Positional → named by catalog order.
+      for (let i = 0; i < s.args.length && i < argNames.length; i++) {
+        argsObj[argNames[i]] = s.args[i]
+      }
+    } else if (s.args && typeof s.args === 'object') {
+      Object.assign(argsObj, s.args)
+    }
+    next.push({ stage: s.stage, args: argsObj })
+  }
+  wizPipeline.value = next
+  wizPipelineName.value = (selectedPipelineInfo.value.id || 'cloned') + '-edit'
+  wizStatus.value = {
+    kind: 'info',
+    text: `Cloned from "${selectedPipelineInfo.value.name}". Edit and Save & Run when ready.`
+  }
+  // Scroll the wizard into view so the user sees the result.
+  setTimeout(() => {
+    const el = document.querySelector('.wizard-card')
+    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }, 100)
 }
 
 function wizardReset() {
@@ -3438,6 +3585,64 @@ if (typeof window !== 'undefined') {
   border-color: #2196f3;
   outline: none;
 }
+
+/* ─── Wizard: suggestion chips, validation, missing-arg highlight ─── */
+.wizard-empty-state {
+  color: #888;
+  font-size: 0.9em;
+  font-style: italic;
+}
+.wizard-chips {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.wizard-chips-label {
+  color: #888;
+  font-size: 0.8em;
+  margin-right: 4px;
+}
+.wizard-chip {
+  background: rgba(102, 126, 234, 0.10);
+  color: #2c4cb0;
+  border: 1px solid rgba(102, 126, 234, 0.25);
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 0.78em;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.wizard-chip:hover {
+  background: rgba(102, 126, 234, 0.20);
+}
+.wizard-arg-required {
+  color: #b00020;
+  font-weight: 600;
+  margin-left: 2px;
+}
+.wizard-arg-missing {
+  border-color: #f0a0a0 !important;
+  background: #fff7f7 !important;
+}
+.wizard-validation {
+  background: #fff5f5;
+  border: 1px solid #f0c0c0;
+  border-radius: 6px;
+  padding: 10px 14px;
+  color: #8a1f1f;
+  font-size: 0.88em;
+  margin: 12px 0;
+}
+.wizard-validation ul {
+  margin: 6px 0 0 18px;
+  padding: 0;
+}
+.wizard-validation li {
+  margin: 2px 0;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
 </style>
 
 
