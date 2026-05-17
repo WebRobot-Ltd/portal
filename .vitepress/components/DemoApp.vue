@@ -2025,11 +2025,28 @@ async function runAiMagic() {
   aiPickedRefined.value = null
   clearHighlightInIframe()
 
+  // Stage context — if the modal was opened from a specific arg, pass
+  // the stage name, the arg name, and the arg's catalog description.
+  // The server uses these to bias both the algo candidates (e.g. strip
+  // :nth-of-type for list-pattern stages) and the LLM prompt (extra
+  // Context block before the Rules).
+  const ctx = {}
+  if (pickerTargetStageIdx.value != null) {
+    const row = wizPipeline.value[pickerTargetStageIdx.value]
+    if (row) {
+      ctx.stage_name = row.stage
+      const spec = findStageSpec(row.stage)
+      const argDef = spec && (spec.arg_schema || []).find(a => a.name === pickerTargetArgName.value)
+      if (pickerTargetArgName.value) ctx.arg_name = pickerTargetArgName.value
+      if (argDef && argDef.description) ctx.arg_description = argDef.description
+    }
+  }
+
   const path = aiMode.value === 'actions' ? 'infer-actions' : 'infer-selector'
   try {
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/${path}`, {
       method: 'POST',
-      body: JSON.stringify({ url: pickerLoadedUrl.value, intent }),
+      body: JSON.stringify({ url: pickerLoadedUrl.value, intent, ...ctx }),
     })
     const j = await r.json()
     if (!r.ok || j.error) throw new Error(j.error || `${path} failed`)
