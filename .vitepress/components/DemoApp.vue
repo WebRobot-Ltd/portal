@@ -2071,6 +2071,22 @@ async function forwardStepToCamoufox(action) {
       }),
     })
     const j = await r.json()
+    // A poisoned Camoufox session (timed-out click, dropped WS frame,
+    // Cloudflare challenge mid-step) returns 404 with "session expired
+    // (driver state lost)". Auto-reopen on the last known URL instead
+    // of leaving the wizard stuck — the user keeps their wizard state,
+    // they just lose the action that failed.
+    if (r.status === 404 && /session expired|session not found/i.test(j.error || '')) {
+      const lastUrl = pickerLoadedUrl.value
+      cmfSessionId.value = null
+      if (lastUrl) {
+        pickerLoadError.value = 'session reset — reloading page'
+        await openWithCamoufox(lastUrl)
+      } else {
+        pickerLoadError.value = 'session expired — reopen the URL to continue'
+      }
+      return
+    }
     if (!r.ok || j.error) throw new Error(j.error || 'cmf/step failed')
     pickerHtml.value      = j.html || pickerHtml.value
     pickerLoadedUrl.value = j.current_url || pickerLoadedUrl.value
