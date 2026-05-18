@@ -2055,19 +2055,29 @@ async function openWithCamoufox(url) {
   }
 }
 
-// Forward an action to Camoufox and swap the iframe with the post-step HTML.
-async function forwardStepToCamoufox(action) {
+// Forward an action (or an ordered batch) to Camoufox and swap the
+// iframe with the post-step HTML. picker.js batches a pending Type
+// with the triggering Click so we always send them in order in a
+// single request — otherwise a search submit would race the typing.
+async function forwardStepToCamoufox(actionOrBatch) {
   if (!cmfSessionId.value) return
+  const batch = Array.isArray(actionOrBatch) ? actionOrBatch : [actionOrBatch]
+  if (!batch.length) return
+  const first = batch[0]
   pickerLoading.value = true
   try {
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/cmf/step`, {
       method: 'POST',
       body: JSON.stringify({
         session_id: cmfSessionId.value,
-        type:     action.type,
-        selector: action.selector,
-        text:     action.text,
-        ms:       action.ms,
+        // New batch field — backend runs the actions in order.
+        actions:  batch,
+        // Single-action fields kept for backwards compat with older pods
+        // mid-rollout; the backend prefers `actions` when present.
+        type:     first.type,
+        selector: first.selector,
+        text:     first.text,
+        ms:       first.ms,
       }),
     })
     const j = await r.json()
@@ -2235,8 +2245,10 @@ function onPickerMessage(ev) {
     // Action-record click in Camoufox mode → forward to /cmf/step
     // (the click was preventDefault'd by picker.js; the server-side
     // browser is the one that actually advances the page).
-    if (cmfSessionId.value && d.action) {
-      forwardStepToCamoufox(d.action)
+    // picker.js may bundle a pending Type with the Click in d.actions
+    // so the live browser sees the typed query BEFORE the submit.
+    if (cmfSessionId.value && (d.action || (Array.isArray(d.actions) && d.actions.length))) {
+      forwardStepToCamoufox(d.actions || d.action)
     }
   } else if (d.type === 'webrobot-pick-actions') {
     pickerActions.value = Array.isArray(d.actions) ? d.actions : []
