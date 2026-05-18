@@ -2226,6 +2226,16 @@ function onPickerMessage(ev) {
     pickerActions.value = Array.isArray(d.actions) ? d.actions : []
   } else if (d.type === 'webrobot-picker-navigation') {
     // Page is reloading in action mode — buffer already received.
+  } else if (d.type === 'webrobot-picker-ready') {
+    // Iframe (re)loaded — picker.js boots in default 'selector-single'.
+    // Echo back the current UI mode so click handling matches what the
+    // user sees in the toolbar; otherwise an 'action-record' UI would
+    // still hit the selector branch and never forward clicks to Camoufox.
+    // This also covers the /cmf/step path, which replaces the srcdoc.
+    const ifrMode = pickerMode.value === 'ai-magic'
+      ? 'selector-single'
+      : (pickerMode.value || 'selector-single')
+    try { ev.source && ev.source.postMessage({ type: 'webrobot-picker-mode', mode: ifrMode }, '*') } catch (_) {}
   } else if (d.type === 'webrobot-picker-cancel') {
     closePicker()
   }
