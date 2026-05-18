@@ -596,6 +596,13 @@ go</pre>
             <button :class="['picker-tab', pickerMode === 'action-record'   && 'active']" @click="setPickerMode('action-record')">⏺ Record actions</button>
             <button :class="['picker-tab', pickerMode === 'ai-magic'        && 'active']" @click="setPickerMode('ai-magic')">🪄 AI Magic</button>
           </div>
+          <div class="picker-strategy-tabs" title="wget = fast HTTP (static sites). Camoufox = real browser (JS-heavy / Cloudflare-protected). Required for Record actions.">
+            <button :class="['picker-tab-small', pickerStrategy === 'wget' && 'active']"
+                    :disabled="pickerMode === 'action-record'"
+                    @click="setPickerStrategy('wget')">wget</button>
+            <button :class="['picker-tab-small', pickerStrategy === 'cmf' && 'active']"
+                    @click="setPickerStrategy('cmf')">Camoufox</button>
+          </div>
           <button class="btn btn-ghost btn-sm" @click="closePicker">✕ Close</button>
         </div>
 
@@ -612,15 +619,32 @@ go</pre>
 
         <div class="picker-modal-body">
           <div v-if="!pickerLoadedUrl" class="picker-empty">
-            Enter a URL above and click Load. The page renders inside a sandboxed iframe via our server-side proxy.
+            Enter a URL above and click Load. The page renders inside a sandboxed iframe — via wget for fast static sites, via Camoufox for JS-heavy ones.
           </div>
+          <div v-else-if="pickerLoadError" class="picker-empty" style="color:#b00020;">
+            Load failed: {{ pickerLoadError }} — try switching strategy to Camoufox (top-right toggle).
+          </div>
+          <!-- Camoufox path: rendered HTML comes back from /cmf/open, we
+               mount it via srcdoc so the iframe is same-origin with the
+               portal (picker.js postMessage works). -->
           <iframe
-            v-else
+            v-else-if="pickerStrategy === 'cmf' && pickerHtml"
+            id="wr-picker-iframe"
+            :srcdoc="pickerHtml"
+            sandbox="allow-same-origin allow-scripts allow-forms"
+            class="picker-iframe"
+          ></iframe>
+          <!-- wget path (legacy): direct GET on /wizard/proxy via src. -->
+          <iframe
+            v-else-if="pickerStrategy === 'wget'"
             id="wr-picker-iframe"
             :src="pickerProxySrc"
             sandbox="allow-same-origin allow-scripts allow-forms"
             class="picker-iframe"
           ></iframe>
+          <div v-else class="picker-empty">
+            <span class="loading-spinner" style="margin-right:8px;"></span> Loading via {{ pickerStrategy === 'cmf' ? 'Camoufox' : 'wget' }}…
+          </div>
         </div>
 
         <!-- Selector result panel -->
@@ -1925,6 +1949,11 @@ const wizSuggestedSet = computed(() => new Set(wizSuggested.value))
 const pickerOpen          = ref(false)
 const pickerUrl           = ref('https://books.toscrape.com/')
 const pickerLoadedUrl     = ref(null)
+const pickerHtml          = ref('')           // for iframe srcdoc (Camoufox strategy)
+const pickerStrategy      = ref('wget')       // 'wget' | 'cmf'
+const cmfSessionId        = ref(null)         // active Camoufox session id (cmf strategy)
+const pickerLoading       = ref(false)
+const pickerLoadError     = ref(null)
 const pickerMode          = ref('selector-single')  // selector-single | selector-list | action-record | ai-magic
 const pickerSelected      = ref(null)               // { selector, matches, sampleText, sampleHtml, refinedFromHighlight? }
 const pickerActions       = ref([])                 // accumulated action list during recording
@@ -1955,15 +1984,23 @@ function openPicker(stageIdx, argName, mode) {
   pickerActions.value  = []
   pickerOpen.value = true
 }
-function closePicker() {
+async function closePicker() {
   pickerOpen.value = false
   pickerLoadedUrl.value = null
   pickerSelected.value = null
   pickerActions.value  = []
   pickerTargetStageIdx.value = null
   pickerTargetArgName.value  = null
+  pickerHtml.value = ''
+  // Release any live Camoufox session — best-effort, idle reaper would
+  // pick it up after 5 min anyway, but explicit close is cheaper.
+  if (cmfSessionId.value) {
+    const id = cmfSessionId.value
+    cmfSessionId.value = null
+    try { await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/cmf/${id}`, { method: 'DELETE' }) } catch (_) {}
+  }
 }
-function loadPickerUrl() {
+async function loadPickerUrl() {
   const u = (pickerUrl.value || '').trim()
   if (!u || !(u.startsWith('http://') || u.startsWith('https://'))) {
     alert('Provide an http(s) URL.')
@@ -1972,6 +2009,93 @@ function loadPickerUrl() {
   pickerSelected.value = null
   pickerActions.value  = []
   pickerLoadedUrl.value = u
+  pickerLoadError.value = null
+
+  // Close any prior Camoufox session before opening a new one.
+  if (cmfSessionId.value) {
+    try {
+      await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/cmf/${cmfSessionId.value}`, { method: 'DELETE' })
+    } catch (_) {}
+    cmfSessionId.value = null
+  }
+
+  // For action-record mode we ALWAYS need a live Camoufox session so
+  // clicks actually advance the page. For other modes (selector
+  // picking / AI Magic / multi-field), Camoufox gives the best
+  // rendering quality on JS-heavy sites but is slower than wget — start
+  // with the strategy the user explicitly chose, default 'cmf' when the
+  // host is likely-protected (Cloudflare-fronted, JS-SPA, etc.).
+  if (pickerStrategy.value === 'cmf' || pickerMode.value === 'action-record') {
+    pickerStrategy.value = 'cmf'
+    await openWithCamoufox(u)
+  } else {
+    // wget fast-path: simple iframe src pointed at the proxy GET endpoint.
+    pickerHtml.value = ''
+    cmfSessionId.value = null
+  }
+}
+
+async function openWithCamoufox(url) {
+  pickerLoading.value = true
+  try {
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/cmf/open`, {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    })
+    const j = await r.json()
+    if (!r.ok || j.error) throw new Error(j.error || `cmf/open failed: ${r.status}`)
+    pickerHtml.value      = j.html || ''
+    cmfSessionId.value    = j.session_id || null
+    pickerLoadedUrl.value = j.current_url || url
+  } catch (e) {
+    pickerLoadError.value = e.message || String(e)
+    pickerHtml.value = ''
+  } finally {
+    pickerLoading.value = false
+  }
+}
+
+// Forward an action to Camoufox and swap the iframe with the post-step HTML.
+async function forwardStepToCamoufox(action) {
+  if (!cmfSessionId.value) return
+  pickerLoading.value = true
+  try {
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/cmf/step`, {
+      method: 'POST',
+      body: JSON.stringify({
+        session_id: cmfSessionId.value,
+        type:     action.type,
+        selector: action.selector,
+        text:     action.text,
+        ms:       action.ms,
+      }),
+    })
+    const j = await r.json()
+    if (!r.ok || j.error) throw new Error(j.error || 'cmf/step failed')
+    pickerHtml.value      = j.html || pickerHtml.value
+    pickerLoadedUrl.value = j.current_url || pickerLoadedUrl.value
+  } catch (e) {
+    pickerLoadError.value = 'step failed: ' + (e.message || String(e))
+  } finally {
+    pickerLoading.value = false
+  }
+}
+
+// Toggle Camoufox / wget strategy from the UI.
+async function setPickerStrategy(s) {
+  pickerStrategy.value = s
+  if (pickerLoadedUrl.value) {
+    if (s === 'cmf') {
+      await openWithCamoufox(pickerLoadedUrl.value)
+    } else {
+      // Close any cmf session and fall back to wget proxy src.
+      if (cmfSessionId.value) {
+        try { await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/cmf/${cmfSessionId.value}`, { method: 'DELETE' }) } catch (_) {}
+        cmfSessionId.value = null
+      }
+      pickerHtml.value = ''
+    }
+  }
 }
 function setPickerMode(m) {
   pickerMode.value = m
@@ -2091,6 +2215,13 @@ function onPickerMessage(ev) {
   } else if (d.type === 'webrobot-picker-multi-warn') {
     // Surface the warning briefly (e.g. clicked outside flatSelect container).
     wizStatus.value = { kind: 'error', text: d.warn || 'click was outside the segment container' }
+  } else if (d.type === 'webrobot-step-request') {
+    // Action-record click in Camoufox mode → forward to /cmf/step
+    // (the click was preventDefault'd by picker.js; the server-side
+    // browser is the one that actually advances the page).
+    if (cmfSessionId.value && d.action) {
+      forwardStepToCamoufox(d.action)
+    }
   } else if (d.type === 'webrobot-pick-actions') {
     pickerActions.value = Array.isArray(d.actions) ? d.actions : []
   } else if (d.type === 'webrobot-picker-navigation') {
@@ -4835,6 +4966,30 @@ if (typeof window !== 'undefined') {
 .picker-multi-hint {
   color: #888;
   font-size: 0.78em;
+}
+
+.picker-strategy-tabs {
+  display: flex;
+  gap: 4px;
+  margin: 0 8px;
+}
+.picker-tab-small {
+  background: #eee;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 0.72em;
+  cursor: pointer;
+  color: #555;
+}
+.picker-tab-small.active {
+  background: #1f2937;
+  color: white;
+  border-color: #1f2937;
+}
+.picker-tab-small:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 </style>
 
