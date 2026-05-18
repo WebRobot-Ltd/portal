@@ -4691,8 +4691,10 @@ if (typeof window !== 'undefined') {
 .picker-modal {
   background: white;
   border-radius: 12px;
-  width: min(1100px, 100%);
-  height: min(90vh, 800px);
+  /* Use most of the screen — sites like ebay/amazon don't fit in 1100px
+     and force their own horizontal scroll that the picker can't see. */
+  width: min(95vw, 1600px);
+  height: min(95vh, 900px);
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
@@ -4738,10 +4740,20 @@ if (typeof window !== 'undefined') {
   position: relative;
   background: #f5f5f5;
   min-height: 0;
+  /* Allow the modal body itself to scroll both axes when the iframe is
+     wider/taller than the available space. The iframe renders at a
+     fixed desktop viewport (see .picker-iframe) so target sites like
+     ebay/amazon get the layout they were designed for. */
+  overflow: auto;
 }
 .picker-iframe {
-  width: 100%;
+  /* Render at a typical desktop viewport so site CSS doesn't collapse
+     to mobile mode. The modal body scrolls when this exceeds the modal
+     width — gives the user the horizontal scrollbar that was missing. */
+  width: 1440px;
+  min-width: 100%;
   height: 100%;
+  min-height: 700px;
   border: 0;
   display: block;
 }
