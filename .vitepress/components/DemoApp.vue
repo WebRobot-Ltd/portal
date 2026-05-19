@@ -2232,6 +2232,15 @@ function openPicker(stageIdx, argName, mode) {
   pickerSelected.value = null
   pickerActions.value  = []
   pickerOpen.value = true
+  // Auto-resume the parked Camoufox session if one is still fresh
+  // (< 5 min, matches the server-side idle reaper). The user already
+  // expressed "use it" intent by pressing "💾 Apply & keep session
+  // for next stage →" — making them confirm the banner again on the
+  // next stage is just friction.
+  const p = pausedCmfSession.value
+  if (p && p.sessionId && (Date.now() - (p.savedAt || 0) < 5 * 60 * 1000)) {
+    resumePausedSession()
+  }
 }
 async function closePicker() {
   pickerOpen.value = false
