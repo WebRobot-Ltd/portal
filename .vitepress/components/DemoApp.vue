@@ -2151,6 +2151,11 @@ watch(pickerLoading, (now, prev) => {
 })
 const pickerMode          = ref('selector-single')  // selector-single | selector-list | action-record | ai-magic
 const pickerSelected      = ref(null)               // { selector, matches, sampleText, sampleHtml, refinedFromHighlight? }
+// URL the picker actually OPENED on (immutable for the lifetime of
+// the cmf session). Different from pickerLoadedUrl which advances
+// with each /cmf/step. We need the open-URL to seed fetch.args.url
+// when applying a trace, because the trace replays FROM there.
+const pickerOpenedUrl     = ref(null)
 const pickerActions       = ref([])                 // STAGED — composed in the iframe, pending Send
 // COMMITTED — actions that already round-tripped through /cmf/step
 // and were replayed on the live Camoufox tab. Only these are eligible
@@ -2216,6 +2221,7 @@ async function closePicker() {
   pickerActions.value  = []
   committedActions.value = []
   applyTraceStageIdx.value = null
+  pickerOpenedUrl.value = null
   pickerTargetStageIdx.value = null
   pickerTargetArgName.value  = null
   pickerHtml.value = ''
@@ -2236,6 +2242,7 @@ async function loadPickerUrl() {
   pickerSelected.value = null
   pickerActions.value  = []
   committedActions.value = []  // fresh URL → fresh trace
+  pickerOpenedUrl.value = u    // tentative — overwritten by /cmf/open if needed
   pickerLoadedUrl.value = u
   pickerLoadError.value = null
 
@@ -2276,6 +2283,11 @@ async function openWithCamoufox(url) {
     pickerHtml.value      = j.html || ''
     cmfSessionId.value    = j.session_id || null
     pickerLoadedUrl.value = j.current_url || url
+    // Remember where the trace started — applyCommittedTrace seeds
+    // this onto the target stage's url arg when the user hasn't typed
+    // one manually, so the runtime knows where to navigate before
+    // replaying the actions.
+    pickerOpenedUrl.value = j.current_url || url
   } catch (e) {
     pickerLoadError.value = e.message || String(e)
     pickerHtml.value = ''
@@ -3043,15 +3055,31 @@ const tracableStages = computed(() => {
 // "Apply this trace to <selected stage>" — uses committedActions
 // (post-send), not the live staged queue. Called from the panel that
 // only appears AFTER a successful Send round-trip.
+//
+// Side effect: if the target stage's first positional arg (the URL
+// for fetch/visit) is still empty, seed it with the URL the picker
+// opened on. Without this the YAML emits `args: []` and the runtime
+// has nowhere to navigate before replaying the trace.
 function applyCommittedTrace() {
   const idx = applyTraceStageIdx.value
   if (idx == null || !wizPipeline.value[idx]) return
   if (!committedActions.value.length) return
-  wizPipeline.value[idx]._trace = committedActions.value.slice()
+  const row = wizPipeline.value[idx]
+  row._trace = committedActions.value.slice()
+  const spec = findStageSpec(row.stage)
+  const firstArg = (spec && spec.arg_schema || [])[0]
+  if (firstArg && pickerOpenedUrl.value) {
+    if (!row.args) row.args = {}
+    const current = row.args[firstArg.name]
+    if (current == null || String(current).trim() === '') {
+      row.args[firstArg.name] = pickerOpenedUrl.value
+    }
+  }
   wizPipeline.value = [...wizPipeline.value]
-  const n = wizPipeline.value[idx]._trace.length
-  const name = wizPipeline.value[idx].stage
-  wizStatus.value = { kind: 'ok', text: `Trace (${n} actions) applied to ${name} (stage ${idx + 1}).` }
+  const n = row._trace.length
+  const seededUrl = firstArg && row.args[firstArg.name]
+  const urlNote = seededUrl ? ` — ${firstArg.name}=${seededUrl}` : ''
+  wizStatus.value = { kind: 'ok', text: `Trace (${n} actions) applied to ${row.stage} (stage ${idx + 1})${urlNote}.` }
 }
 
 // Legacy hook from openTraceRecorder — keep but route through the new
@@ -3087,7 +3115,18 @@ function applyRecordingAndPauseSession() {
     wizStatus.value = { kind: 'error', text: 'Pick the target stage in the Apply panel first.' }
     return
   }
-  wizPipeline.value[idx]._trace = src.slice()
+  const targetRow = wizPipeline.value[idx]
+  targetRow._trace = src.slice()
+  // Same URL-seeding logic as applyCommittedTrace — keep them in sync.
+  const spec = findStageSpec(targetRow.stage)
+  const firstArg = (spec && spec.arg_schema || [])[0]
+  if (firstArg && pickerOpenedUrl.value) {
+    if (!targetRow.args) targetRow.args = {}
+    const current = targetRow.args[firstArg.name]
+    if (current == null || String(current).trim() === '') {
+      targetRow.args[firstArg.name] = pickerOpenedUrl.value
+    }
+  }
   wizPipeline.value = [...wizPipeline.value]
   pausedCmfSession.value = {
     sessionId: cmfSessionId.value,
