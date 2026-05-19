@@ -3128,6 +3128,11 @@ function applyCommittedTrace() {
   const seededUrl = firstArg && row.args[firstArg.name]
   const urlNote = seededUrl ? ` — ${firstArg.name}=${seededUrl}` : ''
   wizStatus.value = { kind: 'ok', text: `Trace (${n} actions) applied to ${row.stage} (stage ${idx + 1})${urlNote}.` }
+  // Close the modal — the trace is saved on the stage row, picker job
+  // is done. closePicker() also DELETE's the Camoufox session; the
+  // sibling "💾 Apply & keep session for next stage →" is the path
+  // that preserves it instead.
+  closePicker()
 }
 
 // Legacy hook from openTraceRecorder — keep but route through the new
