@@ -908,6 +908,19 @@ go</pre>
           <div v-if="pickerStrategy === 'cmf'" class="picker-empty-small picker-stage-hint">
             Clicks/typings in the mirror are staged here, not sent live. Build the full sequence then press <strong>Send</strong> — the iframe will refresh once with the post-batch HTML.
           </div>
+          <!-- Phase-switch CTA: when the wizard opened the picker for a
+               selector / field-picking mode, we land here first (so the
+               user can navigate to the right page) and surface a clear
+               button to flip into the requested mode when ready. -->
+          <div v-if="pickerIntendedMode" class="picker-phase-cta">
+            <span>
+              🧭 <strong>Navigation mode.</strong>
+              Click links / type to drive the live page. When you're on the right page, switch to selection:
+            </span>
+            <button class="btn btn-primary btn-sm" @click="promoteToIntendedMode">
+              📌 Start {{ intendedModeLabel }} →
+            </button>
+          </div>
           <!-- Pre-Send draft view: just lets the user see WHAT is queued
                and clear it. No "Apply to trace" here — that would
                freeze a draft that hasn't been replayed yet and could
@@ -2185,6 +2198,14 @@ const pickerTargetArgName  = ref(null)              // arg.name in that stage's 
 // matches every clicked sample so far; matches is its querySelectorAll
 // count on the iframe document.
 const multiSampleStatus    = ref({ selector: null, matches: 0, samples: 0, sampleText: '' })
+// Two-phase picker: when a non-trivial mode is requested (multi-field,
+// multi-sample, selector-list, selector-single) the modal first opens
+// in action-record so the user can navigate to the right page; a
+// prominent "📌 Start picking" CTA then promotes the iframe into the
+// requested mode. Set to null when the wizard didn't request a
+// specific pick mode (e.g. the picker was opened straight as
+// action-record / ai-magic for navigation only).
+const pickerIntendedMode  = ref(null)
 // Parked Camoufox session, preserved across modal close so the user can
 // build a multi-stage pipeline interactively: drive the browser on
 // stage N, save the trace + park, add stage N+1, reopen the picker and
@@ -2221,6 +2242,28 @@ const pickerProxySrc       = computed(() => {
   return `${API_BASE_URL}/api/webrobot/api/demo/wizard/proxy?url=${encodeURIComponent(pickerLoadedUrl.value)}`
 })
 
+// Friendly label for the "📌 Start <X>" button — keeps the noun in
+// the CTA aligned with what the wizard actually requested.
+const intendedModeLabel = computed(() => {
+  switch (pickerIntendedMode.value) {
+    case 'multi-field':      return 'field selection'
+    case 'multi-sample':     return 'multi-link sampling'
+    case 'selector-single':  return 'selector picking'
+    case 'selector-list':    return 'list selector picking'
+    default:                 return 'picking'
+  }
+})
+
+// User clicked "📌 Start <X>" — flip the iframe out of action-record
+// (navigation mode) into the mode the wizard originally requested.
+// Clear the intent flag so the CTA disappears.
+function promoteToIntendedMode() {
+  if (!pickerIntendedMode.value) return
+  const m = pickerIntendedMode.value
+  pickerIntendedMode.value = null
+  setPickerMode(m)
+}
+
 // Shared helper — every picker entry point should call this AFTER
 // setting pickerOpen=true so the iframe rebinds to the previously
 // parked Camoufox tab. Without this every "Pick" / "Pick fields" /
@@ -2236,7 +2279,18 @@ function tryResumePausedSession() {
 function openPicker(stageIdx, argName, mode) {
   pickerTargetStageIdx.value = stageIdx != null ? stageIdx : null
   pickerTargetArgName.value  = argName || null
-  pickerMode.value = mode || 'selector-single'
+  // Two-phase open: remember the requested mode but ENTER as
+  // action-record so the user can navigate freely first. The
+  // "📌 Start picking" CTA in the action-record panel promotes
+  // pickerMode to pickerIntendedMode on demand.
+  const requested = mode || 'selector-single'
+  if (requested === 'action-record' || requested === 'ai-magic') {
+    pickerIntendedMode.value = null
+    pickerMode.value = requested
+  } else {
+    pickerIntendedMode.value = requested
+    pickerMode.value = 'action-record'
+  }
   pickerSelected.value = null
   pickerActions.value  = []
   pickerOpen.value = true
@@ -2269,6 +2323,7 @@ async function closePicker() {
   pickerTargetStageIdx.value = null
   pickerTargetArgName.value  = null
   pickerHtml.value = ''
+  pickerIntendedMode.value = null   // reset two-phase intent
   cmfSessionId.value = null   // ref only — server session stays alive in pausedCmfSession
 }
 async function loadPickerUrl() {
@@ -2446,6 +2501,12 @@ async function setPickerStrategy(s) {
 }
 function setPickerMode(m) {
   pickerMode.value = m
+  // If the user manually flipped tabs to leave action-record, they've
+  // told us "I'm done navigating" — drop the deferred-intent flag so
+  // the navigate-first CTA doesn't keep reappearing.
+  if (m !== 'action-record') {
+    pickerIntendedMode.value = null
+  }
   // Translate the parent's UI mode to one the iframe picker understands.
   // AI Magic uses selector-single under the hood (so click → LCA-refine works).
   const ifrMode = m === 'ai-magic' ? 'selector-single' : m
@@ -3013,7 +3074,8 @@ function replaceFields(idx, newFields) {
 function openFieldPicker(stageIdx, fieldIdx) {
   pickerTargetStageIdx.value = stageIdx
   pickerTargetArgName.value  = '__field_selector__:' + fieldIdx
-  pickerMode.value = 'selector-single'
+  pickerIntendedMode.value = 'selector-single'
+  pickerMode.value = 'action-record'   // navigate first
   pickerSelected.value = null
   pickerOpen.value = true
   tryResumePausedSession()
@@ -3089,7 +3151,8 @@ async function openAiSuggestFields(stageIdx) {
 function openMultiFieldPicker(stageIdx) {
   pickerTargetStageIdx.value = stageIdx
   pickerTargetArgName.value  = '__fields_multi__'
-  pickerMode.value = 'multi-field'
+  pickerIntendedMode.value = 'multi-field'
+  pickerMode.value = 'action-record'   // navigate first, user promotes via CTA
   pickerOpen.value = true
   tryResumePausedSession()
   // If the stage is flatSelect AND has a segment selector set, push it
@@ -5556,6 +5619,22 @@ if (typeof window !== 'undefined') {
   color: #14365b;
   font-size: 0.82em;
 }
+/* Phase-switch CTA: prominent enough that the user notices it as the
+   next step but not jarring while they're navigating. */
+.picker-phase-cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  background: #fff7ed;
+  border-left: 4px solid #f59e0b;
+  padding: 8px 12px;
+  margin: 6px 0 8px;
+  border-radius: 4px;
+  font-size: 0.88em;
+  color: #614700;
+}
+.picker-phase-cta strong { color: #5a3b00; }
 /* Pre-Send drafted-but-not-replayed YAML uses a muted style so it
    doesn't compete with the post-Send commit panel below. */
 .picker-actions-draft {
