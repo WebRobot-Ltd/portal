@@ -617,6 +617,12 @@ go</pre>
           <button class="btn btn-primary btn-sm" @click="loadPickerUrl">Load page</button>
         </div>
 
+        <!-- Make the "mirror, not a real browser" model explicit so users
+             read a ~10s post-click delay as expected, not as a hang. -->
+        <div v-if="pickerStrategy === 'cmf' && pickerLoadedUrl" class="picker-mirror-hint">
+          ℹ️ This is a <strong>live mirror</strong> of a server-side browser, not the browser itself. Every click / keystroke is replayed on a remote Camoufox instance and the rendered page is sent back — expect a short delay (typically 3–10 s on heavy ecommerce sites) before the iframe updates.
+        </div>
+
         <div class="picker-modal-body">
           <div v-if="!pickerLoadedUrl" class="picker-empty">
             Enter a URL above and click Load. The page renders inside a sandboxed iframe — via wget for fast static sites, via Camoufox for JS-heavy ones.
@@ -644,6 +650,22 @@ go</pre>
           ></iframe>
           <div v-else class="picker-empty">
             <span class="loading-spinner" style="margin-right:8px;"></span> Loading via {{ pickerStrategy === 'cmf' ? 'Camoufox' : 'wget' }}…
+          </div>
+          <!-- Overlay that covers the iframe while a /cmf/step is in
+               flight. The iframe still shows the PREVIOUS page until the
+               post-step HTML lands; without this overlay the user can't
+               tell anything is happening and tends to click again,
+               creating queued/duplicate actions. The text scales with
+               elapsed time so a slow eBay search gives the right
+               expectation instead of looking frozen. -->
+          <div v-if="pickerLoading && pickerLoadedUrl && !pickerLoadError" class="picker-overlay">
+            <div class="picker-overlay-card">
+              <span class="loading-spinner" style="margin-right:10px;"></span>
+              <div class="picker-overlay-text">
+                <strong>{{ pickerLoadingLabel }}</strong>
+                <span v-if="pickerLoadingElapsedS >= 1" class="picker-overlay-elapsed">{{ pickerLoadingElapsedS }}s</span>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -1049,7 +1071,7 @@ go</pre>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 
 // Pipeline execution state
 const selectedPipeline = ref('')
@@ -1953,7 +1975,38 @@ const pickerHtml          = ref('')           // for iframe srcdoc (Camoufox str
 const pickerStrategy      = ref('wget')       // 'wget' | 'cmf'
 const cmfSessionId        = ref(null)         // active Camoufox session id (cmf strategy)
 const pickerLoading       = ref(false)
+const pickerLoadingStartedAt = ref(0)               // ms timestamp when the current step kicked off
+const pickerLoadingElapsedS  = ref(0)               // updated by setInterval while loading
+const pickerLoadingKind      = ref('step')          // 'open' | 'step' — drives the overlay copy
+let   pickerLoadingTicker = null
 const pickerLoadError     = ref(null)
+// Overlay copy escalates with elapsed time so slow ecommerce searches
+// (eBay can take 8-12s for the post-click render) don't read as frozen.
+const pickerLoadingLabel = computed(() => {
+  const e = pickerLoadingElapsedS.value
+  if (pickerLoadingKind.value === 'open') {
+    if (e >= 12) return 'Camoufox is still rendering — Cloudflare challenge or heavy SPA…'
+    if (e >= 5)  return 'Loading page via Camoufox…'
+    return 'Loading page…'
+  }
+  if (e >= 12) return 'Site is slow — still waiting for the server-side browser…'
+  if (e >= 5)  return 'Applying action and re-rendering page…'
+  return 'Sending action to Camoufox…'
+})
+// Drive the ticker from the loading flag — start at the first transition
+// to true, stop when it flips back. Cheap (1Hz) and only while loading.
+watch(pickerLoading, (now, prev) => {
+  if (now && !prev) {
+    pickerLoadingStartedAt.value = Date.now()
+    pickerLoadingElapsedS.value  = 0
+    pickerLoadingTicker = setInterval(() => {
+      pickerLoadingElapsedS.value = Math.floor((Date.now() - pickerLoadingStartedAt.value) / 1000)
+    }, 500)
+  } else if (!now && prev) {
+    if (pickerLoadingTicker) { clearInterval(pickerLoadingTicker); pickerLoadingTicker = null }
+    pickerLoadingElapsedS.value = 0
+  }
+})
 const pickerMode          = ref('selector-single')  // selector-single | selector-list | action-record | ai-magic
 const pickerSelected      = ref(null)               // { selector, matches, sampleText, sampleHtml, refinedFromHighlight? }
 const pickerActions       = ref([])                 // accumulated action list during recording
@@ -2036,6 +2089,7 @@ async function loadPickerUrl() {
 }
 
 async function openWithCamoufox(url) {
+  pickerLoadingKind.value = 'open'
   pickerLoading.value = true
   try {
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/cmf/open`, {
@@ -2064,6 +2118,7 @@ async function forwardStepToCamoufox(actionOrBatch) {
   const batch = Array.isArray(actionOrBatch) ? actionOrBatch : [actionOrBatch]
   if (!batch.length) return
   const first = batch[0]
+  pickerLoadingKind.value = 'step'
   pickerLoading.value = true
   try {
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/cmf/step`, {
@@ -4800,6 +4855,54 @@ if (typeof window !== 'undefined') {
   text-align: center;
   color: #888;
   font-style: italic;
+}
+/* Mirror hint banner shown once per session above the iframe. */
+.picker-mirror-hint {
+  padding: 8px 14px;
+  background: #fffbe6;
+  border-bottom: 1px solid #ffe58f;
+  color: #614700;
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+/* Step-in-progress overlay sitting on top of the iframe. Stays inside
+   the .picker-modal-body so it scrolls with the body (sticky-ish via
+   position:sticky) — but we use position:absolute pinned to viewport
+   center for the card so it's visible even on long pages. */
+.picker-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(245, 245, 245, 0.55);
+  backdrop-filter: blur(1px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  pointer-events: none; /* let the user still see the page; clicks are
+                            blocked by the actual click forwarding being
+                            queued. Avoids double-clicks while waiting. */
+}
+.picker-overlay-card {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 12px 18px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  display: flex;
+  align-items: center;
+  max-width: 460px;
+  pointer-events: auto;
+}
+.picker-overlay-text {
+  display: flex;
+  flex-direction: column;
+  font-size: 0.9em;
+  color: #333;
+}
+.picker-overlay-elapsed {
+  font-size: 0.75em;
+  color: #888;
+  margin-top: 2px;
 }
 .picker-empty-small {
   padding: 8px 14px;
