@@ -625,6 +625,22 @@ go</pre>
           <button class="btn btn-primary btn-sm" @click="loadPickerUrl">Load page</button>
         </div>
 
+        <!-- Resume banner — appears when a previous stage parked the
+             Camoufox session via "Save trace & keep session". One-shot:
+             user picks Resume to bind the iframe back to that page, or
+             Start fresh to drop it (DELETE) and type a new URL. -->
+        <div v-if="pausedCmfSession && !pickerLoadedUrl" class="picker-resume-banner">
+          <span>
+            🔁 <strong>Paused session</strong> on
+            <code>{{ pausedCmfSession.url }}</code>
+            <span class="picker-resume-age">({{ pausedCmfAgeLabel }})</span>
+          </span>
+          <div class="picker-resume-actions">
+            <button class="btn btn-primary btn-sm" @click="resumePausedSession">Resume here</button>
+            <button class="btn btn-ghost btn-sm" @click="discardPausedSession">Start fresh</button>
+          </div>
+        </div>
+
         <!-- Make the "mirror, not a real browser" model explicit so users
              read a ~10s post-click delay as expected, not as a hang. -->
         <div v-if="pickerStrategy === 'cmf' && pickerLoadedUrl" class="picker-mirror-hint">
@@ -866,6 +882,18 @@ go</pre>
           <div v-if="pickerActionsYaml" class="picker-actions">
             <button v-if="pickerTargetArgName === '__stage_trace__' && pickerTargetStageIdx != null" class="btn btn-primary btn-sm" @click="applyRecordingToStageTrace">
               ✅ Apply to {{ (wizPipeline[pickerTargetStageIdx] || {}).stage }}'s trace
+            </button>
+            <!-- Save the trace AND keep the live Camoufox tab parked
+                 so the next stage (e.g. intelligentExplore on the
+                 search-results page) can open the picker and resume
+                 from the same URL/state — no /cmf/open round-trip,
+                 no lost cookies/history. Only meaningful in cmf
+                 strategy and when picker.js produced actions. -->
+            <button v-if="pickerStrategy === 'cmf' && cmfSessionId && pickerTargetStageIdx != null"
+                    class="btn btn-secondary btn-sm"
+                    @click="applyRecordingAndPauseSession"
+                    title="Save the trace to this stage and keep the live browser parked. Next time you open the picker (on the next stage) you can resume from the same page.">
+              💾 Save trace &amp; keep session for next stage →
             </button>
             <button class="btn btn-primary btn-sm" @click="copyPickerActions">Copy YAML</button>
             <button class="btn btn-ghost btn-sm" @click="pickerActions = []">Clear</button>
@@ -2094,6 +2122,25 @@ const pickerTargetArgName  = ref(null)              // arg.name in that stage's 
 // matches every clicked sample so far; matches is its querySelectorAll
 // count on the iframe document.
 const multiSampleStatus    = ref({ selector: null, matches: 0, samples: 0, sampleText: '' })
+// Parked Camoufox session, preserved across modal close so the user can
+// build a multi-stage pipeline interactively: drive the browser on
+// stage N, save the trace + park, add stage N+1, reopen the picker and
+// resume on the SAME live page (same URL, cookies, history). Server-
+// side TTL is 5 min — we track the age client-side just to render it
+// for the user, the backend reaps the rest.
+const pausedCmfSession     = ref(null)   // { sessionId, html, url, savedAt }
+const pausedCmfAgeTick     = ref(0)      // bumped by setInterval so the label refreshes
+const pausedCmfAgeLabel    = computed(() => {
+  pausedCmfAgeTick.value   // dependency for reactivity
+  const p = pausedCmfSession.value
+  if (!p || !p.savedAt) return ''
+  const s = Math.max(0, Math.floor((Date.now() - p.savedAt) / 1000))
+  if (s < 60) return s + 's ago'
+  const m = Math.floor(s / 60); const r = s % 60
+  return `${m}m${r > 0 ? ' ' + r + 's' : ''} ago`
+})
+// 5 min server-side reap matches our visual ageing.
+setInterval(() => { if (pausedCmfSession.value) pausedCmfAgeTick.value++ }, 1000)
 
 // AI Magic state — intent-driven inference of selectors or actions.
 // The algo result arrives synchronously (~ms); the LLM result fills in
@@ -2894,6 +2941,70 @@ function applyRecordingToStageTrace() {
   wizPipeline.value[idx]._trace = pickerActions.value.slice()
   wizPipeline.value = [...wizPipeline.value]
   closePicker()
+}
+
+// Save the recorded trace to the target stage AND park the live
+// Camoufox tab so the user can reopen the picker later (next stage)
+// and resume from the same page. closePicker() would DELETE the
+// session — explicitly avoid that. The paused session lives in
+// pausedCmfSession; the resume banner picks it up.
+function applyRecordingAndPauseSession() {
+  if (pickerTargetStageIdx.value == null) return
+  if (pickerStrategy.value !== 'cmf' || !cmfSessionId.value) {
+    // Defensive: nothing to keep — fall back to the normal apply.
+    applyRecordingToStageTrace()
+    return
+  }
+  const idx = pickerTargetStageIdx.value
+  wizPipeline.value[idx]._trace = pickerActions.value.slice()
+  wizPipeline.value = [...wizPipeline.value]
+  pausedCmfSession.value = {
+    sessionId: cmfSessionId.value,
+    html:      pickerHtml.value,
+    url:       pickerLoadedUrl.value,
+    savedAt:   Date.now(),
+  }
+  // Tear down modal state WITHOUT the closePicker() DELETE.
+  pickerOpen.value          = false
+  pickerLoadedUrl.value     = null
+  pickerSelected.value      = null
+  pickerActions.value       = []
+  pickerTargetStageIdx.value = null
+  pickerTargetArgName.value  = null
+  pickerHtml.value          = ''
+  cmfSessionId.value        = null   // ref only — server session stays alive
+  wizStatus.value = {
+    kind: 'ok',
+    text: 'Trace saved. Camoufox session parked — reopen the picker to resume on the same page.',
+  }
+}
+
+// Rebind the modal to the previously parked session: pretend /cmf/open
+// just returned, no network call. The 5-min idle reaper on the server
+// will reclaim it if the user takes too long.
+function resumePausedSession() {
+  const p = pausedCmfSession.value
+  if (!p) return
+  pickerStrategy.value  = 'cmf'
+  cmfSessionId.value    = p.sessionId
+  pickerHtml.value      = p.html
+  pickerLoadedUrl.value = p.url
+  pickerLoadError.value = null
+  pausedCmfSession.value = null
+}
+
+// User wants a fresh start instead — release the server-side session
+// and clear the banner.
+async function discardPausedSession() {
+  const p = pausedCmfSession.value
+  if (!p) return
+  pausedCmfSession.value = null
+  try {
+    await authenticatedDemoFetch(
+      `${API_BASE_URL}/api/webrobot/api/demo/wizard/cmf/${p.sessionId}`,
+      { method: 'DELETE' }
+    )
+  } catch (_) { /* idle reaper will handle it */ }
 }
 function yamlScalar(v) {
   if (typeof v === 'number') return String(v)
@@ -5077,6 +5188,26 @@ if (typeof window !== 'undefined') {
   font-size: 0.85em;
   line-height: 1.4;
 }
+/* Resume banner — shown when a previous stage parked the Camoufox tab. */
+.picker-resume-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #e8f1ff;
+  border-bottom: 1px solid #b6d4fe;
+  color: #103a78;
+  font-size: 0.9em;
+}
+.picker-resume-banner code {
+  background: rgba(255,255,255,0.5);
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.92em;
+}
+.picker-resume-age { color: #5878a8; font-size: 0.85em; margin-left: 6px; }
+.picker-resume-actions { display: flex; gap: 6px; flex-shrink: 0; }
 /* "Address bar" — current URL of the live Camoufox tab + back button. */
 .picker-address-bar {
   display: flex;
