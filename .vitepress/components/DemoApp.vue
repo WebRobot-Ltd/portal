@@ -560,6 +560,25 @@ go</pre>
                     >🎯 {{ pickModeFor(row.stage) === 'selector-list' ? 'Pick (list)' : 'Pick' }}</button>
                   </div>
                 </div>
+                <!-- Recorded trace inline preview. Shows every action the
+                     user saved into this stage's trace, so they can sanity-
+                     check the sequence without scrolling to the YAML pane
+                     at the bottom. Each row has an X to delete the action
+                     individually — full re-recording goes through the ⏺
+                     button as before. Hidden on extract / flatSelect since
+                     those don't emit a trace: block in the YAML anyway. -->
+                <div v-if="row._trace && row._trace.length && !isStructuredFieldsStage(row.stage)" class="wizard-trace-block">
+                  <div class="wizard-trace-head">
+                    <strong>🎬 trace ({{ row._trace.length }})</strong>
+                    <button class="btn btn-ghost btn-xs" title="Drop all recorded actions from this stage" @click="clearStageTrace(idx)">Clear all</button>
+                  </div>
+                  <ul class="wizard-trace-list">
+                    <li v-for="(a, ai) in row._trace" :key="ai" class="wizard-trace-action">
+                      <code>{{ formatTraceAction(a) }}</code>
+                      <button class="btn btn-ghost btn-xs wizard-trace-del" title="Remove just this action" @click="removeTraceAction(idx, ai)">✕</button>
+                    </li>
+                  </ul>
+                </div>
                 <div v-if="suggestionsFor(row.stage).length" class="wizard-chips">
                   <span class="wizard-chips-label">Try next:</span>
                   <button
@@ -2881,6 +2900,30 @@ function moveStage(idx, dir) {
   const next = [...wizPipeline.value]
   const tmp = next[idx]; next[idx] = next[j]; next[j] = tmp
   wizPipeline.value = next
+}
+
+// Single-line readable rendering of a recorded action, matching the
+// YAML emitter so the inline preview and the final YAML look the same.
+function formatTraceAction(a) {
+  if (!a || !a.type) return ''
+  if (a.type === 'Click'  && a.selector) return `Click("${a.selector}")`
+  if (a.type === 'Type'   && a.selector) return `Type("${a.selector}", "${a.text || ''}")`
+  if (a.type === 'Wait')   return `Wait(${a.ms || 1000})`
+  if (a.type === 'Scroll') return `Scroll(${a.y || 0})`
+  if (a.type === 'Back')   return 'Back()'
+  return `${a.type}(${a.selector ? '"' + a.selector + '"' : ''})`
+}
+function clearStageTrace(idx) {
+  const row = wizPipeline.value[idx]
+  if (!row) return
+  row._trace = []
+  wizPipeline.value = [...wizPipeline.value]
+}
+function removeTraceAction(stageIdx, actionIdx) {
+  const row = wizPipeline.value[stageIdx]
+  if (!row || !Array.isArray(row._trace)) return
+  row._trace = row._trace.filter((_, i) => i !== actionIdx)
+  wizPipeline.value = [...wizPipeline.value]
 }
 function updateStageArg(idx, argName, value) {
   const row = wizPipeline.value[idx]
@@ -5684,6 +5727,41 @@ if (typeof window !== 'undefined') {
   font-weight: 600;
   margin-left: 6px;
 }
+.wizard-trace-block {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #1f2937;
+  border-radius: 4px;
+}
+.wizard-trace-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.wizard-trace-head strong { color: #1f2937; font-size: 0.9em; }
+.wizard-trace-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.wizard-trace-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: 0.85em;
+}
+.wizard-trace-action code {
+  flex: 1;
+  background: transparent;
+  color: #0f172a;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+}
+.wizard-trace-del { color: #94a3b8; }
+.wizard-trace-del:hover { color: #dc2626; }
 
 /* ─── Multi-field picker panel ─────────────────────────────── */
 .picker-multi {
