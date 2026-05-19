@@ -620,7 +620,13 @@ go</pre>
         <!-- Make the "mirror, not a real browser" model explicit so users
              read a ~10s post-click delay as expected, not as a hang. -->
         <div v-if="pickerStrategy === 'cmf' && pickerLoadedUrl" class="picker-mirror-hint">
-          ℹ️ This is a <strong>live mirror</strong> of a server-side browser, not the browser itself. Every click / keystroke is replayed on a remote Camoufox instance and the rendered page is sent back — expect a short delay (typically 3–10 s on heavy ecommerce sites) before the iframe updates.
+          ℹ️ This is a <strong>live mirror</strong> of a server-side browser, not the browser itself.
+          <span v-if="pickerMode === 'action-record'">
+            Clicks and typing are <strong>staged locally</strong>; press <strong>▶ Send</strong> below to replay the whole sequence on Camoufox and refresh the iframe in one go (3–10 s on heavy sites).
+          </span>
+          <span v-else>
+            Each click / keystroke is replayed on a remote Camoufox instance and the rendered page is sent back — expect a short delay (typically 3–10 s on heavy ecommerce sites) before the iframe updates.
+          </span>
         </div>
 
         <!-- "Address bar" showing the URL the live Camoufox tab is on
@@ -789,11 +795,32 @@ go</pre>
           </div>
         </div>
 
-        <!-- Action recorder result panel -->
+        <!-- Action recorder result panel.
+             In Camoufox strategy, clicks no longer fire immediately —
+             they queue here so the user can build a full sequence
+             (focus input → type → click submit) and ship it as ONE
+             batch to /cmf/step. That stops the "page changed after the
+             first click before I could type" surprise the old live-
+             forward flow had. -->
         <div v-if="pickerMode === 'action-record'" class="picker-result">
           <div class="picker-result-row">
-            <strong>Recorded actions: {{ pickerActions.length }}</strong>
-            <button class="btn btn-secondary btn-sm" @click="stopActionRecording">Stop &amp; collect</button>
+            <strong>
+              <span v-if="pickerStrategy === 'cmf'">📥 Staged actions: {{ pickerActions.length }}</span>
+              <span v-else>Recorded actions: {{ pickerActions.length }}</span>
+            </strong>
+            <div class="picker-action-buttons">
+              <button v-if="pickerStrategy === 'cmf'"
+                      class="btn btn-primary btn-sm"
+                      :disabled="pickerLoading || pickerActions.length === 0"
+                      @click="sendStagedActionsToCamoufox"
+                      title="Replay the whole queue on the live Camoufox tab, then refresh the iframe">
+                ▶ Send to Camoufox ({{ pickerActions.length }})
+              </button>
+              <button class="btn btn-secondary btn-sm" @click="stopActionRecording">Stop &amp; collect</button>
+            </div>
+          </div>
+          <div v-if="pickerStrategy === 'cmf'" class="picker-empty-small picker-stage-hint">
+            Clicks/typings in the mirror are staged here, not sent live. Build the full sequence then press <strong>Send</strong> — the iframe will refresh once with the post-batch HTML.
           </div>
           <pre v-if="pickerActionsYaml" class="picker-actions-yaml">{{ pickerActionsYaml }}</pre>
           <div v-if="pickerActionsYaml" class="picker-actions">
@@ -2129,6 +2156,25 @@ async function openWithCamoufox(url) {
 function goBackInCamoufox() {
   if (pickerStrategy.value !== 'cmf' || !cmfSessionId.value) return
   forwardStepToCamoufox([{ type: 'Back' }])
+}
+
+// Ship the staged action queue (pickerActions) to Camoufox in one
+// batch. First ask the iframe to commit any in-progress typing so
+// the last keystroke isn't dropped, then snapshot+clear the queue
+// and forward.
+async function sendStagedActionsToCamoufox() {
+  if (pickerStrategy.value !== 'cmf' || !cmfSessionId.value) return
+  // Flush pending Type inside the iframe; it'll bounce back a
+  // webrobot-pick-actions with the final list, but to keep things
+  // ordered we wait one tick and use what we already have plus what
+  // arrives next.
+  const ifr = document.getElementById('wr-picker-iframe')
+  try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-flush-queue' }, '*') } catch (_) {}
+  await new Promise(r => setTimeout(r, 50))
+  const queue = pickerActions.value.slice()
+  if (!queue.length) return
+  pickerActions.value = []
+  forwardStepToCamoufox(queue)
 }
 
 async function forwardStepToCamoufox(actionOrBatch) {
@@ -4955,6 +5001,19 @@ if (typeof window !== 'undefined') {
   font-size: 0.75em;
   color: #888;
   margin-top: 2px;
+}
+.picker-action-buttons {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.picker-stage-hint {
+  background: #f0f7ff;
+  border-left: 3px solid #2196f3;
+  padding: 6px 10px;
+  margin: 6px 0 8px;
+  color: #14365b;
+  font-size: 0.82em;
 }
 .picker-empty-small {
   padding: 8px 14px;
