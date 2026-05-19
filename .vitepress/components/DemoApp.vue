@@ -623,6 +623,18 @@ go</pre>
           ℹ️ This is a <strong>live mirror</strong> of a server-side browser, not the browser itself. Every click / keystroke is replayed on a remote Camoufox instance and the rendered page is sent back — expect a short delay (typically 3–10 s on heavy ecommerce sites) before the iframe updates.
         </div>
 
+        <!-- "Address bar" showing the URL the live Camoufox tab is on
+             after the most recent navigation step, plus a back button
+             that drives page.goBack() on the server-side browser. Hidden
+             when no page has been loaded yet. -->
+        <div v-if="pickerLoadedUrl" class="picker-address-bar">
+          <button class="picker-back-btn" :disabled="pickerLoading || pickerStrategy !== 'cmf'"
+                  title="Go back in the server-side browser history"
+                  @click="goBackInCamoufox">← Back</button>
+          <span class="picker-address-label">URL:</span>
+          <code class="picker-address-url" :title="pickerLoadedUrl">{{ pickerLoadedUrl }}</code>
+        </div>
+
         <div class="picker-modal-body">
           <div v-if="!pickerLoadedUrl" class="picker-empty">
             Enter a URL above and click Load. The page renders inside a sandboxed iframe — via wget for fast static sites, via Camoufox for JS-heavy ones.
@@ -651,20 +663,18 @@ go</pre>
           <div v-else class="picker-empty">
             <span class="loading-spinner" style="margin-right:8px;"></span> Loading via {{ pickerStrategy === 'cmf' ? 'Camoufox' : 'wget' }}…
           </div>
-          <!-- Overlay that covers the iframe while a /cmf/step is in
-               flight. The iframe still shows the PREVIOUS page until the
-               post-step HTML lands; without this overlay the user can't
-               tell anything is happening and tends to click again,
-               creating queued/duplicate actions. The text scales with
-               elapsed time so a slow eBay search gives the right
-               expectation instead of looking frozen. -->
-          <div v-if="pickerLoading && pickerLoadedUrl && !pickerLoadError" class="picker-overlay">
-            <div class="picker-overlay-card">
-              <span class="loading-spinner" style="margin-right:10px;"></span>
-              <div class="picker-overlay-text">
-                <strong>{{ pickerLoadingLabel }}</strong>
-                <span v-if="pickerLoadingElapsedS >= 1" class="picker-overlay-elapsed">{{ pickerLoadingElapsedS }}s</span>
-              </div>
+        </div>
+        <!-- Loading overlay at MODAL level (not inside the scrolling
+             body): a 1440px iframe with overflow:auto would otherwise
+             pin the overlay to the scroll content rather than the
+             viewport, hiding it whenever the user scrolled horizontally
+             to see the right side of the page. -->
+        <div v-if="pickerLoading && pickerLoadedUrl && !pickerLoadError" class="picker-overlay">
+          <div class="picker-overlay-card">
+            <span class="loading-spinner" style="margin-right:10px;"></span>
+            <div class="picker-overlay-text">
+              <strong>{{ pickerLoadingLabel }}</strong>
+              <span v-if="pickerLoadingElapsedS >= 1" class="picker-overlay-elapsed">{{ pickerLoadingElapsedS }}s</span>
             </div>
           </div>
         </div>
@@ -2113,6 +2123,14 @@ async function openWithCamoufox(url) {
 // iframe with the post-step HTML. picker.js batches a pending Type
 // with the triggering Click so we always send them in order in a
 // single request — otherwise a search submit would race the typing.
+// Drive page.goBack() on the live Camoufox tab. Backend treats the
+// "Back" action type as a back-nav primitive; we forward it as a
+// regular step so the same overlay + URL-refresh flow lights up.
+function goBackInCamoufox() {
+  if (pickerStrategy.value !== 'cmf' || !cmfSessionId.value) return
+  forwardStepToCamoufox([{ type: 'Back' }])
+}
+
 async function forwardStepToCamoufox(actionOrBatch) {
   if (!cmfSessionId.value) return
   const batch = Array.isArray(actionOrBatch) ? actionOrBatch : [actionOrBatch]
@@ -4792,6 +4810,7 @@ if (typeof window !== 'undefined') {
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
   overflow: hidden;
+  position: relative; /* anchor for the absolute loading overlay */
 }
 .picker-modal-header {
   display: flex;
@@ -4864,6 +4883,39 @@ if (typeof window !== 'undefined') {
   color: #614700;
   font-size: 0.85em;
   line-height: 1.4;
+}
+/* "Address bar" — current URL of the live Camoufox tab + back button. */
+.picker-address-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  background: #f8f9fa;
+  border-bottom: 1px solid #e5e5e5;
+  font-size: 0.85em;
+  min-width: 0;
+}
+.picker-back-btn {
+  background: #fff;
+  border: 1px solid #d0d0d0;
+  border-radius: 4px;
+  padding: 3px 10px;
+  font-size: 0.85em;
+  cursor: pointer;
+  color: #333;
+}
+.picker-back-btn:hover:not(:disabled) { background: #eef; border-color: #99b; }
+.picker-back-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.picker-address-label { color: #888; flex-shrink: 0; }
+.picker-address-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: transparent;
+  color: #333;
+  font-family: ui-monospace, SFMono-Regular, monospace;
 }
 /* Step-in-progress overlay sitting on top of the iframe. Stays inside
    the .picker-modal-body so it scrolls with the body (sticky-ish via
