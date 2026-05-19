@@ -653,10 +653,12 @@ go</pre>
           <button class="btn btn-primary btn-sm" @click="loadPickerUrl">Load page</button>
         </div>
 
-        <!-- Resume banner — appears when a previous stage parked the
-             Camoufox session via "Save trace & keep session". One-shot:
-             user picks Resume to bind the iframe back to that page, or
-             Start fresh to drop it (DELETE) and type a new URL. -->
+        <!-- Resume banner — safety net for when auto-resume in
+             openPicker didn't fire (e.g. modal opened via a path that
+             skipped openPicker, or pausedCmfSession appeared while the
+             modal was already open). One-shot: "Resume here" rebinds
+             the iframe; "Start fresh" drops the parked session (DELETE)
+             and lets the user type a new URL. -->
         <div v-if="pausedCmfSession && !pickerLoadedUrl" class="picker-resume-banner">
           <span>
             🔁 <strong>Paused session</strong> on
@@ -938,15 +940,9 @@ go</pre>
               </select>
               <button class="btn btn-primary btn-sm"
                       :disabled="applyTraceStageIdx == null"
-                      @click="applyCommittedTrace">
-                ✅ Apply
-              </button>
-              <button v-if="pickerStrategy === 'cmf' && cmfSessionId"
-                      class="btn btn-secondary btn-sm"
-                      :disabled="applyTraceStageIdx == null"
-                      @click="applyRecordingAndPauseSession"
-                      title="Save the trace AND keep the live Camoufox tab parked so the next stage's picker can resume from the same page.">
-                💾 Apply &amp; keep session for next stage →
+                      @click="applyCommittedTrace"
+                      title="Save the trace on the chosen stage and close. The Camoufox tab is parked automatically — the next stage's picker resumes from the same page.">
+                ✅ Apply &amp; continue
               </button>
               <button class="btn btn-primary btn-sm" @click="copyCommittedTrace">Copy YAML</button>
               <button class="btn btn-ghost btn-sm" @click="committedActions = []">Clear</button>
@@ -2243,6 +2239,22 @@ function openPicker(stageIdx, argName, mode) {
   }
 }
 async function closePicker() {
+  // Park the live Camoufox session BEFORE clearing the refs so the
+  // next openPicker auto-resumes on the same page. The user almost
+  // always wants to continue from where they left off across stages
+  // (record fetch trace → pick visitExplore selector → pick extract
+  // fields…); explicit DELETE was the wrong default. The server-side
+  // idle reaper still cleans up after 5 min if they never come back,
+  // and "Start fresh" on the resume banner is the explicit escape
+  // hatch for "I really want a new session".
+  if (cmfSessionId.value && pickerLoadedUrl.value && pickerHtml.value) {
+    pausedCmfSession.value = {
+      sessionId: cmfSessionId.value,
+      html:      pickerHtml.value,
+      url:       pickerLoadedUrl.value,
+      savedAt:   Date.now(),
+    }
+  }
   pickerOpen.value = false
   pickerLoadedUrl.value = null
   pickerSelected.value = null
@@ -2253,13 +2265,7 @@ async function closePicker() {
   pickerTargetStageIdx.value = null
   pickerTargetArgName.value  = null
   pickerHtml.value = ''
-  // Release any live Camoufox session — best-effort, idle reaper would
-  // pick it up after 5 min anyway, but explicit close is cheaper.
-  if (cmfSessionId.value) {
-    const id = cmfSessionId.value
-    cmfSessionId.value = null
-    try { await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/cmf/${id}`, { method: 'DELETE' }) } catch (_) {}
-  }
+  cmfSessionId.value = null   // ref only — server session stays alive in pausedCmfSession
 }
 async function loadPickerUrl() {
   const u = (pickerUrl.value || '').trim()
