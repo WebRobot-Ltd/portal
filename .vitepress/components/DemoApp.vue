@@ -553,11 +553,11 @@ go</pre>
                     <button
                       v-if="isSelectorArg(a)"
                       class="btn btn-secondary btn-xs wizard-pick-btn"
-                      :title="pickModeFor(row.stage) === 'selector-list'
-                        ? 'Click one repeating link (e.g. one product card or one pagination link) — the picker generalises it to match all siblings.'
+                      :title="pickModeFor(row.stage) === 'multi-sample'
+                        ? 'Click 2+ examples of the repeating link/card you want to follow (different product cards, pagination items, …). The picker intersects them and produces a CSS selector that matches every sibling.'
                         : 'Open the page in the picker and click an element to get a CSS selector'"
                       @click="openPicker(idx, a.name, pickModeFor(row.stage))"
-                    >🎯 {{ pickModeFor(row.stage) === 'selector-list' ? 'Pick (list)' : 'Pick' }}</button>
+                    >🎯 {{ pickModeFor(row.stage) === 'multi-sample' ? 'Pick (multi)' : 'Pick' }}</button>
                   </div>
                 </div>
                 <!-- Recorded trace inline preview. Shows every action the
@@ -2550,18 +2550,27 @@ function isSelectorArg(arg) {
 }
 
 // Stages whose primary selector arg points at a REPEATING link/card
-// (next-page paginator, list of item links, etc.). For those we open
-// the picker in 'selector-list' mode so a single click is generalised
-// to a selector that matches every sibling, instead of a one-shot
-// :nth-of-type path that only hits the exact element the user clicked.
+// (next-page paginator, list of item links, etc.). Open the picker
+// in 'multi-sample' mode: the user clicks 2+ example links, the
+// picker intersects their tag+class paths and emits a selector that
+// matches all of them via querySelectorAll. More robust than
+// 'selector-list' (single-click generalisation) because it confirms
+// the pattern across multiple seeds — class collisions and one-off
+// outliers don't survive the intersection.
 const LIST_PICK_STAGES = new Set([
   'intelligentExplore',
   'intelligentWgetExplore',
   'wgetExplore',
   'visitExplore',
+  'explore',
+  'intelligentJoin',
+  'intelligentWgetJoin',
+  'wgetJoin',
+  'visitJoin',
+  'join',
 ])
 function pickModeFor(stage) {
-  return LIST_PICK_STAGES.has(stage) ? 'selector-list' : 'selector-single'
+  return LIST_PICK_STAGES.has(stage) ? 'multi-sample' : 'selector-single'
 }
 
 // postMessage listener for the proxied iframe.
