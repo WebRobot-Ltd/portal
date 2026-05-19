@@ -75,33 +75,61 @@ pipeline {
             agent {
                 kubernetes {
                     label 'nodejs'
+                    // node:20-bookworm-slim (glibc) instead of -alpine
+                    // (musl). esbuild/sharp/etc. ship glibc-first; the
+                    // alpine variant occasionally fails the postinstall
+                    // silently and leaves the build hanging instead of
+                    // crashing.
+                    //
+                    // Resources are explicit: vitepress build on this
+                    // site peaks around 1.3 GB heap (Vue components +
+                    // every markdown page). Without limits the pod
+                    // inherits k8s defaults and the OOM-killer reaps
+                    // the node process while the sidecar 'sleep 99d'
+                    // stays alive — Jenkins then thinks the sh step
+                    // is still running and hangs the whole pipeline.
                     yaml """
 apiVersion: v1
 kind: Pod
 spec:
   containers:
   - name: nodejs
-    image: node:20-alpine
+    image: node:20-bookworm-slim
     command:
     - sleep
     args:
     - 99d
+    env:
+    - name: NODE_OPTIONS
+      value: "--max-old-space-size=3072"
+    resources:
+      requests:
+        cpu: "500m"
+        memory: "2Gi"
+      limits:
+        cpu: "2000m"
+        memory: "3Gi"
 """
                 }
             }
             steps {
                 container('nodejs') {
                     script {
-                        echo "📦 Installazione dipendenze..."
-                        sh 'npm ci'
-                        
-                        echo "🔨 Build sito VitePress..."
-                        sh 'npm run build'
-                        
-                        echo "✅ Verifica file generati..."
-                        sh 'test -d .vitepress/dist || (echo "❌ Directory .vitepress/dist non trovata!" && exit 1)'
-                        sh 'ls -lh .vitepress/dist/ | head -20'
-                        sh 'du -sh .vitepress/dist/'
+                        // Bound the whole stage so a wedged build fails
+                        // the pipeline in 15 min instead of holding the
+                        // Jenkins worker indefinitely.
+                        timeout(time: 15, unit: 'MINUTES') {
+                            echo "📦 Installazione dipendenze..."
+                            sh 'npm ci'
+
+                            echo "🔨 Build sito VitePress..."
+                            sh 'npm run build'
+
+                            echo "✅ Verifica file generati..."
+                            sh 'test -d .vitepress/dist || (echo "❌ Directory .vitepress/dist non trovata!" && exit 1)'
+                            sh 'ls -lh .vitepress/dist/ | head -20'
+                            sh 'du -sh .vitepress/dist/'
+                        }
                     }
                 }
             }
