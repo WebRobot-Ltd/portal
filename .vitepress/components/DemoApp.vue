@@ -3083,11 +3083,16 @@ function openTraceRecorder(stageIdx) {
   pickerOpen.value = true
 }
 
-// Stages whose YAML emits a `trace:` block — only these are valid
-// targets for the post-send "Apply trace to which stage?" dropdown.
-// Kept narrow on purpose: wget is HTTP-only so it can't replay a
-// browser trace.
-const TRACE_CAPABLE_STAGES = new Set(['fetch', 'visit'])
+// Stages whose YAML accepts a `trace:` block — confirmed by reading
+// etl_stage_specs.usage_guide ("optional `trace` (sequence of
+// actions)" in the doc for each). NOTE: `visit` is intentionally
+// EXCLUDED — it's not a distinct trace target, it's syntactic sugar
+// for `fetch` whose trace starts with `visit` (browser mode), so the
+// trace always belongs to a fetch stage in the YAML. intelligentExplore
+// uses a different per-action `traceAction` arg (a single action name
+// string, not a block), so it's NOT in this set. wget is HTTP-only
+// and can't replay browser actions either.
+const TRACE_CAPABLE_STAGES = new Set(['fetch', 'explore', 'join'])
 function isTraceCapableStage(name) { return TRACE_CAPABLE_STAGES.has(name) }
 const tracableStages = computed(() => {
   return wizPipeline.value
