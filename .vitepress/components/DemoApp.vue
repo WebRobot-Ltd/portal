@@ -2809,16 +2809,44 @@ function openFieldPicker(stageIdx, fieldIdx) {
 // LLM looks at the whole page and produces selectors that match the
 // first row only. PTA-based auto-detection of the segment is the
 // natural next step but isn't wired to the demo wizard yet.
-function openAiSuggestFields(stageIdx) {
+async function openAiSuggestFields(stageIdx) {
   const row = wizPipeline.value[stageIdx]
+  // For flatSelect we need a segment container before the LLM can
+  // suggest field selectors relative to a row. If the user hasn't set
+  // one yet, call PTA server-side (same script DirectExtractionApiV10
+  // uses) to auto-detect it. If PTA isn't configured on the pod, fall
+  // back to a clear error so the user knows to set the selector
+  // manually.
   if (row && row.stage === 'flatSelect') {
     const hasContainer = row.args && typeof row.args.selector === 'string' && row.args.selector.trim()
     if (!hasContainer) {
-      wizStatus.value = {
-        kind: 'error',
-        text: 'flatSelect: set the segment container `selector` first (manually or via 🎯 Pick). PTA-based auto-detect is coming.',
+      const url = (pickerUrl.value || '').trim() || (row.args && row.args.url) || null
+      if (!url) {
+        wizStatus.value = { kind: 'error', text: 'flatSelect: set the URL or `selector` first.' }
+        return
       }
-      return
+      wizStatus.value = { kind: 'info', text: 'flatSelect: inferring segment container via PTA…' }
+      try {
+        const prompt = (aiIntent.value || '').trim() ||
+          'each repeated item / card / row in the main listing on the page'
+        const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-segment`, {
+          method: 'POST',
+          body: JSON.stringify({ url, segmentation_prompt: prompt }),
+        })
+        const j = await r.json()
+        if (!r.ok || j.error || !j.segment_selector) {
+          throw new Error(j.error || 'PTA could not find a repeating container')
+        }
+        updateStageArg(stageIdx, 'selector', j.segment_selector)
+        wizStatus.value = { kind: 'ok', text: `flatSelect: PTA picked "${j.segment_selector}"` }
+      } catch (e) {
+        wizStatus.value = {
+          kind: 'error',
+          text: 'PTA segment inference failed: ' + (e.message || String(e))
+            + ' — set the container selector manually via 🎯 Pick.',
+        }
+        return
+      }
     }
   }
   openMultiFieldPicker(stageIdx)
