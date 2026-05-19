@@ -2361,12 +2361,13 @@ function onPickerMessage(ev) {
     // Surface the warning briefly (e.g. clicked outside flatSelect container).
     wizStatus.value = { kind: 'error', text: d.warn || 'click was outside the segment container' }
   } else if (d.type === 'webrobot-step-request') {
-    // Action-record click in Camoufox mode → forward to /cmf/step
-    // (the click was preventDefault'd by picker.js; the server-side
-    // browser is the one that actually advances the page).
-    // picker.js may bundle a pending Type with the Click in d.actions
-    // so the live browser sees the typed query BEFORE the submit.
+    // Auto-send from picker.js: the user clicked a non-editable target
+    // (link, button, submit) which picker.js treats as the commit
+    // gesture for the staged queue. Forward the batch and clear the
+    // parent's mirror of the queue so the "▶ Send (N)" badge resets
+    // immediately instead of waiting for the next pick-actions ping.
     if (cmfSessionId.value && (d.action || (Array.isArray(d.actions) && d.actions.length))) {
+      pickerActions.value = []
       forwardStepToCamoufox(d.actions || d.action)
     }
   } else if (d.type === 'webrobot-pick-actions') {
