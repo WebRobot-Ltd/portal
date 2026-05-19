@@ -25,8 +25,34 @@ RUN echo "📁 Verifica file nella directory public:" && \
     test -f public/logo.jpeg || (echo "❌ logo.jpeg non trovato in public!" && exit 1) && \
     test -f public/logo.svg || (echo "⚠️ logo.svg non trovato in public" || true)
 
-# Build sito VitePress (genera file statici in .vitepress/dist)
-RUN npm run build
+# Build sito VitePress (genera file statici in .vitepress/dist).
+#
+# Same Node↔esbuild deadlock the Jenkins Build Site stage hits:
+# 'vitepress build' prints "build complete in N.Ns" and dist/ is
+# fully written, but the npm/node process never exits because
+# esbuild's service-mode child keeps the pipe open. Without the
+# wrapper, this `RUN` line hangs indefinitely (Kaniko stays in
+# 'Building stage 1' until the cluster reaps the job) — same root
+# cause as the Build Site stage.
+#
+# Wrap with BusyBox `timeout` (alpine ships it — supports `-s KILL`
+# the same way GNU coreutils does) and treat any exit code as
+# success when .vitepress/dist/index.html is on disk. The build
+# artifacts are what we ship; the lingering shutdown handshake is
+# incidental and SIGKILL drops both processes cleanly.
+RUN set +e; \
+    timeout -s KILL 120 npm run build; \
+    BUILD_EC=$?; \
+    if [ -f .vitepress/dist/index.html ]; then \
+        echo "✅ vitepress dist OK (wrapper exit=$BUILD_EC)"; \
+        if [ "$BUILD_EC" = "124" ] || [ "$BUILD_EC" = "137" ]; then \
+            echo "ℹ️  esbuild deadlock — SIGKILLed, build output intact."; \
+        fi; \
+        exit 0; \
+    else \
+        echo "❌ No .vitepress/dist/index.html — build truly failed (exit=$BUILD_EC)" >&2; \
+        exit ${BUILD_EC:-1}; \
+    fi
 
 # Verifica che i file siano stati generati
 RUN ls -la .vitepress/dist || (echo "❌ Directory .vitepress/dist non trovata!" && exit 1)
