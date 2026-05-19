@@ -485,6 +485,9 @@ go</pre>
                     <strong>📋 Fields ({{ (row._fields || []).length }})</strong>
                     <div class="wizard-fields-actions">
                       <button class="btn btn-secondary btn-xs" @click="openMultiFieldPicker(idx)" title="Open the picker in multi-field mode — click each field on the page">🎯 Pick fields</button>
+                      <button class="btn btn-primary btn-xs"
+                              title="Open the picker and describe the fields you want — LLM fills the table"
+                              @click="openAiSuggestFields(idx)">🪄 AI suggest fields</button>
                       <button class="btn btn-ghost btn-xs" @click="addField(idx)">+ Add empty</button>
                     </div>
                   </div>
@@ -2797,6 +2800,34 @@ function openFieldPicker(stageIdx, fieldIdx) {
   pickerMode.value = 'selector-single'
   pickerSelected.value = null
   pickerOpen.value = true
+}
+
+// Open the picker in multi-field mode AND immediately prompt the
+// user for the field-describing intent so the "🪄 Auto-suggest fields"
+// flow becomes one click away from the wizard row. For flatSelect we
+// need the segment_selector (container) set first; otherwise the
+// LLM looks at the whole page and produces selectors that match the
+// first row only. PTA-based auto-detection of the segment is the
+// natural next step but isn't wired to the demo wizard yet.
+function openAiSuggestFields(stageIdx) {
+  const row = wizPipeline.value[stageIdx]
+  if (row && row.stage === 'flatSelect') {
+    const hasContainer = row.args && typeof row.args.selector === 'string' && row.args.selector.trim()
+    if (!hasContainer) {
+      wizStatus.value = {
+        kind: 'error',
+        text: 'flatSelect: set the segment container `selector` first (manually or via 🎯 Pick). PTA-based auto-detect is coming.',
+      }
+      return
+    }
+  }
+  openMultiFieldPicker(stageIdx)
+  // Hand focus to the intent input in the picker once it's mounted.
+  // 350 ms is enough for the modal CSS transition + iframe srcdoc.
+  setTimeout(() => {
+    const el = document.querySelector('.picker-multi input.text-input')
+    try { el && el.focus() } catch (_) {}
+  }, 350)
 }
 
 // Open picker in multi-field mode for batch field picking. When the
