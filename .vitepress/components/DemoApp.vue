@@ -2221,6 +2221,18 @@ const pickerProxySrc       = computed(() => {
   return `${API_BASE_URL}/api/webrobot/api/demo/wizard/proxy?url=${encodeURIComponent(pickerLoadedUrl.value)}`
 })
 
+// Shared helper — every picker entry point should call this AFTER
+// setting pickerOpen=true so the iframe rebinds to the previously
+// parked Camoufox tab. Without this every "Pick" / "Pick fields" /
+// "AI suggest" / "Record" button on a new stage would land the user
+// on an empty modal instead of the page they were just on.
+function tryResumePausedSession() {
+  const p = pausedCmfSession.value
+  if (p && p.sessionId && (Date.now() - (p.savedAt || 0) < 5 * 60 * 1000)) {
+    resumePausedSession()
+  }
+}
+
 function openPicker(stageIdx, argName, mode) {
   pickerTargetStageIdx.value = stageIdx != null ? stageIdx : null
   pickerTargetArgName.value  = argName || null
@@ -2228,15 +2240,7 @@ function openPicker(stageIdx, argName, mode) {
   pickerSelected.value = null
   pickerActions.value  = []
   pickerOpen.value = true
-  // Auto-resume the parked Camoufox session if one is still fresh
-  // (< 5 min, matches the server-side idle reaper). The user already
-  // expressed "use it" intent by pressing "💾 Apply & keep session
-  // for next stage →" — making them confirm the banner again on the
-  // next stage is just friction.
-  const p = pausedCmfSession.value
-  if (p && p.sessionId && (Date.now() - (p.savedAt || 0) < 5 * 60 * 1000)) {
-    resumePausedSession()
-  }
+  tryResumePausedSession()
 }
 async function closePicker() {
   // Park the live Camoufox session BEFORE clearing the refs so the
@@ -3012,6 +3016,7 @@ function openFieldPicker(stageIdx, fieldIdx) {
   pickerMode.value = 'selector-single'
   pickerSelected.value = null
   pickerOpen.value = true
+  tryResumePausedSession()
 }
 
 // Open the picker in multi-field mode AND immediately prompt the
@@ -3032,7 +3037,15 @@ async function openAiSuggestFields(stageIdx) {
   if (row && row.stage === 'flatSelect') {
     const hasContainer = row.args && typeof row.args.selector === 'string' && row.args.selector.trim()
     if (!hasContainer) {
-      const url = (pickerUrl.value || '').trim() || (row.args && row.args.url) || null
+      // Prefer the parked Camoufox tab's URL — that's the listing page
+      // the user just navigated to in the previous stage's recorder.
+      // Falls back to pickerUrl / row.args.url so the manual paths still
+      // work when no session is parked.
+      const url = (pickerUrl.value || '').trim()
+        || (row.args && row.args.url)
+        || (pausedCmfSession.value && pausedCmfSession.value.url)
+        || (pickerLoadedUrl.value)
+        || null
       if (!url) {
         wizStatus.value = { kind: 'error', text: 'flatSelect: set the URL or `selector` first.' }
         return
@@ -3078,6 +3091,7 @@ function openMultiFieldPicker(stageIdx) {
   pickerTargetArgName.value  = '__fields_multi__'
   pickerMode.value = 'multi-field'
   pickerOpen.value = true
+  tryResumePausedSession()
   // If the stage is flatSelect AND has a segment selector set, push it
   // to picker.js so it constrains clicks to descendants of one segment
   // and produces RELATIVE selectors for the fields.
@@ -3105,6 +3119,7 @@ function openTraceRecorder(stageIdx) {
     applyTraceStageIdx.value = stageIdx
   }
   pickerOpen.value = true
+  tryResumePausedSession()
 }
 
 // Stages whose YAML accepts a `trace:` block — confirmed by reading
