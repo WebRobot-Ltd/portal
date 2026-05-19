@@ -878,27 +878,55 @@ go</pre>
           <div v-if="pickerStrategy === 'cmf'" class="picker-empty-small picker-stage-hint">
             Clicks/typings in the mirror are staged here, not sent live. Build the full sequence then press <strong>Send</strong> — the iframe will refresh once with the post-batch HTML.
           </div>
-          <pre v-if="pickerActionsYaml" class="picker-actions-yaml">{{ pickerActionsYaml }}</pre>
+          <!-- Pre-Send draft view: just lets the user see WHAT is queued
+               and clear it. No "Apply to trace" here — that would
+               freeze a draft that hasn't been replayed yet and could
+               easily mismatch the live Camoufox tab. -->
+          <pre v-if="pickerActionsYaml" class="picker-actions-yaml picker-actions-draft">{{ pickerActionsYaml }}</pre>
           <div v-if="pickerActionsYaml" class="picker-actions">
-            <button v-if="pickerTargetArgName === '__stage_trace__' && pickerTargetStageIdx != null" class="btn btn-primary btn-sm" @click="applyRecordingToStageTrace">
-              ✅ Apply to {{ (wizPipeline[pickerTargetStageIdx] || {}).stage }}'s trace
-            </button>
-            <!-- Save the trace AND keep the live Camoufox tab parked
-                 so the next stage (e.g. intelligentExplore on the
-                 search-results page) can open the picker and resume
-                 from the same URL/state — no /cmf/open round-trip,
-                 no lost cookies/history. Only meaningful in cmf
-                 strategy and when picker.js produced actions. -->
-            <button v-if="pickerStrategy === 'cmf' && cmfSessionId && pickerTargetStageIdx != null"
-                    class="btn btn-secondary btn-sm"
-                    @click="applyRecordingAndPauseSession"
-                    title="Save the trace to this stage and keep the live browser parked. Next time you open the picker (on the next stage) you can resume from the same page.">
-              💾 Save trace &amp; keep session for next stage →
-            </button>
-            <button class="btn btn-primary btn-sm" @click="copyPickerActions">Copy YAML</button>
-            <button class="btn btn-ghost btn-sm" @click="pickerActions = []">Clear</button>
+            <button class="btn btn-ghost btn-sm" @click="pickerActions = []">Clear staged</button>
           </div>
-          <div v-else class="picker-empty-small">Interact with the page above (clicks, typing, scroll), then click "Stop &amp; collect" or press ESC inside the page.</div>
+
+          <!-- Post-Send commit panel: appears only after at least one
+               batch has round-tripped through Camoufox. THIS is where
+               the user picks which stage to attach the trace to —
+               explicit dropdown so a sequence can be applied to fetch,
+               visit, or any other future trace-capable stage. -->
+          <div v-if="committedActions.length" class="picker-committed-panel">
+            <div class="picker-committed-head">
+              <strong>🎬 Committed on Camoufox: {{ committedActions.length }}</strong>
+              <span class="picker-committed-hint">replayed on the live browser — ready to save as a stage trace</span>
+            </div>
+            <pre class="picker-actions-yaml">{{ committedActionsYaml }}</pre>
+            <div v-if="!tracableStages.length" class="picker-empty-small">
+              No fetch / visit stage in the pipeline yet — add one and it'll appear here.
+            </div>
+            <div v-else class="picker-apply-trace">
+              <label>Apply trace to:</label>
+              <select v-model.number="applyTraceStageIdx" class="text-input picker-apply-select">
+                <option v-for="s in tracableStages" :key="s.idx" :value="s.idx">
+                  {{ s.idx + 1 }}. {{ s.stage }}
+                </option>
+              </select>
+              <button class="btn btn-primary btn-sm"
+                      :disabled="applyTraceStageIdx == null"
+                      @click="applyCommittedTrace">
+                ✅ Apply
+              </button>
+              <button v-if="pickerStrategy === 'cmf' && cmfSessionId"
+                      class="btn btn-secondary btn-sm"
+                      :disabled="applyTraceStageIdx == null"
+                      @click="applyRecordingAndPauseSession"
+                      title="Save the trace AND keep the live Camoufox tab parked so the next stage's picker can resume from the same page.">
+                💾 Apply &amp; keep session for next stage →
+              </button>
+              <button class="btn btn-primary btn-sm" @click="copyCommittedTrace">Copy YAML</button>
+              <button class="btn btn-ghost btn-sm" @click="committedActions = []">Clear</button>
+            </div>
+          </div>
+          <div v-if="!pickerActionsYaml && !committedActions.length" class="picker-empty-small">
+            Interact with the page above (click input → type → click submit), then press <strong>▶ Send</strong>. Once Camoufox replays the batch, an "Apply trace to stage" panel appears here.
+          </div>
         </div>
       </div>
     </div>
@@ -2114,7 +2142,13 @@ watch(pickerLoading, (now, prev) => {
 })
 const pickerMode          = ref('selector-single')  // selector-single | selector-list | action-record | ai-magic
 const pickerSelected      = ref(null)               // { selector, matches, sampleText, sampleHtml, refinedFromHighlight? }
-const pickerActions       = ref([])                 // accumulated action list during recording
+const pickerActions       = ref([])                 // STAGED — composed in the iframe, pending Send
+// COMMITTED — actions that already round-tripped through /cmf/step
+// and were replayed on the live Camoufox tab. Only these are eligible
+// for "Apply to a stage trace" because they're guaranteed to reproduce
+// the page state. Staged queue is just a draft until Send fires.
+const committedActions    = ref([])
+const applyTraceStageIdx  = ref(null)
 const pickerTargetStageIdx = ref(null)              // wizPipeline index that owns the target arg
 const pickerTargetArgName  = ref(null)              // arg.name in that stage's args
 // Live state of the multi-sample (repeating-link) picker, synced from
@@ -2171,6 +2205,8 @@ async function closePicker() {
   pickerLoadedUrl.value = null
   pickerSelected.value = null
   pickerActions.value  = []
+  committedActions.value = []
+  applyTraceStageIdx.value = null
   pickerTargetStageIdx.value = null
   pickerTargetArgName.value  = null
   pickerHtml.value = ''
@@ -2190,6 +2226,7 @@ async function loadPickerUrl() {
   }
   pickerSelected.value = null
   pickerActions.value  = []
+  committedActions.value = []  // fresh URL → fresh trace
   pickerLoadedUrl.value = u
   pickerLoadError.value = null
 
@@ -2311,6 +2348,20 @@ async function forwardStepToCamoufox(actionOrBatch) {
     if (!r.ok || j.error) throw new Error(j.error || 'cmf/step failed')
     pickerHtml.value      = j.html || pickerHtml.value
     pickerLoadedUrl.value = j.current_url || pickerLoadedUrl.value
+    // Successful round-trip: the batch we just sent really ran on the
+    // live Camoufox tab. Append to the committed log — that's the
+    // sequence the user can "Apply to a fetch/visit trace". Skip
+    // pure-back-navigation entries (no useful trace value) to keep
+    // the YAML tidy.
+    const committable = batch.filter(a => a && a.type && a.type !== 'Back')
+    if (committable.length) {
+      committedActions.value = [...committedActions.value, ...committable]
+      // Default the apply-dropdown to the first trace-capable stage so
+      // the user only has to click Apply, not also pick a target.
+      if (applyTraceStageIdx.value == null && tracableStages.value.length) {
+        applyTraceStageIdx.value = tracableStages.value[0].idx
+      }
+    }
   } catch (e) {
     pickerLoadError.value = 'step failed: ' + (e.message || String(e))
   } finally {
@@ -2405,6 +2456,32 @@ const pickerActionsYaml = computed(() => {
 })
 function copyPickerActions() {
   navigator.clipboard.writeText(pickerActionsYaml.value).then(
+    () => { /* silent */ },
+    () => alert('clipboard write failed'),
+  )
+}
+
+// Same YAML projection as pickerActionsYaml but applied to the
+// committed log (post-Send). Used both by the on-screen <pre> and
+// by the Copy button on the commit panel.
+function actionsToTraceYaml(list) {
+  if (!list || !list.length) return ''
+  const lines = ['trace:']
+  for (const a of list) {
+    if (a.type === 'Click' && a.selector) {
+      lines.push(`  - Click("${a.selector}")`)
+    } else if (a.type === 'Type' && a.selector) {
+      const safe = String(a.text || '').replace(/"/g, '\\"')
+      lines.push(`  - Type("${a.selector}", "${safe}")`)
+    } else if (a.type === 'Scroll') {
+      lines.push(`  - Scroll(${a.y || 0})`)
+    }
+  }
+  return lines.join('\n')
+}
+const committedActionsYaml = computed(() => actionsToTraceYaml(committedActions.value))
+function copyCommittedTrace() {
+  navigator.clipboard.writeText(committedActionsYaml.value).then(
     () => { /* silent */ },
     () => alert('clipboard write failed'),
   )
@@ -2932,13 +3009,50 @@ function openTraceRecorder(stageIdx) {
   pickerTargetStageIdx.value = stageIdx
   pickerTargetArgName.value  = '__stage_trace__'
   pickerMode.value = 'action-record'
+  // Pre-select the stage in the post-Send "Apply trace to" dropdown
+  // so the user only has to click Apply once the trace is committed.
+  // Falls back to whatever the dropdown decides if the stage isn't
+  // trace-capable (e.g. trace recorder opened from an extract row).
+  if (isTraceCapableStage(wizPipeline.value[stageIdx]?.stage)) {
+    applyTraceStageIdx.value = stageIdx
+  }
   pickerOpen.value = true
 }
 
+// Stages whose YAML emits a `trace:` block — only these are valid
+// targets for the post-send "Apply trace to which stage?" dropdown.
+// Kept narrow on purpose: wget is HTTP-only so it can't replay a
+// browser trace.
+const TRACE_CAPABLE_STAGES = new Set(['fetch', 'visit'])
+function isTraceCapableStage(name) { return TRACE_CAPABLE_STAGES.has(name) }
+const tracableStages = computed(() => {
+  return wizPipeline.value
+    .map((row, idx) => ({ idx, stage: row.stage }))
+    .filter(s => isTraceCapableStage(s.stage))
+})
+
+// "Apply this trace to <selected stage>" — uses committedActions
+// (post-send), not the live staged queue. Called from the panel that
+// only appears AFTER a successful Send round-trip.
+function applyCommittedTrace() {
+  const idx = applyTraceStageIdx.value
+  if (idx == null || !wizPipeline.value[idx]) return
+  if (!committedActions.value.length) return
+  wizPipeline.value[idx]._trace = committedActions.value.slice()
+  wizPipeline.value = [...wizPipeline.value]
+  const n = wizPipeline.value[idx]._trace.length
+  const name = wizPipeline.value[idx].stage
+  wizStatus.value = { kind: 'ok', text: `Trace (${n} actions) applied to ${name} (stage ${idx + 1}).` }
+}
+
+// Legacy hook from openTraceRecorder — keep but route through the new
+// committed-action store so the behaviour matches what the new
+// dropdown applies.
 function applyRecordingToStageTrace() {
   if (pickerTargetStageIdx.value == null) return
   const idx = pickerTargetStageIdx.value
-  wizPipeline.value[idx]._trace = pickerActions.value.slice()
+  const src = committedActions.value.length ? committedActions.value : pickerActions.value
+  wizPipeline.value[idx]._trace = src.slice()
   wizPipeline.value = [...wizPipeline.value]
   closePicker()
 }
@@ -2949,14 +3063,22 @@ function applyRecordingToStageTrace() {
 // session — explicitly avoid that. The paused session lives in
 // pausedCmfSession; the resume banner picks it up.
 function applyRecordingAndPauseSession() {
-  if (pickerTargetStageIdx.value == null) return
   if (pickerStrategy.value !== 'cmf' || !cmfSessionId.value) {
     // Defensive: nothing to keep — fall back to the normal apply.
     applyRecordingToStageTrace()
     return
   }
-  const idx = pickerTargetStageIdx.value
-  wizPipeline.value[idx]._trace = pickerActions.value.slice()
+  // Prefer the committed log (post-send actions) — that's what really
+  // shaped the parked page; staged queue is a draft.
+  const src = committedActions.value.length ? committedActions.value : pickerActions.value
+  const idx = pickerTargetStageIdx.value != null
+    ? pickerTargetStageIdx.value
+    : (applyTraceStageIdx.value != null ? applyTraceStageIdx.value : null)
+  if (idx == null) {
+    wizStatus.value = { kind: 'error', text: 'Pick the target stage in the Apply panel first.' }
+    return
+  }
+  wizPipeline.value[idx]._trace = src.slice()
   wizPipeline.value = [...wizPipeline.value]
   pausedCmfSession.value = {
     sessionId: cmfSessionId.value,
@@ -2969,6 +3091,7 @@ function applyRecordingAndPauseSession() {
   pickerLoadedUrl.value     = null
   pickerSelected.value      = null
   pickerActions.value       = []
+  committedActions.value    = []
   pickerTargetStageIdx.value = null
   pickerTargetArgName.value  = null
   pickerHtml.value          = ''
@@ -5293,6 +5416,38 @@ if (typeof window !== 'undefined') {
   color: #14365b;
   font-size: 0.82em;
 }
+/* Pre-Send drafted-but-not-replayed YAML uses a muted style so it
+   doesn't compete with the post-Send commit panel below. */
+.picker-actions-draft {
+  opacity: 0.75;
+  border-left: 3px solid #cbd5e1;
+}
+/* Post-Send commit panel — green border to signal "ready to save". */
+.picker-committed-panel {
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-left: 4px solid #16a34a;
+  border-radius: 4px;
+}
+.picker-committed-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.picker-committed-head strong { color: #14532d; }
+.picker-committed-hint { color: #4d7059; font-size: 0.82em; }
+.picker-apply-trace {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.picker-apply-trace label { color: #14532d; font-size: 0.9em; }
+.picker-apply-select { max-width: 260px; }
 .picker-empty-small {
   padding: 8px 14px;
   color: #888;
