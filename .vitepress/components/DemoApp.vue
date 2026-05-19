@@ -595,6 +595,9 @@ go</pre>
           <div class="picker-mode-tabs">
             <button :class="['picker-tab', pickerMode === 'selector-single' && 'active']" @click="setPickerMode('selector-single')">🎯 Single</button>
             <button :class="['picker-tab', pickerMode === 'selector-list'   && 'active']" @click="setPickerMode('selector-list')">📋 List</button>
+            <button :class="['picker-tab', pickerMode === 'multi-sample'    && 'active']"
+                    title="Click 2+ examples of the repeating link/card you want the crawler to follow. The picker generalises a CSS selector that matches all of them — meant for explore-stage args."
+                    @click="setPickerMode('multi-sample')">📍 Repeating</button>
             <button :class="['picker-tab', pickerMode === 'action-record'   && 'active']" @click="setPickerMode('action-record')">⏺ Record actions</button>
             <button :class="['picker-tab', pickerMode === 'ai-magic'        && 'active']" @click="setPickerMode('ai-magic')">🪄 AI Magic</button>
           </div>
@@ -699,6 +702,38 @@ go</pre>
               {{ pickerTargetArgName ? `Use this selector for "${pickerTargetArgName}"` : 'Open this from an arg to apply' }}
             </button>
             <button class="btn btn-ghost btn-sm" @click="pickerSelected = null">Clear</button>
+          </div>
+        </div>
+
+        <!-- Multi-link sample panel — visible when picker is in
+             'multi-sample' mode. Shows the running generalised selector
+             plus a "match count" so the user can decide when enough
+             examples have been clicked. Apply to explore-stage args. -->
+        <div v-if="pickerMode === 'multi-sample'" class="picker-result picker-multi">
+          <div class="picker-multi-head">
+            <strong>📍 Repeating-link sampler</strong>
+            <span v-if="pickerTargetArgName" class="picker-multi-target">
+              → target: {{ pickerTargetArgName }}
+            </span>
+          </div>
+          <div class="picker-empty-small picker-stage-hint">
+            Click 2+ examples of the same repeating element (e.g. product link, "next page" link, list item). The picker grows a selector that matches all clicked samples — apply it to your explore stage when the count looks right.
+          </div>
+          <div v-if="multiSampleStatus.samples > 0" class="picker-result-row">
+            <code class="picker-selector">{{ multiSampleStatus.selector || '— no common selector yet —' }}</code>
+            <span class="picker-matches">
+              {{ multiSampleStatus.samples }} sample{{ multiSampleStatus.samples === 1 ? '' : 's' }}
+              · {{ multiSampleStatus.matches }} match{{ multiSampleStatus.matches === 1 ? '' : 'es' }}
+            </span>
+          </div>
+          <div v-if="multiSampleStatus.sampleText" class="picker-sample">{{ multiSampleStatus.sampleText }}</div>
+          <div class="picker-actions">
+            <button class="btn btn-primary btn-sm"
+                    :disabled="!pickerTargetArgName || !multiSampleStatus.selector"
+                    @click="applyMultiSampleSelector">
+              {{ pickerTargetArgName ? `Use this selector for "${pickerTargetArgName}"` : 'Open this from an arg to apply' }}
+            </button>
+            <button class="btn btn-ghost btn-sm" @click="clearMultiSamples">Clear samples</button>
           </div>
         </div>
 
@@ -2051,6 +2086,11 @@ const pickerSelected      = ref(null)               // { selector, matches, samp
 const pickerActions       = ref([])                 // accumulated action list during recording
 const pickerTargetStageIdx = ref(null)              // wizPipeline index that owns the target arg
 const pickerTargetArgName  = ref(null)              // arg.name in that stage's args
+// Live state of the multi-sample (repeating-link) picker, synced from
+// picker.js on every click. selector is the generalised CSS that
+// matches every clicked sample so far; matches is its querySelectorAll
+// count on the iframe document.
+const multiSampleStatus    = ref({ selector: null, matches: 0, samples: 0, sampleText: '' })
 
 // AI Magic state — intent-driven inference of selectors or actions.
 // The algo result arrives synchronously (~ms); the LLM result fills in
@@ -2253,6 +2293,12 @@ function setPickerMode(m) {
   try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-mode', mode: ifrMode }, '*') } catch (_) {}
   if (m === 'action-record') pickerSelected.value = null
   if (m !== 'action-record')  pickerActions.value = []
+  if (m !== 'multi-sample') {
+    // Switched away from sampling — drop the local mirror so the panel
+    // restarts from zero next time the user enters the mode. picker.js
+    // already cleared its own highlights on the mode message.
+    multiSampleStatus.value = { selector: null, matches: 0, samples: 0, sampleText: '' }
+  }
   if (m !== 'ai-magic') {
     // Drop AI Magic state + highlights when switching away.
     clearHighlightInIframe()
@@ -2261,6 +2307,20 @@ function setPickerMode(m) {
     aiPickedRefined.value = null
     aiError.value = null
   }
+}
+function clearMultiSamples() {
+  // Bounce the iframe out of and back into multi-sample so picker.js
+  // wipes its local seed array + highlight classes.
+  setPickerMode('selector-single')
+  setPickerMode('multi-sample')
+}
+function applyMultiSampleSelector() {
+  const sel = multiSampleStatus.value.selector
+  if (!sel || pickerTargetStageIdx.value == null || !pickerTargetArgName.value) {
+    closePicker(); return
+  }
+  updateStageArg(pickerTargetStageIdx.value, pickerTargetArgName.value, sel)
+  closePicker()
 }
 function stopActionRecording() {
   const ifr = document.getElementById('wr-picker-iframe')
@@ -2377,6 +2437,16 @@ function onPickerMessage(ev) {
   } else if (d.type === 'webrobot-picker-multi-warn') {
     // Surface the warning briefly (e.g. clicked outside flatSelect container).
     wizStatus.value = { kind: 'error', text: d.warn || 'click was outside the segment container' }
+  } else if (d.type === 'webrobot-pick-multi-sample') {
+    // Repeating-link sampler progress ping. d.selector may be null if
+    // the seeds don't yet share a usable suffix (rare — usually means
+    // user clicked unrelated elements).
+    multiSampleStatus.value = {
+      selector:   d.selector || null,
+      matches:    typeof d.matches === 'number' ? d.matches : 0,
+      samples:    typeof d.samples === 'number' ? d.samples : 0,
+      sampleText: d.sampleText || '',
+    }
   } else if (d.type === 'webrobot-step-request') {
     // Auto-send from picker.js: the user clicked a non-editable target
     // (link, button, submit) which picker.js treats as the commit
