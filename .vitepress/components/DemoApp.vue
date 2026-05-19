@@ -541,9 +541,11 @@ go</pre>
                     <button
                       v-if="isSelectorArg(a)"
                       class="btn btn-secondary btn-xs wizard-pick-btn"
-                      title="Open the page in the picker and click an element to get a CSS selector"
-                      @click="openPicker(idx, a.name, 'selector-single')"
-                    >🎯 Pick</button>
+                      :title="pickModeFor(row.stage) === 'selector-list'
+                        ? 'Click one repeating link (e.g. one product card or one pagination link) — the picker generalises it to match all siblings.'
+                        : 'Open the page in the picker and click an element to get a CSS selector'"
+                      @click="openPicker(idx, a.name, pickModeFor(row.stage))"
+                    >🎯 {{ pickModeFor(row.stage) === 'selector-list' ? 'Pick (list)' : 'Pick' }}</button>
                   </div>
                 </div>
                 <div v-if="suggestionsFor(row.stage).length" class="wizard-chips">
@@ -2303,6 +2305,21 @@ function copyPickerActions() {
 function isSelectorArg(arg) {
   if (!arg || !arg.name) return false
   return /selector$/i.test(arg.name) || arg.name.toLowerCase() === 'selector'
+}
+
+// Stages whose primary selector arg points at a REPEATING link/card
+// (next-page paginator, list of item links, etc.). For those we open
+// the picker in 'selector-list' mode so a single click is generalised
+// to a selector that matches every sibling, instead of a one-shot
+// :nth-of-type path that only hits the exact element the user clicked.
+const LIST_PICK_STAGES = new Set([
+  'intelligentExplore',
+  'intelligentWgetExplore',
+  'wgetExplore',
+  'visitExplore',
+])
+function pickModeFor(stage) {
+  return LIST_PICK_STAGES.has(stage) ? 'selector-list' : 'selector-single'
 }
 
 // postMessage listener for the proxied iframe.
