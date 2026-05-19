@@ -471,7 +471,16 @@ go</pre>
                   <div class="wizard-editor-row-actions">
                     <button class="btn btn-ghost btn-xs" :disabled="idx === 0" @click="moveStage(idx, -1)">↑</button>
                     <button class="btn btn-ghost btn-xs" :disabled="idx === wizPipeline.length - 1" @click="moveStage(idx, 1)">↓</button>
-                    <button class="btn btn-secondary btn-xs" @click="openTraceRecorder(idx)" title="Record a sequence of click/type/scroll actions to run as this stage's trace">⏺</button>
+                    <!-- ⏺ trace recorder doesn't make sense on extract /
+                         flatSelect: those stages don't emit a trace:
+                         block, the user only ever interacts with them
+                         through the structured fields editor below
+                         (🎯 Pick fields / 🪄 AI suggest fields). Hide
+                         it there to keep the row uncluttered. -->
+                    <button v-if="!isStructuredFieldsStage(row.stage)"
+                            class="btn btn-secondary btn-xs"
+                            @click="openTraceRecorder(idx)"
+                            title="Record a sequence of click/type/scroll actions to run as this stage's trace">⏺</button>
                     <button class="btn btn-danger btn-xs" @click="removeStage(idx)">✕</button>
                   </div>
                 </div>
