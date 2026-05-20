@@ -686,9 +686,9 @@ go</pre>
     <!-- ───────── Validate modal (browser-automation preview) ─────── -->
     <div v-if="validateOpen" class="picker-modal-backdrop" @click.self="closeValidate">
       <div class="picker-modal validate-modal">
-        <div class="picker-modal-header">
+        <div class="picker-modal-header validate-modal-header">
           <strong>🔬 Validate selectors (real browser automation)</strong>
-          <button class="btn btn-ghost btn-sm" @click="closeValidate">✕ Close</button>
+          <button class="btn btn-secondary btn-sm validate-close-btn" @click="closeValidate">✕ Close</button>
         </div>
 
         <div class="validate-body">
@@ -759,6 +759,16 @@ go</pre>
               <strong>URL:</strong> {{ validateResult.final_url }}
             </div>
           </div>
+        </div>
+
+        <div class="validate-footer">
+          <span v-if="validateResult" class="validate-footer-summary">
+            <strong v-if="validateResult.valid"  class="validate-footer-ok">✓ Valid</strong>
+            <strong v-else                       class="validate-footer-ko">✗ Invalid</strong>
+            <span v-if="validateResult.record_count != null"> · {{ validateResult.record_count }} record(s)</span>
+            <span v-if="validateResult.took_ms != null"> · {{ (validateResult.took_ms / 1000).toFixed(1) }}s</span>
+          </span>
+          <button class="btn btn-secondary" @click="closeValidate">Close</button>
         </div>
       </div>
     </div>
@@ -6548,6 +6558,19 @@ if (typeof window !== 'undefined') {
 
 /* ── Validate-selectors modal ─────────────────────────────────── */
 .validate-modal { width: min(95vw, 1500px); height: min(92vh, 880px); }
+.validate-modal-header strong { flex: 1; color: #111827; font-size: 1.02em; }
+.validate-close-btn { white-space: nowrap; }
+.validate-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  border-top: 1px solid #e0e0e0;
+  background: #fafbfc;
+}
+.validate-footer-summary { flex: 1; color: #374151; font-size: 0.88em; }
+.validate-footer-ok { color: #166534; }
+.validate-footer-ko { color: #b91c1c; }
 .validate-body {
   flex: 1;
   display: grid;
@@ -6597,8 +6620,8 @@ if (typeof window !== 'undefined') {
 .validate-step-error   { color: #b91c1c; }
 .validate-step-status { margin: 0 6px; font-size: 0.78em; color: inherit; opacity: 0.85; }
 .validate-step-msg { color: #374151; }
-.validate-records-scroll { max-height: 280px; overflow: auto; border: 1px solid #e0e0e0; border-radius: 6px; }
-.validate-records-table { width: 100%; border-collapse: collapse; font-size: 0.82em; }
+.validate-records-scroll { max-height: 280px; overflow: auto; border: 1px solid #e0e0e0; border-radius: 6px; background: #ffffff; }
+.validate-records-table { width: 100%; border-collapse: collapse; font-size: 0.82em; background: #ffffff; color: #111827; }
 .validate-records-table th,
 .validate-records-table td {
   padding: 6px 8px;
@@ -6609,8 +6632,10 @@ if (typeof window !== 'undefined') {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: #111827;
 }
 .validate-records-table th { background: #f3f4f6; font-weight: 600; color: #1f2937; position: sticky; top: 0; }
+.validate-records-table td { color: #111827; }
 .validate-error { margin-top: 12px; padding: 10px 12px; background: #fef2f2; color: #b91c1c; border-radius: 6px; font-size: 0.88em; }
 .validate-iframe-placeholder {
   flex: 1;
