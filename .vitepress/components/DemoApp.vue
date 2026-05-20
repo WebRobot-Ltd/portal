@@ -2404,10 +2404,13 @@ async function goBackInCamoufox() {
   const before = pickerLoadedUrl.value
   await forwardStepToCamoufox([{ type: 'Back' }])
   if (pickerLoadedUrl.value === before) {
-    pickerLoadError.value = '← Back: already at the start of this session — nothing to undo.'
+    // Surface as a non-fatal status bubble — pickerLoadError swaps the
+    // iframe out for the "Load failed: …" panel which is too loud
+    // for "history is empty".
+    wizStatus.value = { kind: 'info', text: '← Back: already at the start of this session — nothing to undo.' }
     setTimeout(() => {
-      if (pickerLoadError.value && pickerLoadError.value.startsWith('← Back')) {
-        pickerLoadError.value = null
+      if (wizStatus.value && wizStatus.value.text && wizStatus.value.text.startsWith('← Back')) {
+        wizStatus.value = null
       }
     }, 4000)
   }
