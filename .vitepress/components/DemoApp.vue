@@ -811,12 +811,42 @@ go</pre>
               <span v-if="aiLoading" class="loading-spinner"></span>
               {{ aiLoading ? 'Thinking…' : '🪄 Auto-suggest fields' }}
             </button>
+            <button class="btn btn-secondary btn-sm"
+                    :disabled="suggestNamesLoading || !((currentStageFields).length)"
+                    @click="suggestFieldNamesFromModal">
+              <span v-if="suggestNamesLoading" class="loading-spinner"></span>
+              🪄 Suggest names
+            </button>
             <button class="btn btn-secondary btn-sm" @click="closePicker">✅ Done</button>
           </div>
           <div v-if="aiError" class="picker-ai-err">{{ aiError }}</div>
           <div class="picker-multi-hint">
-            Click each field on the page to add it. Auto-suggest pre-fills the field rows from your description. Edit names + methods in the stage editor.
+            Click each field on the page to add it. Edit names below; "🪄 Suggest names" asks the LLM to propose snake_case columns from the samples.
           </div>
+          <!-- Inline editor: every field picked on the current stage is
+               listed here so the user names + tweaks without closing
+               the modal. Selectors that were already saved before
+               re-opening were re-painted in the iframe by picker.js
+               via webrobot-picker-multi-restore. -->
+          <table v-if="currentStageFields.length" class="picker-multi-fields-table">
+            <thead>
+              <tr><th></th><th>as (column)</th><th>selector</th><th>sample</th><th></th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="(f, fIdx) in currentStageFields" :key="fIdx">
+                <td><span class="wizard-field-dot" :style="{background: f._color || '#bbb'}"></span></td>
+                <td>
+                  <input type="text" class="text-input"
+                         :value="f.as"
+                         placeholder="column"
+                         @input="updateFieldProp(pickerTargetStageIdx, fIdx, 'as', $event.target.value)">
+                </td>
+                <td><code class="picker-multi-sel" :title="f.selector">{{ (f.selector || '').slice(0, 60) }}{{ (f.selector || '').length > 60 ? '…' : '' }}</code></td>
+                <td class="picker-multi-sample" :title="f._sample">{{ (f._sample || '').slice(0, 32) }}</td>
+                <td><button class="btn btn-danger btn-xs" @click="removeFieldFromModal(fIdx)">✕</button></td>
+              </tr>
+            </tbody>
+          </table>
         </div>
 
         <!-- AI Magic panel -->
@@ -2749,6 +2779,29 @@ function onPickerMessage(ev) {
       ? 'selector-single'
       : (pickerMode.value || 'selector-single')
     try { ev.source && ev.source.postMessage({ type: 'webrobot-picker-mode', mode: ifrMode }, '*') } catch (_) {}
+    // When the picker is reopened on a stage that already carries
+    // row._fields (extract / flatSelect, user comes back to refine),
+    // re-paint those seeds inside the iframe so the user sees
+    // immediately what's saved. picker.js handles the restore
+    // synchronously — re-resolves each selector against the current
+    // DOM, applies the outline + color.
+    if ((ifrMode === 'multi-field' || pickerIntendedMode.value === 'multi-field') && pickerTargetStageIdx.value != null) {
+      const row = wizPipeline.value[pickerTargetStageIdx.value]
+      const fields = (row && Array.isArray(row._fields)) ? row._fields.filter(f => (f.selector || '').trim()) : []
+      if (fields.length) {
+        try {
+          ev.source && ev.source.postMessage({
+            type: 'webrobot-picker-multi-restore',
+            fields: fields.map(f => ({
+              selector: f.selector,
+              color:    f._color || null,
+              label:    f.as || null,
+              sampleText: f._sample || null,
+            })),
+          }, '*')
+        } catch (_) {}
+      }
+    }
   } else if (d.type === 'webrobot-picker-cancel') {
     closePicker()
   }
@@ -3074,6 +3127,43 @@ function addField(idx) {
 // a selector are skipped (LLM needs at least the selector to derive
 // context). On success we patch row._fields[*].as in-place.
 const suggestNamesLoading = ref(false)
+// Live mirror of the target stage's _fields so the inline editor in
+// the multi-field modal can iterate them without re-resolving
+// wizPipeline.value[stageIdx] on every render.
+const currentStageFields = computed(() => {
+  const idx = pickerTargetStageIdx.value
+  if (idx == null) return []
+  const row = wizPipeline.value[idx]
+  return (row && Array.isArray(row._fields)) ? row._fields : []
+})
+// Used by the inline "🪄 Suggest names" button INSIDE the modal —
+// just forwards to the existing suggestFieldNames(stageIdx) action.
+function suggestFieldNamesFromModal() {
+  if (pickerTargetStageIdx.value == null) return
+  suggestFieldNames(pickerTargetStageIdx.value)
+}
+function removeFieldFromModal(fieldIdx) {
+  if (pickerTargetStageIdx.value == null) return
+  // Also clear the highlight on the iframe so the user sees the field
+  // is gone — picker.js holds its own multiFields array we need to
+  // sync. The simplest sync is to re-send the restore message with
+  // the remaining fields after the local mutation.
+  removeField(pickerTargetStageIdx.value, fieldIdx)
+  const row = wizPipeline.value[pickerTargetStageIdx.value]
+  const fields = (row && Array.isArray(row._fields)) ? row._fields.filter(f => (f.selector || '').trim()) : []
+  const ifr = document.getElementById('wr-picker-iframe')
+  try {
+    ifr && ifr.contentWindow && ifr.contentWindow.postMessage({
+      type: 'webrobot-picker-multi-restore',
+      fields: fields.map(f => ({
+        selector: f.selector,
+        color:    f._color || null,
+        label:    f.as || null,
+        sampleText: f._sample || null,
+      })),
+    }, '*')
+  } catch (_) {}
+}
 async function suggestFieldNames(stageIdx) {
   const row = wizPipeline.value[stageIdx]
   if (!row || !Array.isArray(row._fields) || !row._fields.length) return
@@ -5696,6 +5786,46 @@ if (typeof window !== 'undefined') {
 }
 /* Phase-switch CTA: prominent enough that the user notices it as the
    next step but not jarring while they're navigating. */
+/* Inline editor inside the multi-field picker modal. */
+.picker-multi-fields-table {
+  width: 100%;
+  margin-top: 6px;
+  border-collapse: collapse;
+  font-size: 0.85em;
+}
+.picker-multi-fields-table thead th {
+  text-align: left;
+  color: #666;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-bottom: 1px solid #eee;
+}
+.picker-multi-fields-table td {
+  padding: 3px 6px;
+  vertical-align: middle;
+  border-bottom: 1px solid #f4f4f4;
+}
+.picker-multi-fields-table td input.text-input {
+  width: 100%;
+  font-size: 0.9em;
+  padding: 2px 6px;
+}
+.picker-multi-sel {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 0.78em;
+  color: #555;
+  background: #f5f5f5;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.picker-multi-sample {
+  color: #888;
+  font-size: 0.82em;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .picker-phase-cta {
   display: flex;
   align-items: center;
