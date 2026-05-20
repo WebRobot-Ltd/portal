@@ -497,6 +497,13 @@ go</pre>
                       <button class="btn btn-primary btn-xs"
                               title="Open the picker and describe the fields you want — LLM fills the table"
                               @click="openAiSuggestFields(idx)">🪄 AI suggest fields</button>
+                      <button class="btn btn-secondary btn-xs"
+                              :disabled="suggestNamesLoading || !(row._fields && row._fields.length)"
+                              :title="(row._fields && row._fields.length) ? 'Ask the LLM to propose snake_case column names from the samples you picked' : 'Pick some fields first'"
+                              @click="suggestFieldNames(idx)">
+                        <span v-if="suggestNamesLoading" class="loading-spinner"></span>
+                        🪄 Suggest names
+                      </button>
                       <button class="btn btn-ghost btn-xs" @click="addField(idx)">+ Add empty</button>
                     </div>
                   </div>
@@ -3060,6 +3067,59 @@ function addField(idx) {
   if (!f) return
   wizPipeline.value[idx]._fields = [...f, { selector: '', as: '', method: 'text' }]
   wizPipeline.value = [...wizPipeline.value]
+}
+
+// Ask the demo wizard's LLM (BYOC, demo org credential) to propose
+// snake_case names for every picked field on a stage. Fields without
+// a selector are skipped (LLM needs at least the selector to derive
+// context). On success we patch row._fields[*].as in-place.
+const suggestNamesLoading = ref(false)
+async function suggestFieldNames(stageIdx) {
+  const row = wizPipeline.value[stageIdx]
+  if (!row || !Array.isArray(row._fields) || !row._fields.length) return
+  // Build the LLM-side items: drop empty selectors, keep a short
+  // sample so the prompt stays compact (backend trims further to
+  // 140 chars anyway).
+  const items = row._fields
+    .map((f, i) => ({ _idx: i, selector: (f.selector || '').trim(), sample: (f._sample || '').slice(0, 200) }))
+    .filter(it => it.selector)
+  if (!items.length) {
+    wizStatus.value = { kind: 'error', text: 'Pick at least one field selector before naming.' }
+    return
+  }
+  suggestNamesLoading.value = true
+  try {
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/suggest-field-names`, {
+      method: 'POST',
+      body: JSON.stringify({
+        items: items.map(it => ({ selector: it.selector, sample: it.sample })),
+        stage_name: row.stage,
+      }),
+    })
+    const j = await r.json()
+    if (!r.ok || j.error) throw new Error(j.error || 'suggest-field-names failed')
+    const suggestions = Array.isArray(j.fields) ? j.fields : []
+    if (!suggestions.length) {
+      wizStatus.value = { kind: 'error', text: 'LLM returned no usable names — try again or rename manually.' }
+      return
+    }
+    // Zip back by index. The backend preserves order, so suggestions[k]
+    // corresponds to items[k] which carries _idx pointing at the
+    // original row._fields slot.
+    const next = row._fields.slice()
+    suggestions.forEach((sg, k) => {
+      const i = items[k] && items[k]._idx
+      if (i == null) return
+      next[i] = { ...next[i], as: sg.as || next[i].as }
+    })
+    row._fields = next
+    wizPipeline.value = [...wizPipeline.value]
+    wizStatus.value = { kind: 'ok', text: `🪄 Suggested ${suggestions.length} name${suggestions.length === 1 ? '' : 's'} for ${row.stage}.` }
+  } catch (e) {
+    wizStatus.value = { kind: 'error', text: 'Suggest-names: ' + (e.message || String(e)) }
+  } finally {
+    suggestNamesLoading.value = false
+  }
 }
 function removeField(idx, fieldIdx) {
   const row = wizPipeline.value[idx]
