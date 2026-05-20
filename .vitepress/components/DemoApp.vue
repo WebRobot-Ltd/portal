@@ -3959,6 +3959,15 @@ const wizValidationErrors = computed(() => {
 })
 const wizValid = computed(() => wizValidationErrors.value.length === 0)
 
+// Detect whether the wizard YAML needs a CSV input dataset. Right
+// now there's exactly one stage that consumes one — load_csv — but
+// the regex is broad enough to catch aliases (loadCsv, load_dataset)
+// if we add them later. When this is true, Save & Run pauses for the
+// upload modal before kicking off the Spark job.
+function pipelineNeedsInputCsv(yamlText) {
+  return /\b(load_csv|loadCsv|load_dataset)\b/.test(yamlText || '')
+}
+
 async function wizardSubmit(execute) {
   if (!wizValid.value) {
     // Keep the existing red status as well so it's visible without
@@ -3967,9 +3976,21 @@ async function wizardSubmit(execute) {
     return
   }
   const name = wizPipelineName.value.trim()
+  const yamlText = wizYamlPreview.value
+
+  // If the user pressed Save & Run AND the pipeline declares a
+  // load_csv-style stage, we need an input dataset before executing.
+  // Save the pipeline as a draft first (so an agent exists for the
+  // upload endpoint to attach the dataset to), then funnel into the
+  // existing dataset-upload modal — that flow already handles CSV
+  // upload, auto-generated single-row mode, and execute.
+  if (execute && pipelineNeedsInputCsv(yamlText)) {
+    await wizardSaveThenOpenDatasetModal(name, yamlText)
+    return
+  }
+
   wizStatus.value = { kind: 'info', text: execute ? 'Saving + submitting…' : 'Saving as draft…' }
   try {
-    const yamlText = wizYamlPreview.value
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/save-generated-pipeline`, {
       method: 'POST',
       body: JSON.stringify({ pipeline_name: name, pipeline_yaml: yamlText, execute })
@@ -4012,6 +4033,36 @@ async function wizardSubmit(execute) {
     }
     // Refresh demo selector so the new pipeline appears.
     loadPipelines()
+  } catch (e) {
+    wizStatus.value = { kind: 'error', text: 'Error: ' + (e.message || String(e)) }
+  }
+}
+
+// load_csv-needing pipelines: save as draft first (so /upload-dataset
+// has an agent to attach to), refresh the demo list, auto-select the
+// draft in the existing pipeline selector, and trigger the dataset
+// upload modal. From there the existing handleExecutePipeline path
+// uploads the CSV and submits the Spark job — no duplicated UI.
+async function wizardSaveThenOpenDatasetModal(name, yamlText) {
+  wizStatus.value = { kind: 'info', text: 'Saving draft so the input dataset can be attached…' }
+  try {
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/save-generated-pipeline`, {
+      method: 'POST',
+      body: JSON.stringify({ pipeline_name: name, pipeline_yaml: yamlText, execute: false })
+    })
+    const j = await r.json()
+    if (!r.ok) throw new Error(j.error || 'Save failed')
+    await loadPipelines()
+    // Auto-select the just-saved draft so handleExecutePipeline picks
+    // it up. selectedPipeline = the id the selector uses (pipeline_name).
+    selectedPipeline.value = name
+    if (typeof onPipelineSelected === 'function') onPipelineSelected()
+    wizStatus.value = {
+      kind: 'success',
+      text: `✅ Saved as draft. Please choose a CSV (or skip for auto-generated input) in the upload modal that just opened.`
+    }
+    // Open the existing upload modal — same UX used for curated demos.
+    handleExecutePipeline()
   } catch (e) {
     wizStatus.value = { kind: 'error', text: 'Error: ' + (e.message || String(e)) }
   }
