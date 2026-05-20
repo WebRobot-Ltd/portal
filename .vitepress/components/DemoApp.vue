@@ -315,6 +315,38 @@ go</pre>
           <span v-if="statusData.records_output != null"> · <strong>Records out:</strong> {{ statusData.records_output }}</span>
           <span v-else-if="statusData.records_processed != null"> · <strong>Records processed:</strong> {{ statusData.records_processed }}</span>
         </div>
+
+        <!-- Phased "what is happening NOW" panel. While the cluster is
+             coming up (image pulls, executor scheduling) the DB-level
+             status is just "SUBMITTED" for a minute — without this
+             panel the user thinks nothing is happening. -->
+        <div v-if="statusData && !isExecutionTerminal" class="exec-phase">
+          <div class="exec-phase-row">
+            <span class="exec-phase-spinner" v-if="phaseShowSpinner"></span>
+            <span class="exec-phase-icon" v-else>{{ phaseIcon }}</span>
+            <strong class="exec-phase-label">{{ phaseLabel }}</strong>
+            <span class="exec-phase-detail">{{ phaseDetail }}</span>
+          </div>
+          <div v-if="statusData.driver || (statusData.executors && statusData.executors.length)" class="exec-phase-pods">
+            <div v-if="statusData.driver">
+              Driver:
+              <span :class="['exec-phase-pill', statusData.driver.ready ? 'ready' : 'pending']">
+                {{ statusData.driver.ready ? '✓ ready' : (statusData.driver.reason || statusData.driver.phase) }}
+              </span>
+              <span v-if="statusData.driver.node" class="exec-phase-node">on {{ statusData.driver.node }}</span>
+            </div>
+            <div v-if="statusData.executors && statusData.executors.length">
+              Executors:
+              <span class="exec-phase-pill" :class="(statusData.executors_ready === statusData.executors_total) ? 'ready' : 'pending'">
+                {{ statusData.executors_ready }}/{{ statusData.executors_total }} ready
+              </span>
+              <span v-if="executorImagePullingNode" class="exec-phase-detail">
+                · pulling image on {{ executorImagePullingNode }}
+              </span>
+            </div>
+          </div>
+        </div>
+
         <div v-if="statusData && statusData.error_message" class="exec-error">
           <strong>Error:</strong> <code>{{ statusData.error_message.slice(0, 600) }}</code>
         </div>
@@ -2379,6 +2411,59 @@ const statusBadgeColor = computed(() => {
 const isExecutionRunning = computed(() => {
   const s = statusData.value && statusData.value.status
   return s === 'RUNNING' || s === 'SUBMITTED'
+})
+
+const TERMINAL_LIFECYCLE = new Set(['completed', 'failed', 'cancelled'])
+const isExecutionTerminal = computed(() => {
+  const s = statusData.value && statusData.value.status
+  const p = statusData.value && statusData.value.phase
+  if (TERMINAL_LIFECYCLE.has(p)) return true
+  return s === 'COMPLETED' || s === 'SUCCEEDED' || s === 'FAILED' || s === 'CANCELLED'
+})
+
+// Phase → (icon, friendly label, free-form detail) for the loading
+// strip. Driven by the backend-synthesized `phase` field which we
+// trust over the raw DB status because it correlates with what's
+// actually visible to the user (driver up? executors pulling?).
+const PHASE_META = {
+  submitting:         { icon: '⏳', spinner: true,  label: 'Submitting to Spark…',
+                        detail: 'Spark Operator is materialising the CRD on the cluster.' },
+  starting_driver:    { icon: '🐣', spinner: true,  label: 'Starting Spark driver…',
+                        detail: 'The driver pod is scheduling / pulling image.' },
+  waiting_executors:  { icon: '🛎️', spinner: true, label: 'Driver ready, waiting for executors…',
+                        detail: 'Driver is up, asking k8s for executor pods.' },
+  pulling_executors:  { icon: '📥', spinner: true,  label: 'Pulling executor image on workers…',
+                        detail: 'First run on a node downloads ~1 GB of container image. Typically 30–90s.' },
+  executors_starting: { icon: '⚙️', spinner: true,  label: 'Executors warming up…',
+                        detail: 'Image is on the node, container is initialising.' },
+  running:            { icon: '🚀', spinner: true,  label: 'Pipeline running…',
+                        detail: 'Driver + executors are fully up; tasks are flowing.' },
+  completed:          { icon: '✅', spinner: false, label: 'Completed',
+                        detail: 'Final output is in the preview table below.' },
+  failed:             { icon: '❌', spinner: false, label: 'Failed',
+                        detail: 'See the error message above and the Spark driver logs.' },
+  cancelled:          { icon: '🛑', spinner: false, label: 'Cancelled',
+                        detail: 'User cancelled this run.' },
+  unknown:            { icon: '❓', spinner: false, label: 'Status unknown',
+                        detail: 'The execution record can\'t be located. It may have been pruned.' },
+}
+const phaseMeta = computed(() => {
+  const p = statusData.value && statusData.value.phase
+  return PHASE_META[p] || PHASE_META.unknown
+})
+const phaseLabel      = computed(() => phaseMeta.value.label)
+const phaseDetail     = computed(() => phaseMeta.value.detail)
+const phaseIcon       = computed(() => phaseMeta.value.icon)
+const phaseShowSpinner = computed(() => phaseMeta.value.spinner)
+// "Pulling image on w1mg1" — used in the executor row to point the
+// user at the node that's still pulling. Returns null when no
+// executor is in image-pull state.
+const executorImagePullingNode = computed(() => {
+  const execs = (statusData.value && statusData.value.executors) || []
+  for (const e of execs) {
+    if (e && e.image_pulling && e.node) return e.node
+  }
+  return null
 })
 
 // ─── CLI-style pipeline wizard ──────────────────────────────────────
@@ -5686,6 +5771,48 @@ if (typeof window !== 'undefined') {
   border-radius: 4px;
   font-size: 0.85em;
 }
+.exec-phase {
+  margin-top: 10px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, #fff7e6 0%, #fffaf0 100%);
+  border: 1px solid #f5c06b;
+  border-radius: 8px;
+  font-size: 0.92em;
+  color: #4a3a1f;
+}
+.exec-phase-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.exec-phase-icon { font-size: 1.15em; }
+.exec-phase-label { color: #222; font-size: 1em; }
+.exec-phase-detail { color: #6b5a3a; font-size: 0.9em; }
+.exec-phase-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(245, 192, 107, 0.4);
+  border-top-color: #d97706;
+  border-radius: 50%;
+  animation: exec-phase-spin 0.9s linear infinite;
+}
+@keyframes exec-phase-spin { to { transform: rotate(360deg); } }
+.exec-phase-pods {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.88em;
+  color: #4a3a1f;
+}
+.exec-phase-pill {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.82em;
+  font-weight: 600;
+  margin-left: 4px;
+}
+.exec-phase-pill.ready   { background: #d1fae5; color: #065f46; }
+.exec-phase-pill.pending { background: #fef3c7; color: #92400e; }
+.exec-phase-node { color: #6b7280; font-size: 0.85em; margin-left: 4px; }
 .exec-output { margin-top: 18px; }
 .exec-output h3 { margin: 0 0 6px 0; }
 .exec-output-meta {
