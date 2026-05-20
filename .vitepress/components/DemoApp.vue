@@ -597,17 +597,19 @@ go</pre>
                 <div
                   v-for="a in (findStageSpec(row.stage) && findStageSpec(row.stage).arg_schema || [])"
                   :key="a.name"
+                  v-show="!isFieldsListArg(a)"
                   class="wizard-editor-arg"
                 >
-                  <label>
+                  <label :title="a.description || ''">
                     <strong>{{ a.name }}</strong><span v-if="a.required" class="wizard-arg-required" title="required">*</span>
                     <span class="wizard-arg-type">({{ a.type || 'any' }})</span>
+                    <span v-if="a.description" class="wizard-arg-desc">— {{ a.description }}</span>
                   </label>
                   <div class="wizard-arg-input-row">
                     <input
                       type="text"
                       :value="row.args[a.name] != null ? row.args[a.name] : ''"
-                      :placeholder="(a.description || '').slice(0, 80)"
+                      :placeholder="argPlaceholder(a)"
                       :class="['text-input', 'wizard-arg-input', a.required && (row.args[a.name] == null || String(row.args[a.name]).trim() === '') ? 'wizard-arg-missing' : '']"
                       @input="updateStageArg(idx, a.name, $event.target.value)"
                     />
@@ -2898,6 +2900,32 @@ function copyCommittedTrace() {
 function isSelectorArg(arg) {
   if (!arg || !arg.name) return false
   return /selector$/i.test(arg.name) || arg.name.toLowerCase() === 'selector'
+}
+
+// Args that are structured field-lists (extract.extractors,
+// flatSelect.extractors, etc.) live in row._fields not row.args, so
+// rendering a generic <input> for them shows a confusing placeholder
+// ("Array of {selector, method, as} maps — …" truncated) and a dead
+// text field the user can't actually use. The 📋 Fields panel below
+// is the only correct UI for them. Same alias set as the validator.
+const FIELDS_LIST_ARG_NAMES = new Set(['extractors', 'fields', 'columns'])
+function isFieldsListArg(arg) {
+  return !!(arg && arg.name && FIELDS_LIST_ARG_NAMES.has(arg.name))
+}
+
+// Compact, type-driven placeholder for the arg input. The catalog
+// description is shown in full as a label suffix; the placeholder
+// should hint at the SHAPE of the value, not repeat the description.
+function argPlaceholder(arg) {
+  if (!arg) return ''
+  const n = (arg.name || '').toLowerCase()
+  const t = (arg.type || '').toLowerCase()
+  if (isSelectorArg(arg))      return 'e.g. div.product > h2 a'
+  if (n.includes('url'))       return 'https://example.com/…'
+  if (n === 'jointype')        return 'LeftOuter | Inner'
+  if (n === 'depth' || t === 'int' || t === 'integer') return 'integer, e.g. 1'
+  if (n.startsWith('$'))       return '$column_name'
+  return ''
 }
 
 // Stages whose primary selector arg points at a REPEATING link/card
@@ -5832,6 +5860,12 @@ if (typeof window !== 'undefined') {
 .wizard-arg-type {
   color: #999;
   font-weight: normal;
+}
+.wizard-arg-desc {
+  color: #6b7280;
+  font-weight: normal;
+  font-size: 0.92em;
+  margin-left: 4px;
 }
 .wizard-arg-input {
   width: 100%;
