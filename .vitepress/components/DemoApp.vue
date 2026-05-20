@@ -2396,9 +2396,21 @@ async function openWithCamoufox(url) {
 // Drive page.goBack() on the live Camoufox tab. Backend treats the
 // "Back" action type as a back-nav primitive; we forward it as a
 // regular step so the same overlay + URL-refresh flow lights up.
-function goBackInCamoufox() {
+// We snapshot the URL before the call so we can tell the user when
+// goBack landed on the same page (Camoufox has nothing to undo,
+// e.g. already at the entry of the history stack).
+async function goBackInCamoufox() {
   if (pickerStrategy.value !== 'cmf' || !cmfSessionId.value) return
-  forwardStepToCamoufox([{ type: 'Back' }])
+  const before = pickerLoadedUrl.value
+  await forwardStepToCamoufox([{ type: 'Back' }])
+  if (pickerLoadedUrl.value === before) {
+    pickerLoadError.value = '← Back: already at the start of this session — nothing to undo.'
+    setTimeout(() => {
+      if (pickerLoadError.value && pickerLoadError.value.startsWith('← Back')) {
+        pickerLoadError.value = null
+      }
+    }, 4000)
+  }
 }
 
 // Ship the staged action queue (pickerActions) to Camoufox in one
