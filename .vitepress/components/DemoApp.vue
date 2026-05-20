@@ -3858,6 +3858,11 @@ const wizValidationErrors = computed(() => {
   const errs = []
   if (wizPipelineName.value.trim() === '') errs.push('Pipeline name is required.')
   if (wizPipeline.value.length === 0) errs.push('Add at least one stage.')
+  // Structured stages keep their field list outside row.args (in
+  // row._fields), so the generic "row.args[name] empty?" check would
+  // always fail on them. List the arg names whose value actually comes
+  // from _fields so we can route the requirement check separately.
+  const FIELDS_ARG_ALIASES = new Set(['extractors', 'fields', 'columns'])
   for (let i = 0; i < wizPipeline.value.length; i++) {
     const row = wizPipeline.value[i]
     const spec = findStageSpec(row.stage)
@@ -3865,8 +3870,19 @@ const wizValidationErrors = computed(() => {
       errs.push(`Stage #${i + 1} "${row.stage}" is not in the live catalog.`)
       continue
     }
+    const structuredFields = Array.isArray(row._fields)
+      ? row._fields.filter(f => (f && f.selector || '').trim() !== '')
+      : []
     for (const a of (spec.arg_schema || [])) {
       if (!a.required) continue
+      // Field-list args (extract/flatSelect) — the wizard stores these
+      // under row._fields. Require at least one row with a selector.
+      if (FIELDS_ARG_ALIASES.has(a.name)) {
+        if (structuredFields.length === 0) {
+          errs.push(`Stage #${i + 1} "${row.stage}": pick at least one field (🎯 in the Fields panel).`)
+        }
+        continue
+      }
       const v = row.args[a.name]
       if (v == null || String(v).trim() === '') {
         errs.push(`Stage #${i + 1} "${row.stage}": required arg "${a.name}" is empty.`)
