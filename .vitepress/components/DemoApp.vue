@@ -3858,6 +3858,52 @@ function yamlScalar(v) {
   if (/^(true|false)$/i.test(s)) return s.toLowerCase()
   return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"'
 }
+// Stages that NativeFetchStage / NativeVisitStage / NativeWgetStage
+// accept a trace for. The Scala parser expects the trace as the
+// SECOND positional arg of `args:`, not a sibling `trace:` block —
+// see NativeFetchStage.scala in the ETL runtime.
+const FETCH_LIKE_STAGES = new Set(['fetch', 'visit', 'wget'])
+
+// Convert the wizard's internal trace action objects
+// ({type, selector, text, ms, y, …}) into the action-map shape the
+// runtime's ActionFactoryRegistry can consume:
+//   { action: "click",  selector: "..." }
+//   { action: "input",  selector: "...", text: "..." }
+//   { action: "wait",   seconds: 1.0 }
+//   { action: "scroll", direction: "down", pixels: 600 }
+// Names match the actionName field of CustomActionFactories (ETL).
+function traceActionToYamlMap(a) {
+  if (!a || !a.type) return null
+  if (a.type === 'Click'  && a.selector) {
+    return `{ action: "click", selector: ${yamlScalar(a.selector)} }`
+  }
+  if (a.type === 'Type'   && a.selector) {
+    return `{ action: "input", selector: ${yamlScalar(a.selector)}, text: ${yamlScalar(a.text || '')} }`
+  }
+  if (a.type === 'Wait') {
+    const seconds = ((a.ms != null ? Number(a.ms) : 1000) / 1000)
+    return `{ action: "wait", seconds: ${seconds} }`
+  }
+  if (a.type === 'Scroll') {
+    const pixels = Math.abs(Number(a.y || 600))
+    const direction = (Number(a.y || 0) < 0) ? 'up' : 'down'
+    return `{ action: "scroll", direction: "${direction}", pixels: ${pixels} }`
+  }
+  return null
+}
+
+// Emit the embedded trace as the second positional `args` entry
+// (a nested list of action maps). Called from inside the args:
+// block for fetch / visit / wget stages.
+function emitEmbeddedTraceActions(row, lines, indent) {
+  const t = Array.isArray(row._trace) ? row._trace : []
+  const entries = t.map(traceActionToYamlMap).filter(Boolean)
+  if (entries.length === 0) return false
+  lines.push(`${indent}-`)
+  for (const e of entries) lines.push(`${indent}  - ${e}`)
+  return true
+}
+
 function buildYamlFromPipeline(pipeline, catalog) {
   if (!pipeline || pipeline.length === 0) return '(add at least one stage)'
   const findSpec = (n) => catalog.find(s => s.stage_name === n || (s.aliases || []).includes(n))
@@ -3897,7 +3943,7 @@ function buildYamlFromPipeline(pipeline, catalog) {
           lines.push(`        - { selector: ${yamlScalar(f.selector)}, method: ${yamlScalar(f.method || 'text')}, as: ${yamlScalar(f.as || '')} }`)
         }
       }
-      maybeEmitTrace(row, lines)
+      // flatSelect doesn't fetch — trace is meaningless on it; drop.
       continue
     }
 
@@ -3908,33 +3954,25 @@ function buildYamlFromPipeline(pipeline, catalog) {
     for (const n of orderedArgNames) {
       if (row.args[n] != null && row.args[n] !== '') filled.push([n, row.args[n]])
     }
-    if (filled.length === 0) lines.push('    args: []')
-    else {
+    const isFetchLike = FETCH_LIKE_STAGES.has(row.stage)
+    const traceLen = isFetchLike && Array.isArray(row._trace) ? row._trace.length : 0
+    if (filled.length === 0 && traceLen === 0) {
+      lines.push('    args: []')
+    } else {
       lines.push('    args:')
       for (const [n, v] of filled) lines.push(`      - ${yamlScalar(v)}    # ${n}`)
+      // For fetch/visit/wget the runtime reads the trace as args[1]
+      // (a list of {action, selector, ...} maps) — not as a sibling
+      // trace: block. See NativeFetchStage.scala in the ETL runtime.
+      if (isFetchLike && traceLen > 0) {
+        emitEmbeddedTraceActions(row, lines, '      ')
+      }
     }
-    maybeEmitTrace(row, lines)
   }
   lines.push('output:')
   lines.push('  format: parquet')
   lines.push('  mode: overwrite')
   return lines.join('\n')
-}
-
-// Emit a trace: block under the current stage when row._trace is set
-// (from the ⏺ Record-trace flow on the stage row).
-function maybeEmitTrace(row, lines) {
-  const t = Array.isArray(row._trace) ? row._trace : []
-  if (t.length === 0) return
-  lines.push('    trace:')
-  for (const a of t) {
-    const sel = (a.selector || '').replace(/"/g, '\\"')
-    const txt = (a.text     || '').replace(/"/g, '\\"')
-    if (a.type === 'Click'  && sel) lines.push(`      - Click("${sel}")`)
-    else if (a.type === 'Type' && sel) lines.push(`      - Type("${sel}", "${txt}")`)
-    else if (a.type === 'Wait')   lines.push(`      - Wait(${a.ms || 1000})`)
-    else if (a.type === 'Scroll') lines.push(`      - Scroll(${a.y || 0})`)
-  }
 }
 
 async function wizardSuggestFromIntent() {
