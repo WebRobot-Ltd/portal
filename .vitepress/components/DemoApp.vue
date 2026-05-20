@@ -347,8 +347,62 @@ go</pre>
         <div v-else class="exec-output-empty">(no rows yet)</div>
       </div>
 
-      <h3 class="exec-logs-title">Live log tail (driver) — sanitized</h3>
-      <pre class="exec-logs">{{ logsText || '(no logs yet — waiting for Spark driver to start)' }}</pre>
+      <!-- Spark log viewer — driver + every allocated executor.
+           Sanitized server-side (DemoLogSanitizer drops s3:// /
+           *.svc.cluster.local / pod=… lines and rewrites internal
+           classpaths) and re-masked client-side as defense-in-depth.
+           Pod names themselves NEVER reach the browser; the executor
+           dropdown is populated from numeric indices the server
+           extracted from Loki labels. -->
+      <div class="exec-logs-panel">
+        <div class="exec-logs-controls">
+          <h3 class="exec-logs-title">📜 Spark logs — sanitized</h3>
+          <select v-model="logsPodType" class="text-input text-input-sm" @change="onLogsPodTypeChange">
+            <option value="driver">Driver</option>
+            <option value="executor">Executor</option>
+          </select>
+          <select
+            v-if="logsPodType === 'executor'"
+            v-model.number="logsExecutorIndex"
+            class="text-input text-input-sm"
+            :disabled="!logsExecutors.length"
+            @change="pollLogsOnce"
+          >
+            <option :value="null">
+              {{ logsExecutors.length ? 'All executors (first)' : 'Waiting for executors…' }}
+            </option>
+            <option v-for="idx in logsExecutors" :key="idx" :value="idx">Executor {{ idx }}</option>
+          </select>
+          <select v-model.number="logsTail" class="text-input text-input-sm" @change="pollLogsOnce">
+            <option :value="50">Last 50</option>
+            <option :value="200">Last 200</option>
+            <option :value="500">Last 500</option>
+            <option :value="1000">Last 1000</option>
+            <option :value="5000">Last 5000</option>
+            <option :value="100000">All rows</option>
+          </select>
+          <label class="exec-logs-checkbox" title="Re-fetch every 8s while the run is active">
+            <input type="checkbox" v-model="logsAutoRefresh" @change="onLogsAutoRefreshToggle" />
+            Auto-refresh
+          </label>
+          <button class="btn btn-secondary btn-sm" @click="pollLogsOnce">Refresh</button>
+        </div>
+        <div v-if="logsLines.length === 0" class="exec-logs-empty">
+          (no logs yet — Spark {{ logsPodType }} hasn't emitted lines for this filter)
+        </div>
+        <div v-else class="exec-logs-stream">
+          <div v-for="(line, i) in logsLines" :key="i" :class="['exec-logs-line', 'level-' + line.level.toLowerCase()]">
+            <span v-if="line.timestamp" class="exec-logs-ts">{{ line.timestamp }}</span>
+            <span class="exec-logs-level">[{{ line.level }}]</span>
+            <span class="exec-logs-msg">{{ line.message }}</span>
+          </div>
+        </div>
+        <div class="exec-logs-footer">
+          Showing <strong>{{ logsPodType }}</strong>
+          <span v-if="logsPodType === 'executor' && logsExecutorIndex !== null"> #{{ logsExecutorIndex }}</span>
+          · {{ logsLines.length }} line(s) · server-side + client-side sanitized
+        </div>
+      </div>
     </div>
 
     <!-- Section 2: Build your pipeline — CLI-style wizard (catalog +
@@ -616,10 +670,94 @@ go</pre>
         <div class="wizard-actions">
           <button class="btn btn-primary" :disabled="!wizValid" @click="wizardSaveAndRun">Save &amp; Run</button>
           <button class="btn btn-secondary" :disabled="!wizValid" @click="wizardSaveAsDraft" title="Save without running — appears in the selector above">Save (draft)</button>
+          <button class="btn btn-secondary"
+                  :disabled="!wizValid || validateOpen"
+                  @click="openValidate"
+                  title="Run the pipeline on a real Camoufox session and preview up to 5 records before launching the Spark job">🔬 Validate selectors</button>
           <button class="btn btn-secondary" @click="openPicker(null, null, 'action-record')" title="Record a sequence of click/type/scroll actions on a target page (for fetch/visit trace args)">⏺ Record actions</button>
           <button class="btn btn-ghost" @click="wizardReset">Reset</button>
           <div v-if="wizStatus.kind" :class="['wizard-status', 'wizard-status-' + wizStatus.kind]">
             {{ wizStatus.text }}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── Validate modal (browser-automation preview) ─────── -->
+    <div v-if="validateOpen" class="picker-modal-backdrop" @click.self="closeValidate">
+      <div class="picker-modal validate-modal">
+        <div class="picker-modal-header">
+          <strong>🔬 Validate selectors (real browser automation)</strong>
+          <button class="btn btn-ghost btn-sm" @click="closeValidate">✕ Close</button>
+        </div>
+
+        <div class="validate-body">
+          <div class="validate-left">
+            <div class="validate-status" :class="'validate-status-' + (validateState.kind || 'idle')">
+              {{ validateState.text || 'Click "Run validation" to walk the pipeline on a Camoufox session.' }}
+            </div>
+
+            <div class="validate-controls">
+              <button class="btn btn-primary"
+                      :disabled="validateState.kind === 'running'"
+                      @click="runValidation">
+                {{ validateState.kind === 'running' ? '⏳ Running…' : '▶ Run validation' }}
+              </button>
+              <span v-if="validateResult && validateResult.took_ms != null" class="validate-took">
+                Took {{ (validateResult.took_ms / 1000).toFixed(1) }}s
+              </span>
+            </div>
+
+            <div v-if="validateResult && validateResult.steps && validateResult.steps.length" class="validate-steps">
+              <h5>Pipeline walk</h5>
+              <ol>
+                <li v-for="(s, i) in validateResult.steps" :key="i" :class="'validate-step-' + s.status">
+                  <strong>{{ s.stage }}</strong>
+                  <span class="validate-step-status">[{{ s.status }}]</span>
+                  <span class="validate-step-msg">{{ s.message }}</span>
+                </li>
+              </ol>
+            </div>
+
+            <div v-if="validateResult && Array.isArray(validateResult.records) && validateResult.records.length" class="validate-records">
+              <h5>Records preview ({{ validateResult.record_count }} of max 5)</h5>
+              <div class="validate-records-scroll">
+                <table class="validate-records-table">
+                  <thead>
+                    <tr>
+                      <th v-for="col in validateColumns" :key="col">{{ col }}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="(row, ri) in validateResult.records" :key="ri">
+                      <td v-for="col in validateColumns" :key="col" :title="String(row[col] == null ? '' : row[col])">
+                        {{ truncate(row[col]) }}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div v-if="validateResult && validateResult.valid === false" class="validate-error">
+              <strong>Validation failed:</strong> {{ validateResult.error || 'see steps above' }}
+            </div>
+          </div>
+
+          <div class="validate-right">
+            <h5>Final page (after trace)</h5>
+            <div v-if="!validateResult || !validateResult.html_snapshot" class="validate-iframe-placeholder">
+              Run the validation to capture a snapshot of what Camoufox saw.
+            </div>
+            <iframe
+              v-else
+              class="validate-iframe"
+              sandbox="allow-same-origin"
+              :srcdoc="validateResult.html_snapshot"
+            ></iframe>
+            <div v-if="validateResult && validateResult.final_url" class="validate-final-url">
+              <strong>URL:</strong> {{ validateResult.final_url }}
+            </div>
           </div>
         </div>
       </div>
@@ -2022,7 +2160,13 @@ const LOGS_POLL_MS   = 8000
 
 const executionState = ref(null)   // {execution_id, pipeline_name, output_dataset_id, started_at}
 const statusData     = ref(null)   // latest /status response
-const logsText       = ref('')     // sanitized log blob
+const logsText       = ref('')     // raw sanitized blob (kept for back-compat)
+const logsLines      = ref([])     // parsed log entries: [{timestamp, level, message}]
+const logsExecutors  = ref([])     // executor indices reported by server (e.g. [0, 1, 2])
+const logsPodType    = ref('driver')        // 'driver' | 'executor'
+const logsExecutorIndex = ref(null)         // null = first/any executor
+const logsTail          = ref(200)          // matches server default
+const logsAutoRefresh   = ref(true)         // toggled off when user wants to scroll quietly
 const outputPreview  = ref(null)   // {format, columns, rows, truncated, note}
 let statusTimerId = null
 let logsTimerId   = null
@@ -2039,6 +2183,8 @@ function clearExecutionState() {
   executionState.value = null
   statusData.value = null
   logsText.value = ''
+  logsLines.value = []
+  logsExecutors.value = []
   outputPreview.value = null
   try { localStorage.removeItem(LS_KEY) } catch {}
 }
@@ -2052,7 +2198,73 @@ function startExecPolling() {
   pollStatusOnce()
   pollLogsOnce()
   statusTimerId = setInterval(pollStatusOnce, STATUS_POLL_MS)
-  logsTimerId   = setInterval(pollLogsOnce,   LOGS_POLL_MS)
+  if (logsAutoRefresh.value) {
+    logsTimerId = setInterval(pollLogsOnce, LOGS_POLL_MS)
+  }
+}
+function onLogsAutoRefreshToggle() {
+  if (logsTimerId) { clearInterval(logsTimerId); logsTimerId = null }
+  if (logsAutoRefresh.value && executionState.value) {
+    logsTimerId = setInterval(pollLogsOnce, LOGS_POLL_MS)
+    pollLogsOnce()
+  }
+}
+function onLogsPodTypeChange() {
+  // Switching driver → executor must reset the index — otherwise the
+  // request would carry an executorIndex that doesn't make sense.
+  logsExecutorIndex.value = null
+  pollLogsOnce()
+}
+
+// Defense-in-depth: even though DemoLogSanitizer.sanitize ran server-side,
+// mask anything that still looks credential-shaped before painting it
+// in the DOM. Mirrors maskSensitiveInfo() from the Next.js portal but
+// kept narrow — the heavy lifting is already done upstream.
+function maskLogLine(s) {
+  if (!s) return ''
+  let out = String(s)
+  // Presigned-URL query strings.
+  out = out.replace(/(https?:\/\/[^\s?]+)\?[^\s]*(X-Amz-Signature|X-Amz-Credential|Signature=|presigned)[^\s]*/gi,
+                    '$1?[REDACTED-CREDENTIALS]')
+  // AWS-shaped access keys.
+  out = out.replace(/\bAKIA[0-9A-Z]{16}\b/g, '[REDACTED-ACCESS-KEY]')
+  // Common k=v secret pairs (token/secret/api-key).
+  out = out.replace(/\b(token|secret|api[_-]?key)\s*[=:]\s*[A-Za-z0-9+/=._-]{16,}/gi, '$1=[REDACTED]')
+  // Internal namespace still leaking through.
+  out = out.replace(/spookystuff/gi, 'WebRobot')
+  return out
+}
+
+// Parse the sanitized multi-line blob the server returns into rows the
+// viewer can color-code. Tolerant: a line without timestamp or level
+// still renders, just under default styling.
+const LEVELS = /\b(ERROR|WARN|WARNING|INFO|DEBUG|TRACE|FATAL)\b/i
+const TS_REGEX = /^(\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)/
+function parseLogBlob(blob) {
+  if (!blob) return []
+  const out = []
+  for (const raw of blob.split('\n')) {
+    if (!raw.trim()) continue
+    const masked = maskLogLine(raw)
+    const tsMatch = masked.match(TS_REGEX)
+    const lvlMatch = masked.match(LEVELS)
+    let timestamp = ''
+    let message = masked
+    if (tsMatch) {
+      timestamp = tsMatch[1]
+      message = message.slice(tsMatch[0].length).trim()
+    }
+    let level = 'INFO'
+    if (lvlMatch) {
+      level = lvlMatch[1].toUpperCase()
+      if (level === 'WARNING') level = 'WARN'
+      // Drop the first level token from the body so it doesn't repeat in
+      // the message column.
+      message = message.replace(lvlMatch[0], '').trim()
+    }
+    out.push({ timestamp, level, message: message || masked })
+  }
+  return out
 }
 
 async function pollStatusOnce() {
@@ -2074,11 +2286,21 @@ async function pollStatusOnce() {
 async function pollLogsOnce() {
   if (!executionState.value) return
   try {
-    const url = `${API_BASE_URL}/api/webrobot/api/demo/executions/${encodeURIComponent(executionState.value.execution_id)}/logs?tail=200`
+    const params = new URLSearchParams()
+    params.set('tail', String(logsTail.value || 200))
+    params.set('podType', logsPodType.value || 'driver')
+    if (logsPodType.value === 'executor' && logsExecutorIndex.value !== null && logsExecutorIndex.value !== undefined) {
+      params.set('executorIndex', String(logsExecutorIndex.value))
+    }
+    const url = `${API_BASE_URL}/api/webrobot/api/demo/executions/${encodeURIComponent(executionState.value.execution_id)}/logs?${params}`
     const r = await authenticatedDemoFetch(url)
     if (!r.ok) return
     const j = await r.json()
     logsText.value = j.logs || ''
+    logsLines.value = parseLogBlob(logsText.value)
+    if (Array.isArray(j.executors)) {
+      logsExecutors.value = j.executors.slice().sort((a, b) => a - b)
+    }
   } catch (e) { console.warn('logs poll:', e) }
 }
 
@@ -3695,6 +3917,74 @@ async function wizardSubmit(execute) {
 function wizardSaveAndRun()  { return wizardSubmit(true) }
 function wizardSaveAsDraft() { return wizardSubmit(false) }
 
+// ── Validate-selectors modal ──────────────────────────────────────
+// Browser-automation preview: POSTs the current YAML to
+// /wizard/validate, which opens a Camoufox session, replays the
+// fetch trace, then samples up to 5 records from flatSelect /
+// extract stages. The user sees the same DOM the Spark runtime
+// would see — no jsoup, no static HTTP — before committing.
+const validateOpen   = ref(false)
+const validateState  = ref({ kind: 'idle', text: '' })
+const validateResult = ref(null)
+const validateColumns = computed(() => {
+  const recs = validateResult.value && validateResult.value.records
+  if (!Array.isArray(recs) || !recs.length) return []
+  const cols = []
+  const seen = new Set()
+  for (const r of recs) {
+    if (r && typeof r === 'object') {
+      for (const k of Object.keys(r)) {
+        if (!seen.has(k)) { seen.add(k); cols.push(k) }
+      }
+    }
+  }
+  return cols
+})
+function truncate(v) {
+  if (v == null) return ''
+  const s = String(v)
+  return s.length > 80 ? s.slice(0, 77) + '…' : s
+}
+function openValidate() {
+  if (!wizValid.value) {
+    wizStatus.value = { kind: 'error', text: 'Fix the validation errors above first.' }
+    return
+  }
+  validateOpen.value = true
+  validateState.value = { kind: 'idle', text: '' }
+  validateResult.value = null
+}
+function closeValidate() {
+  validateOpen.value = false
+}
+async function runValidation() {
+  validateState.value = { kind: 'running', text: 'Opening Camoufox session and replaying trace…' }
+  validateResult.value = null
+  try {
+    const yamlText = wizYamlPreview.value
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/validate`, {
+      method: 'POST',
+      body: JSON.stringify({ yaml: yamlText })
+    })
+    const j = await r.json()
+    if (!r.ok) throw new Error(j.error || 'Validation request failed')
+    validateResult.value = j
+    if (j.valid) {
+      validateState.value = {
+        kind: 'success',
+        text: `✓ Validation OK — ${j.record_count} record(s) extracted via Camoufox.`
+      }
+    } else {
+      validateState.value = {
+        kind: 'error',
+        text: 'Validation failed — see steps below.'
+      }
+    }
+  } catch (e) {
+    validateState.value = { kind: 'error', text: 'Error: ' + (e.message || String(e)) }
+  }
+}
+
 // Clone the currently-selected demo pipeline into the wizard editor.
 // Uses /demo/list's pre-parsed `stages` array (server-side YAML parse)
 // so we don't need a YAML lib in the browser. Positional args get
@@ -5295,6 +5585,72 @@ if (typeof window !== 'undefined') {
   word-break: break-word;
   margin: 0;
 }
+.exec-logs-panel { margin-top: 16px; }
+.exec-logs-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.exec-logs-controls .exec-logs-title { margin: 0 auto 0 0; }
+.text-input-sm {
+  padding: 4px 8px;
+  font-size: 0.85em;
+  height: auto;
+  width: auto;
+}
+.exec-logs-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85em;
+  color: #555;
+}
+.exec-logs-stream {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 8px;
+  max-height: 460px;
+  overflow-y: auto;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  padding: 10px 12px;
+}
+.exec-logs-empty {
+  background: #1e1e1e;
+  color: #888;
+  padding: 14px;
+  border-radius: 8px;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  font-style: italic;
+}
+.exec-logs-line {
+  display: flex;
+  gap: 8px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.45;
+}
+.exec-logs-line:hover { background: rgba(255, 255, 255, 0.05); }
+.exec-logs-ts    { color: #6e7681; flex-shrink: 0; min-width: 170px; }
+.exec-logs-level { flex-shrink: 0; min-width: 60px; font-weight: 600; }
+.exec-logs-line.level-error   .exec-logs-level { color: #ff7b72; }
+.exec-logs-line.level-warn    .exec-logs-level { color: #f0b429; }
+.exec-logs-line.level-info    .exec-logs-level { color: #79c0ff; }
+.exec-logs-line.level-debug   .exec-logs-level { color: #8b949e; }
+.exec-logs-line.level-trace   .exec-logs-level { color: #6e7681; }
+.exec-logs-line.level-fatal   .exec-logs-level { color: #ff4757; }
+.exec-logs-line.level-error   { color: #ffa198; }
+.exec-logs-msg { flex: 1; word-break: break-word; }
+.exec-logs-footer {
+  margin-top: 6px;
+  font-size: 0.75em;
+  color: #888;
+}
 
 /* ─── Pipeline wizard ──────────────────────────────────────── */
 .wizard-card {
@@ -6147,6 +6503,85 @@ if (typeof window !== 'undefined') {
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ── Validate-selectors modal ─────────────────────────────────── */
+.validate-modal { width: min(95vw, 1500px); height: min(92vh, 880px); }
+.validate-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: minmax(420px, 1fr) minmax(420px, 1fr);
+  gap: 0;
+  overflow: hidden;
+}
+.validate-left {
+  padding: 14px 16px;
+  overflow-y: auto;
+  border-right: 1px solid #e0e0e0;
+  background: #fafbfc;
+}
+.validate-right {
+  padding: 14px 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+}
+.validate-status {
+  padding: 10px 12px;
+  border-radius: 6px;
+  font-size: 0.9em;
+  margin-bottom: 12px;
+  background: #eef2f6;
+  color: #374151;
+}
+.validate-status-running { background: #fff7ed; color: #9a3412; }
+.validate-status-success { background: #ecfdf5; color: #166534; }
+.validate-status-error   { background: #fef2f2; color: #b91c1c; }
+.validate-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.validate-took { color: #6b7280; font-size: 0.85em; }
+.validate-steps h5,
+.validate-records h5,
+.validate-right h5 { margin: 4px 0 8px 0; font-size: 0.95em; color: #1f2937; }
+.validate-steps ol {
+  margin: 0 0 14px 0;
+  padding-left: 18px;
+  font-size: 0.86em;
+  line-height: 1.45;
+}
+.validate-steps li { margin-bottom: 3px; }
+.validate-step-running { color: #9a3412; }
+.validate-step-ok      { color: #166534; }
+.validate-step-skipped { color: #6b7280; }
+.validate-step-error   { color: #b91c1c; }
+.validate-step-status { margin: 0 6px; font-size: 0.78em; color: inherit; opacity: 0.85; }
+.validate-step-msg { color: #374151; }
+.validate-records-scroll { max-height: 280px; overflow: auto; border: 1px solid #e0e0e0; border-radius: 6px; }
+.validate-records-table { width: 100%; border-collapse: collapse; font-size: 0.82em; }
+.validate-records-table th,
+.validate-records-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #eee;
+  text-align: left;
+  vertical-align: top;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.validate-records-table th { background: #f3f4f6; font-weight: 600; color: #1f2937; position: sticky; top: 0; }
+.validate-error { margin-top: 12px; padding: 10px 12px; background: #fef2f2; color: #b91c1c; border-radius: 6px; font-size: 0.88em; }
+.validate-iframe-placeholder {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #9ca3af;
+  font-size: 0.9em;
+  border: 1px dashed #d1d5db;
+  border-radius: 6px;
+}
+.validate-iframe { flex: 1; width: 100%; border: 1px solid #e0e0e0; border-radius: 6px; background: white; }
+.validate-final-url { font-size: 0.78em; color: #6b7280; margin-top: 6px; word-break: break-all; }
 </style>
 
 
