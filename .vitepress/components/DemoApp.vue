@@ -36,12 +36,12 @@
             :disabled="availablePipelines.length === 0"
           >
             <option value="">-- Choose a pipeline --</option>
-            <option 
-              v-for="pipeline in availablePipelines" 
+            <option
+              v-for="pipeline in availablePipelines"
               :key="pipeline.id"
               :value="pipeline.id"
             >
-              {{ pipeline.name }}
+              {{ pipeline.isDraft ? '✏️ ' : '' }}{{ pipeline.name }}{{ pipeline.isDraft ? '  (draft)' : '' }}
             </option>
           </select>
           <p v-if="!loadingPipelines && availablePipelines.length === 0 && !pipelinesError" class="hint">
@@ -296,7 +296,7 @@ go</pre>
     <!-- Live execution panel — status + log tail + output preview.
          Visible whenever there is a known execution_id (fresh from submit
          OR restored from localStorage on page reload — "reattach"). -->
-    <div v-if="executionState" class="demo-section exec-panel">
+    <div v-if="executionState" class="demo-section exec-panel" ref="execPanelEl">
       <div class="exec-panel-header">
         <h2>⏱️ Execution status</h2>
         <div class="exec-panel-actions">
@@ -1426,7 +1426,7 @@ go</pre>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 
 // Pipeline execution state
 const selectedPipeline = ref('')
@@ -1733,7 +1733,8 @@ async function loadPipelines() {
       stages: demo.stages || [],
       requiresInputDataset: demo.requires_input_dataset || false,
       csvFormatDescription: demo.csv_format_description || null,
-      pipelineYaml: demo.pipeline_yaml || null
+      pipelineYaml: demo.pipeline_yaml || null,
+      isDraft: !!demo.is_draft   // backend marks wizard-saved pipelines (Generated:* agents) so the selector can flag them
     }))
     
   } catch (error) {
@@ -2169,6 +2170,7 @@ const STATUS_POLL_MS = 5000
 const LOGS_POLL_MS   = 8000
 
 const executionState = ref(null)   // {execution_id, pipeline_name, output_dataset_id, started_at}
+const execPanelEl    = ref(null)   // template ref for the exec panel — used to scrollIntoView after Save & Run
 const statusData     = ref(null)   // latest /status response
 const logsText       = ref('')     // raw sanitized blob (kept for back-compat)
 const logsLines      = ref([])     // parsed log entries: [{timestamp, level, message}]
@@ -3949,15 +3951,35 @@ async function wizardSubmit(execute) {
     if (execute) {
       const execId = j.execution && j.execution.execution_id
       const dsId   = j.execution && j.execution.output_dataset_id
-      if (execId) attachToExecution(execId, name, dsId)
-      wizStatus.value = {
-        kind: 'success',
-        text: 'Saved + submitted. Watch the Execution status panel above.'
+      // Surface backend execution_error verbatim instead of pretending
+      // we're "running" — the user would otherwise stare at an empty
+      // Execution panel forever.
+      if (j.execution_error) {
+        wizStatus.value = { kind: 'error', text: 'Saved but execution failed: ' + j.execution_error }
+      } else if (execId) {
+        attachToExecution(execId, name, dsId)
+        wizStatus.value = {
+          kind: 'success',
+          text: '✅ Saved + submitted. Scrolling to the Execution status panel…'
+        }
+        // The exec-panel sits above the wizard in the DOM. After a
+        // bottom-of-page Save & Run the user would never see it
+        // without scrolling — do it for them.
+        await nextTick()
+        const el = execPanelEl.value
+        if (el && typeof el.scrollIntoView === 'function') {
+          el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        }
+      } else {
+        wizStatus.value = {
+          kind: 'error',
+          text: 'Saved but no execution_id returned by the backend — check Jersey logs.'
+        }
       }
     } else {
       wizStatus.value = {
         kind: 'success',
-        text: `Pipeline "${name}" saved. Find it in the selector above when you want to run it.`
+        text: `✅ Pipeline "${name}" saved as draft. Look in the demo selector above (it'll be flagged "draft").`
       }
     }
     // Refresh demo selector so the new pipeline appears.
