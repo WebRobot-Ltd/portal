@@ -3077,8 +3077,12 @@ async function runAutoSuggestFields() {
       intent,
       stage_name: row && row.stage,
     }
-    if (row && row.stage === 'flatSelect' && row.args && row.args.selector) {
-      body.container_selector = row.args.selector
+    if (row && row.stage === 'flatSelect' && row.args) {
+      // Honor either the catalog name (segmentSelector) or the legacy
+      // wizard-internal name (selector). See buildYamlFromPipeline for
+      // the same alias.
+      const seg = row.args.segmentSelector || row.args.selector
+      if (seg) body.container_selector = seg
     }
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-fields`, {
       method: 'POST',
@@ -3546,11 +3550,14 @@ function openMultiFieldPicker(stageIdx) {
   // to picker.js so it constrains clicks to descendants of one segment
   // and produces RELATIVE selectors for the fields.
   const row = wizPipeline.value[stageIdx]
-  if (row && row.stage === 'flatSelect' && row.args && row.args.selector) {
-    setTimeout(() => {
-      const ifr = document.getElementById('wr-picker-iframe')
-      try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-multi-config', containerSelector: row.args.selector }, '*') } catch (_) {}
-    }, 600)
+  if (row && row.stage === 'flatSelect' && row.args) {
+    const segSel = row.args.segmentSelector || row.args.selector
+    if (segSel) {
+      setTimeout(() => {
+        const ifr = document.getElementById('wr-picker-iframe')
+        try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-multi-config', containerSelector: segSel }, '*') } catch (_) {}
+      }, 600)
+    }
   }
 }
 
@@ -3750,7 +3757,11 @@ function buildYamlFromPipeline(pipeline, catalog) {
       continue
     }
     if (row.stage === 'flatSelect') {
-      const seg = (row.args && row.args.selector) || ''
+      // Catalog calls the first arg `segmentSelector`; the wizard
+      // internals (PTA flow, picker target) historically wrote it as
+      // `selector`. Read both, prefer the catalog name when present so
+      // we honor a user edit on the catalog-driven input row.
+      const seg = (row.args && (row.args.segmentSelector || row.args.selector)) || ''
       lines.push('    args:')
       lines.push(`      - ${yamlScalar(seg)}    # segment selector`)
       if (fields.length === 0) {
@@ -3863,6 +3874,21 @@ const wizValidationErrors = computed(() => {
   // always fail on them. List the arg names whose value actually comes
   // from _fields so we can route the requirement check separately.
   const FIELDS_ARG_ALIASES = new Set(['extractors', 'fields', 'columns'])
+  // Some catalog arg names diverge from the internal storage key the
+  // wizard writes via updateStageArg / the picker. Map them so the
+  // generic check resolves to the right slot (instead of false-positiving
+  // on a name the UI never populates). When you find a NEW divergence,
+  // add the catalog name here — don't rename the wizard internals.
+  const ARG_NAME_ALIASES = new Map([
+    // flatSelect's first arg in the catalog is "segmentSelector" but the
+    // picker writes to row.args.selector (riga 3514, updateStageArg ..., 'selector', ...).
+    ['segmentSelector', 'selector'],
+  ])
+  const argSlot = (row, argName) => {
+    if (row.args[argName] != null) return row.args[argName]
+    const alias = ARG_NAME_ALIASES.get(argName)
+    return alias ? row.args[alias] : undefined
+  }
   for (let i = 0; i < wizPipeline.value.length; i++) {
     const row = wizPipeline.value[i]
     const spec = findStageSpec(row.stage)
@@ -3883,7 +3909,7 @@ const wizValidationErrors = computed(() => {
         }
         continue
       }
-      const v = row.args[a.name]
+      const v = argSlot(row, a.name)
       if (v == null || String(v).trim() === '') {
         errs.push(`Stage #${i + 1} "${row.stage}": required arg "${a.name}" is empty.`)
       }
