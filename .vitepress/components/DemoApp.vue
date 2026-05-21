@@ -4165,6 +4165,23 @@ async function wizardSubmit(execute) {
       // Surface backend execution_error verbatim instead of pretending
       // we're "running" — the user would otherwise stare at an empty
       // Execution panel forever.
+      //
+      // Special case: when the backend rejects because the pipeline
+      // wants an input dataset that the wizard didn't attach, route
+      // to the existing dataset-upload modal (CSV upload or
+      // auto-trigger). Save already succeeded — the agent is in
+      // the selector — so we can reuse the curated-demo "Run" path.
+      if (j.execution_error && /input dataset is required/i.test(j.execution_error)) {
+        wizStatus.value = {
+          kind: 'info',
+          text: 'Pipeline saved. Choose a dataset (or skip with auto-trigger) to start the run.'
+        }
+        await loadPipelines()
+        selectedPipeline.value = name
+        if (typeof onPipelineSelected === 'function') onPipelineSelected()
+        handleExecutePipeline()   // opens the existing upload modal
+        return
+      }
       if (j.execution_error) {
         wizStatus.value = { kind: 'error', text: 'Saved but execution failed: ' + j.execution_error }
       } else if (execId) {
