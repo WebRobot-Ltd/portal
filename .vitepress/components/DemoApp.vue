@@ -313,10 +313,13 @@ go</pre>
           <div v-else-if="executionResult.pollingMessage" class="polling-banner polling-done">
             {{ executionResult.pollingMessage }}
           </div>
-          <div class="result-preview">
-            <h4>Preview Data ({{ executionResult.preview.length }} records):</h4>
-            <pre class="code-block">{{ formatPreview(executionResult.preview) }}</pre>
-          </div>
+          <!--
+            The old `<pre>{{ formatPreview(executionResult.preview) }}</pre>`
+            block lived here. Removed: the Execution-status panel below
+            now renders the same data as a proper HTML table from
+            `outputPreview` (polled via /demo/executions/<eid>/output).
+            Showing both was redundant.
+          -->
         </div>
         <div v-else-if="executionResult.status === 'error'" class="error-content">
           <p class="error-message">{{ executionResult.error }}</p>
