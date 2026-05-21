@@ -30,7 +30,8 @@ export default defineConfig({
           items: [
             { text: 'Introduction', link: '/docs/introduction' },
             { text: 'Quick Start', link: '/docs/quick-start' },
-            { text: 'CLI Reference', link: '/docs/cli' }
+            { text: 'CLI Reference', link: '/docs/cli' },
+            { text: 'Demo API & Sandbox', link: '/docs/demo-api' }
           ]
         },
         {
