@@ -11,6 +11,7 @@ The interactive UI at [/demo](/demo) is just one client of these endpoints — t
 - **SDK integration.** Wire any of the four SDKs against the public endpoint and exercise `executeDemo` / `getExecutionStatus` / `getExecutionOutput` in your own CI before you have credentials.
 - **Demo-driven onboarding.** Point a teammate at `webrobot demo execute …` and skip the API-key dance.
 - **Extend without compiling.** Inject custom Python logic into a demo pipeline via inline `python_define` + `python_row_transform` — no Scala plugin, no bundle upload. See [Advanced: extending the demo pipeline with Python](#advanced-extending-the-demo-pipeline-with-python).
+- **Use it from AI clients.** All demo endpoints are also exposed as a public **MCP server at `mcp.webrobot.eu/mcp`** — Claude Code, Cursor and any streamable-http MCP client get the 28 tools auto-generated from the spec. See [With MCP](#with-mcp-claude-code-cursor-any-mcp-client).
 
 > **What "public" means here.** The `/webrobot/api/demo/*` endpoints accept anonymous calls. They are rate-limited and only schedule the pipelines whose YAML is bundled in the demo plugin (plus pipelines you produce with `generate-pipeline` + `save-generated-pipeline` in the same session). They run on a shared Spark cluster in Hetzner Helsinki (EU-sovereign), so output throughput is best-effort.
 
@@ -198,6 +199,77 @@ api := webrobot.NewAPIClient(cfg)
 pipelines, _, _ := api.DefaultAPI.ListDemos(context.Background()).Execute()
 resp, _, _      := api.DefaultAPI.ExecuteDemo(context.Background(), "01-static-books").RequestBody(map[string]interface{}{}).Execute()
 execID          := resp["executionId"].(string)
+```
+
+---
+
+## With MCP (Claude Code, Cursor, any MCP client)
+
+The demo surface is also exposed as a public **Model Context Protocol** server at:
+
+```
+https://mcp.webrobot.eu/mcp
+```
+
+No authentication, no signup — same posture as the REST endpoints. The server is auto-generated from the live OpenAPI spec via FastMCP, so every demo endpoint becomes an MCP tool with names matching the spec's `operationId`:
+
+| Area | Sample tools |
+| --- | --- |
+| Run flow | `listDemos`, `getPluginInfo`, `executeDemo`, `getExecutionStatus`, `getExecutionLogs`, `getExecutionOutput`, `cancelExecution` |
+| Pipeline generation | `generatePipeline`, `saveGeneratedPipeline`, `reloadPipelines` |
+| Dataset upload | `uploadDataset` |
+| Catalog | `getCatalogStages` |
+| Wizard | `suggestStages`, `wizardInferActions`, `wizardInferFields`, `wizardInferSegment`, `wizardInferSelector`, `wizardSuggestFieldNames`, `wizardValidate`, `wizardProxy`, `cmfOpen`, `cmfStep`, `cmfClose` |
+| Python transform skills | `generatePythonTransform`, `validatePythonTransform`, `securityCheckPythonTransform` |
+| App assets | `serveDemoApp`, `serveStaticFile` |
+
+28 tools in total, all matching exactly the curl / CLI / SDK surface documented above — same parameters, same responses.
+
+### Wire it into Claude Code
+
+Add this to your Claude Code MCP config (typically `~/.claude/settings.json` or the per-project equivalent):
+
+```json
+{
+  "mcpServers": {
+    "webrobot-demo": {
+      "type": "http",
+      "url": "https://mcp.webrobot.eu/mcp"
+    }
+  }
+}
+```
+
+Restart Claude Code; the 28 tools appear under `webrobot-demo` and the agent can call them directly. Example prompts that route through MCP:
+
+- "Use webrobot-demo to list the available pipelines and run `01-static-books`, then show me the first 20 output rows."
+- "Generate a python_row_transform that parses raw_price into a numeric `price` field and security-check it before saving."
+
+### Wire it into Cursor / other MCP clients
+
+Cursor supports remote MCP servers in `~/.cursor/mcp.json` with the same shape:
+
+```json
+{
+  "mcpServers": {
+    "webrobot-demo": { "url": "https://mcp.webrobot.eu/mcp" }
+  }
+}
+```
+
+Any client that speaks **streamable HTTP** MCP works against this URL — there's nothing WebRobot-specific in the transport layer.
+
+### Why only demo, not the full API
+
+The online MCP at `mcp.webrobot.eu` runs in `MCP_SCOPE=demo` mode — its outbound httpx client sends **no** `Authorization` header, and operations outside `/webrobot/api/demo/*` are filtered out at boot via FastMCP `route_maps`. This keeps the public surface aligned with what the demo REST endpoints already accept anonymously.
+
+For the **full API** surface (your projects, jobs, datasets, agents, billing — anything that requires a real organization), use the **local MCP server bundled with the [Claude Code WebRobot plugin](https://github.com/WebRobot-Ltd/claude-code-webrobot-skills)**. It's the same `server.py` running in `MCP_TRANSPORT=stdio MCP_SCOPE=full` mode, reading your API key from `~/.claude/plugins/webrobot/config.json` (or env vars / CLI HOCON configs). Per-session credential passthrough on the hosted MCP is on the roadmap but is not in production yet.
+
+### Health check
+
+```bash
+curl -s https://mcp.webrobot.eu/health | jq .
+# → {"status":"ok","scope":"demo","base_url":"https://api.webrobot.eu"}
 ```
 
 ---
