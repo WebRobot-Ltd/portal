@@ -673,7 +673,7 @@ go</pre>
                       type="text"
                       :value="row.args[a.name] != null ? row.args[a.name] : ''"
                       :placeholder="argPlaceholder(a)"
-                      :class="['text-input', 'wizard-arg-input', a.required && (row.args[a.name] == null || String(row.args[a.name]).trim() === '') ? 'wizard-arg-missing' : '']"
+                      :class="['text-input', 'wizard-arg-input', wizShowFieldErrors && a.required && (row.args[a.name] == null || String(row.args[a.name]).trim() === '') ? 'wizard-arg-missing' : '']"
                       @input="updateStageArg(idx, a.name, $event.target.value)"
                     />
                     <button
@@ -722,10 +722,10 @@ go</pre>
         <h4>📄 YAML preview</h4>
         <pre class="wizard-yaml">{{ wizYamlPreview }}</pre>
 
-        <!-- Required-arg / shape validation. The Save buttons stay
-             disabled until this is empty. Less rage at Spark error
-             messages when an arg is missing. -->
-        <div v-if="wizValidationErrors.length" class="wizard-validation">
+        <!-- Required-arg / shape validation. The banner + per-field
+             red highlight only appear after the user has tried to
+             save once — until then we trust them to fill the form. -->
+        <div v-if="wizShowFieldErrors && wizValidationErrors.length" class="wizard-validation">
           <strong>Fix before saving:</strong>
           <ul>
             <li v-for="(err, i) in wizValidationErrors" :key="i">{{ err }}</li>
@@ -4129,6 +4129,16 @@ const wizValidationErrors = computed(() => {
   return errs
 })
 const wizValid = computed(() => wizValidationErrors.value.length === 0)
+// Flip to true the first time wizardSubmit blocks on validation errors,
+// so per-field red highlights + the Fix-before-saving banner only show
+// up AFTER the user has tried to save. Newly-added stages start neutral
+// instead of immediately screaming red. The watch below also clears
+// the flag automatically as soon as everything is filled in, so the
+// red goes away the moment the user types the last missing value.
+const wizShowFieldErrors = ref(false)
+watch(wizValid, (nowValid) => {
+  if (nowValid) wizShowFieldErrors.value = false
+})
 
 // Detect whether the wizard YAML needs a CSV input dataset. Right
 // now there's exactly one stage that consumes one — load_csv — but
@@ -4141,11 +4151,17 @@ function pipelineNeedsInputCsv(yamlText) {
 
 async function wizardSubmit(execute) {
   if (!wizValid.value) {
-    // Keep the existing red status as well so it's visible without
-    // scrolling to the validation panel.
+    // First failed save attempt: unlock the per-field red highlight
+    // + the "Fix before saving" banner so the user sees what's
+    // missing. Stays on until they fix everything (wizValid becomes
+    // true again — see the watch below).
+    wizShowFieldErrors.value = true
     wizStatus.value = { kind: 'error', text: 'Fix the validation errors above first.' }
     return
   }
+  // Validation passed at submit time — clear the highlight state so a
+  // subsequent edit doesn't keep the residual red.
+  wizShowFieldErrors.value = false
   const name = wizPipelineName.value.trim()
   const yamlText = wizYamlPreview.value
 
