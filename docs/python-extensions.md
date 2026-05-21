@@ -14,36 +14,38 @@ There are three ways to register a function:
 
 | Mode | How | Best for |
 |------|-----|----------|
-| A — Inline YAML | `python_define` stage in the pipeline | One-off transforms, self-contained pipelines |
-| B — DB-registered | `POST /api/python-extensions` | Shared/reusable functions, API-driven workflows |
+| A — Inline YAML | Top-level `python_extensions:` block in the YAML | One-off transforms, self-contained pipelines, demo sandbox |
+| B — DB-registered | `POST /api/python-extensions` | Shared/reusable functions across pipelines in the same org |
 | C — Hybrid | AI agent generates + registers via API + references by name | AI-assisted development |
 
 ---
 
 ## Mode A — Inline YAML
 
-Define the function in the pipeline YAML itself using the `python_define` stage, then reference it by name in a `python_row_transform` stage later in the same pipeline.
+Declare the function inside a top-level **`python_extensions:`** block, then reference it by name from a `python_row_transform:<name>` stage in the pipeline. The runtime template (`PySparkCodeGenerator` → `pyspark_pipeline.mustache`) reads this block and wraps `def NAME(row): ...` around the supplied `functionBody`, so what you write in YAML is just the body of the function — not a full `def`.
 
 ```yaml
-stages:
+# Top-level extension declarations — NOT a stage of the pipeline.
+python_extensions:
+  stages:
+    - name: extract_price
+      type: row_transform
+      functionBody: |
+        import re
+        price_str = row.get('raw_price', '')
+        match = re.search(r'[\d.,]+', price_str)
+        if match:
+            price = float(match.group().replace(',', '.'))
+        else:
+            price = None
+        return {**row, 'price': price}
+
+# Pipeline references the named function via the python_row_transform stage.
+pipeline:
   - stage: load_csv
     args:
       - path: "${INPUT_CSV_PATH}"
         header: "true"
-
-  - stage: python_define
-    args:
-      - name: extract_price
-        code: |
-          def extract_price(row):
-              import re
-              price_str = row.get('raw_price', '')
-              match = re.search(r'[\d.,]+', price_str)
-              if match:
-                  price = float(match.group().replace(',', '.'))
-              else:
-                  price = None
-              return {**row, 'price': price}
 
   - stage: python_row_transform:extract_price
     args: []
@@ -51,9 +53,17 @@ stages:
   - stage: save_csv
     args:
       - path: "${OUTPUT_CSV_PATH}"
+
+output:
+  format: csv
+  path: "${OUTPUT_CSV_PATH}"
 ```
 
-The `python_define` stage compiles and registers the function for the lifetime of the current pipeline run. The function is not persisted between runs.
+Notes:
+
+- `functionBody` is **just the body** of the function — no `def` signature line. The template adds `def {{name}}(row): ...` and indents each line of the body by 4 spaces.
+- `type: row_transform` is required. The runtime supports `resolvers:` and `actions:` alongside `stages:` as well — see the [Python plugin source](https://github.com/WebRobot-Ltd/webrobot-etl-api) for those shapes.
+- The block is parsed once at code-generation time and the functions are registered for the lifetime of the run. They are not persisted between runs — that's what Mode B is for.
 
 ---
 
