@@ -24,6 +24,22 @@
       need to be state-of-the-art programming to do non-trivial work.
     </div>
 
+    <!-- Perf banner: HTTP-only stages skip browser automation entirely
+         and run dramatically faster + lighter on the cluster — pick
+         them whenever the target site renders content server-side. -->
+    <div class="perf-banner">
+      ⚡ Prefer the HTTP-only stages — <strong>wget</strong>,
+      <strong>wgetExplore</strong>, <strong>wgetJoin</strong> — when
+      the target site lets you (server-rendered content, no JS-only
+      pagination): they skip the entire browser automation layer and
+      are <strong>significantly faster + cheaper</strong> on cluster
+      resources. Use their <strong>visit*</strong> counterparts only
+      when the page genuinely needs a JS-rendered DOM (single-page
+      apps, infinite scroll, anti-bot challenge). Wikipedia, arXiv,
+      GitHub README pages → wget; eBay search, Amazon detail pages →
+      visit.
+    </div>
+
     <!-- Section 1: Execute Existing Pipelines -->
     <div class="demo-section">
       <h2>📋 Execute Example Pipelines</h2>
@@ -5894,6 +5910,26 @@ if (typeof window !== 'undefined') {
   color: #bfdbfe;
 }
 .dark .design-banner strong { color: #dbeafe; }
+
+/* Perf banner — third chip, green palette to read as a positive
+   "tip" rather than another advisory. */
+.perf-banner {
+  background: #ecfdf5;
+  border: 1px solid #6ee7b7;
+  color: #065f46;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+.perf-banner strong { color: #047857; }
+.dark .perf-banner {
+  background: #18302a;
+  border-color: #10b981;
+  color: #a7f3d0;
+}
+.dark .perf-banner strong { color: #d1fae5; }
 
 /* ─── Live execution panel ─────────────────────────────────── */
 .exec-panel {
