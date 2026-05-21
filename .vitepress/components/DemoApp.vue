@@ -9,6 +9,17 @@
       is currently in development and <strong>not yet in production</strong>.
     </div>
 
+    <!-- Sovereignty banner: where the workload physically runs.
+         Important for EU GDPR-conscious users / B2B procurement. -->
+    <div class="sovereignty-banner">
+      🇪🇺 Everything you trigger here runs on a
+      <strong>European, sovereign Kubernetes cluster</strong> hosted on
+      <strong>Hetzner</strong> servers in the EU. Your data stays in
+      Europe; no third-country processors are in the demo execution path.
+      Object storage (MinIO), Trino, Spark, Camoufox browser pool and
+      the API control plane all live in the same EU region.
+    </div>
+
     <!-- Design banner: the pipeline programming model is intentionally
          a chain of stages rather than full structured programming —
          it's been shaped to be cheap for an LLM to author end-to-end.
@@ -5962,7 +5973,28 @@ if (typeof window !== 'undefined') {
 }
 .dark .design-banner strong { color: #dbeafe; }
 
-/* Perf banner — third chip, green palette to read as a positive
+/* Sovereignty banner — second chip, violet palette so it stands
+   apart from the amber/blue/green narrative chips. Communicates
+   EU data residency, a recurring procurement / GDPR question. */
+.sovereignty-banner {
+  background: #f5f3ff;
+  border: 1px solid #c4b5fd;
+  color: #4c1d95;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+.sovereignty-banner strong { color: #5b21b6; }
+.dark .sovereignty-banner {
+  background: #221a3a;
+  border-color: #8b5cf6;
+  color: #ddd6fe;
+}
+.dark .sovereignty-banner strong { color: #ede9fe; }
+
+/* Perf banner — fourth chip, green palette to read as a positive
    "tip" rather than another advisory. */
 .perf-banner {
   background: #ecfdf5;
