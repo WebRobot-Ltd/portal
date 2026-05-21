@@ -383,7 +383,46 @@ The model is prompted to emit a complete `pipeline:` block that already referenc
 
 **2. Use a coding agent (Claude Code, Cursor) against your editor.** Same prompt, just delivered to the IDE — the agent edits the YAML in place. Because the function is plain Python that satisfies a tiny contract, agents land it correctly on the first try almost every time. Just remember the rules the runtime enforces (stdlib-only, imports inside `def`, return a `dict`, preserve fields with `{**row, ...}`).
 
-The two paths converge on the same YAML, so you can mix freely — e.g. let the platform generate the scraping stages, then ask Claude to add a more elaborate transform.
+**3. Direct intent → named server skill → function snippet.** Between the two — when you don't need a whole pipeline (path 1) but don't want to round-trip through an IDE either (path 2) — call a **named wizard skill** that returns just the function body. The wizard endpoints follow a consistent contract: the client sends a small intent payload, the **system prompt and few-shot live server-side**, and the response is already shaped for the next stage.
+
+The relevant skills:
+
+| Skill | Endpoint | Input | Output |
+| --- | --- | --- | --- |
+| Stages from intent | `POST /webrobot/api/demo/wizard/suggest` | `{"intent":"..."}` | `{"suggested":["wget","wgetExplore",...]}` |
+| Python transform from intent | `POST /webrobot/api/demo/wizard/generate-python-transform` | `{"intent":"...","sampleRow":{...}}` (sampleRow optional) | `{"name":"clean_price","code":"def clean_price(row): ..."}` |
+| Validate a Python transform | `POST /webrobot/api/demo/wizard/validate-python-transform` | `{"code":"def ..."}` | `{"ok":true,"name":"clean_price"}` or `{"ok":false,"issues":[...]}` |
+
+The benefit of named skills over raw LLM calls: every client (CLI, demo UI, your own integration) hits the same system prompt and the same output shape — drift between callers is impossible, and the platform owners can iterate the prompt without breaking every consumer.
+
+```bash
+# ask the server to generate the function — no system prompt on the client
+curl -s -X POST https://api.webrobot.eu/webrobot/api/demo/wizard/generate-python-transform \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "intent": "Parse raw_price (any common European/UK format) into numeric `price`; add `currency` with detected ISO code.",
+    "sampleRow": {"raw_price": "£12.99"}
+  }' | jq .
+
+# → { "name": "clean_price", "code": "def clean_price(row):\n    import re\n    ..." }
+```
+
+Drop the returned `code` straight into a `python_define` stage:
+
+```yaml
+- stage: python_define
+  args:
+    - name: clean_price
+      code: |
+        # ← paste the `code` field returned by /wizard/generate-python-transform
+
+- stage: python_row_transform:clean_price
+  args: []
+```
+
+This is also the natural shape for an "intent box" widget next to the YAML editor in the demo UI: a textarea, a "generate" button, and the same endpoint. No system prompt in the client, no divergence.
+
+The three paths converge on the same YAML, so you can mix freely — e.g. let the platform generate the scraping stages (path 1), refine the transform via the named skill (path 3), and polish edge cases by hand in the IDE (path 2). The contract that backs them all is one place: the wizard skills on the server.
 
 ### When to use which mode
 
