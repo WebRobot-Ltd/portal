@@ -9,6 +9,21 @@
       is currently in development and <strong>not yet in production</strong>.
     </div>
 
+    <!-- Design banner: the pipeline programming model is intentionally
+         a chain of stages rather than full structured programming —
+         it's been shaped to be cheap for an LLM to author end-to-end.
+         The higher-order agentic flow turns intent into a YAML pipeline. -->
+    <div class="design-banner">
+      🤖 The pipeline programming model is intentionally a
+      <strong>chain of stages</strong>, not full structured programming —
+      it's designed to be <strong>easy for an LLM to author</strong>
+      end-to-end. Stages compose like UNIX pipes; arguments are flat
+      maps or selectors. Higher-order
+      <strong>agentic orchestration</strong> (with the right skills + planner)
+      handles the intent-to-pipeline translation, so this YAML doesn't
+      need to be state-of-the-art programming to do non-trivial work.
+    </div>
+
     <!-- Section 1: Execute Existing Pipelines -->
     <div class="demo-section">
       <h2>📋 Execute Example Pipelines</h2>
@@ -5859,6 +5874,26 @@ if (typeof window !== 'undefined') {
   color: #fde68a;
 }
 .dark .scope-banner strong { color: #fef3c7; }
+
+/* Design banner — sibling of scope-banner but cooler/blue palette
+   so the two chips don't visually merge into one yellow strip. */
+.design-banner {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  color: #1e3a8a;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+.design-banner strong { color: #1e40af; }
+.dark .design-banner {
+  background: #172033;
+  border-color: #3b82f6;
+  color: #bfdbfe;
+}
+.dark .design-banner strong { color: #dbeafe; }
 
 /* ─── Live execution panel ─────────────────────────────────── */
 .exec-panel {
