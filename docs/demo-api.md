@@ -363,6 +363,28 @@ webrobot demo output <executionId> --limit 20
 
 The `clean_price` function ran on every row, added two columns, and the output preview reflects them. No plugin install, no Java build.
 
+### AI-assisted: generate the function and the YAML in one shot
+
+`python_define` is the sweet spot for AI code generation — the function source is small, the contract is fixed (`row: dict → dict`), and the whole thing ships inline so the model doesn't need to know anything about your infra. Two complementary patterns work here:
+
+**1. Use the platform's own `generate-pipeline` endpoint.** Ask for the pipeline AND the transform together. The demo backend can emit both stages in the same YAML:
+
+```bash
+webrobot demo generate-pipeline -b '{
+  "prompt": "Scrape books.toscrape.com and add a clean numeric `price` (GBP) column parsed from the raw price string. Include the python_define stage inline."
+}' | tee draft.json
+
+webrobot demo save-generated-pipeline -b @draft.json
+webrobot demo reload-pipelines
+webrobot demo execute books-with-extension --follow
+```
+
+The model is prompted to emit a complete `pipeline:` block that already references `python_row_transform:<name>` after the corresponding `python_define`.
+
+**2. Use a coding agent (Claude Code, Cursor) against your editor.** Same prompt, just delivered to the IDE — the agent edits the YAML in place. Because the function is plain Python that satisfies a tiny contract, agents land it correctly on the first try almost every time. Just remember the rules the runtime enforces (stdlib-only, imports inside `def`, return a `dict`, preserve fields with `{**row, ...}`).
+
+The two paths converge on the same YAML, so you can mix freely — e.g. let the platform generate the scraping stages, then ask Claude to add a more elaborate transform.
+
 ### When to use which mode
 
 The full [Python Extensions](/docs/python-extensions) page covers three modes — here is when each makes sense:
