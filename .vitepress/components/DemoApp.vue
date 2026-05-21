@@ -4366,6 +4366,13 @@ function cloneToWizard() {
     kind: 'info',
     text: `Cloned from "${selectedPipelineInfo.value.name}". Edit and Save & Run when ready.`
   }
+  // The "Edit in wizard" button lives inside the dataset upload
+  // modal. Once the user committed to editing, that modal has done
+  // its job — close it so they actually see the wizard panel they
+  // were sent to.
+  if (typeof showUploadModal !== 'undefined' && showUploadModal.value) {
+    closeUploadModal()
+  }
   // Scroll the wizard into view so the user sees the result.
   setTimeout(() => {
     const el = document.querySelector('.wizard-card')
