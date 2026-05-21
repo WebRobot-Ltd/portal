@@ -3020,10 +3020,17 @@ function copyCommittedTrace() {
 }
 
 // Heuristic: is this arg a CSS selector? (drives whether to show the
-// 🎯 button next to it).
+// 🎯 button next to it). Hybrid args like `url_or_selector` (visit
+// stage takes a URL OR a column ref OR a selector) are excluded —
+// they're URL-shaped most of the time and rendering the picker
+// next to them was confusing the user into thinking the field was
+// CSS-only.
 function isSelectorArg(arg) {
   if (!arg || !arg.name) return false
-  return /selector$/i.test(arg.name) || arg.name.toLowerCase() === 'selector'
+  const n = arg.name.toLowerCase()
+  // Pure URL fields (or hybrid url/selector fields) get URL treatment.
+  if (n.includes('url') || n === 'href' || n === 'src') return false
+  return /selector$/i.test(arg.name) || n === 'selector';
 }
 
 // Args that are structured field-lists (extract.extractors,
@@ -3044,8 +3051,10 @@ function argPlaceholder(arg) {
   if (!arg) return ''
   const n = (arg.name || '').toLowerCase()
   const t = (arg.type || '').toLowerCase()
+  // URL check first — hybrid names like `url_or_selector` (visit
+  // stage) would otherwise fall into the selector branch.
+  if (n.includes('url') || n === 'href' || n === 'src') return 'https://example.com/…'
   if (isSelectorArg(arg))      return 'e.g. div.product > h2 a'
-  if (n.includes('url'))       return 'https://example.com/…'
   if (n === 'jointype')        return 'LeftOuter | Inner'
   if (n === 'depth' || t === 'int' || t === 'integer') return 'integer, e.g. 1'
   if (n.startsWith('$'))       return '$column_name'
