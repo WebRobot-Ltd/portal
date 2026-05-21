@@ -10,6 +10,7 @@ The interactive UI at [/demo](/demo) is just one client of these endpoints — t
 - **Pipeline prototyping.** Generate a pipeline from a natural-language prompt, iterate, then promote the same YAML to your own org without changing a single stage.
 - **SDK integration.** Wire any of the four SDKs against the public endpoint and exercise `executeDemo` / `getExecutionStatus` / `getExecutionOutput` in your own CI before you have credentials.
 - **Demo-driven onboarding.** Point a teammate at `webrobot demo execute …` and skip the API-key dance.
+- **Extend without compiling.** Inject custom Python logic into a demo pipeline via inline `python_define` + `python_row_transform` — no Scala plugin, no bundle upload. See [Advanced: extending the demo pipeline with Python](#advanced-extending-the-demo-pipeline-with-python).
 
 > **What "public" means here.** The `/webrobot/api/demo/*` endpoints accept anonymous calls. They are rate-limited and only schedule the pipelines whose YAML is bundled in the demo plugin (plus pipelines you produce with `generate-pipeline` + `save-generated-pipeline` in the same session). They run on a shared Spark cluster in Hetzner Helsinki (EU-sovereign), so output throughput is best-effort.
 
@@ -293,6 +294,102 @@ Every demo path has a corresponding authenticated route on the main API:
 | `POST /webrobot/api/demo/generate-pipeline`         | `POST /webrobot/api/wizard/generate-pipeline`                      |
 
 The CLI follows the same parallel: `webrobot demo …` ↔ `webrobot project … / job … / execution …`. Switching is just a matter of pointing at the authenticated tree once you have credentials.
+
+## Advanced: extending the demo pipeline with Python
+
+You don't need to ship a Scala plugin — or upload a plugin bundle — to add custom logic to a demo pipeline. The ETL parser already accepts **Python Extensions** as a first-class stage, and they work end-to-end inside the demo sandbox: define a function in the YAML, reference it by name in a later stage, save and execute.
+
+This is the right extensibility hook for sandbox users: no compile step, no `organization_id`, no deployment — just YAML plus a Python function that travels with the pipeline.
+
+### How it wires
+
+Two stages do the work:
+
+- **`python_define`** — registers a Python function for the lifetime of the current pipeline run. The function source lives inline in the YAML.
+- **`python_row_transform:<name>`** — applies that function row-by-row in the dataframe.
+
+The function receives a row as a `dict` and returns a `dict`. Anything you want downstream must be in the returned dict (use `{**row, ...}` to preserve fields).
+
+### End-to-end example
+
+A demo pipeline that scrapes `books.toscrape.com`, then applies a custom Python transform to extract a clean numeric price:
+
+```yaml
+# books-with-extension.yaml — save-generated-pipeline accepts this directly
+pipeline:
+  - stage: wget
+    args: ["https://books.toscrape.com/"]
+
+  - stage: extract
+    args:
+      - { name: title, selector: "article.product_pod h3 a", method: "attr:title" }
+      - { name: raw_price, selector: "article.product_pod p.price_color", method: "text" }
+
+  # ── extension point ────────────────────────────────────────────────
+  - stage: python_define
+    args:
+      - name: clean_price
+        code: |
+          def clean_price(row):
+              import re
+              raw = row.get('raw_price', '') or ''
+              m = re.search(r'[\d.,]+', raw)
+              price = float(m.group().replace(',', '.')) if m else None
+              return {**row, 'price': price, 'currency': 'GBP'}
+
+  - stage: python_row_transform:clean_price
+    args: []
+  # ── end extension ──────────────────────────────────────────────────
+
+output:
+  format: csv
+  mode: overwrite
+  path: "${OUTPUT_CSV_PATH}"
+```
+
+Run it through the demo flow exactly like a bundled pipeline:
+
+```bash
+# 1. save the pipeline (any name; the demo plugin persists it for this session)
+webrobot demo save-generated-pipeline -b @books-with-extension.yaml
+webrobot demo reload-pipelines
+
+# 2. execute and follow
+webrobot demo execute books-with-extension --follow
+
+# 3. inspect the output — note the new `price` and `currency` columns
+webrobot demo output <executionId> --limit 20
+```
+
+The `clean_price` function ran on every row, added two columns, and the output preview reflects them. No plugin install, no Java build.
+
+### When to use which mode
+
+The full [Python Extensions](/docs/python-extensions) page covers three modes — here is when each makes sense:
+
+| Mode | Where the code lives | Fit for demo sandbox? |
+| --- | --- | --- |
+| **A — Inline `python_define`** | In the pipeline YAML itself | ✅ **Use this in the demo.** Self-contained, no auth needed, travels with the pipeline. |
+| **B — DB-registered** | `POST /api/python-extensions` (needs `organization_id`) | ❌ Requires an authenticated org. Move to this once you've got credentials and want to share functions across pipelines. |
+| **C — Hybrid (AI-assisted)** | AI agent generates + registers + references | ❌ Same auth requirement as Mode B. |
+
+So the path is: **prototype with Mode A in the sandbox → promote to Mode B once you've got an org**. The YAML stays portable in both cases — only the function source moves from inline to DB.
+
+### What the parser supports today
+
+The ETL parser handles these on the same pipeline:
+
+- multiple `python_define` blocks (define helpers before they are used)
+- chained `python_row_transform:<name>` calls in any order
+- a function returning a dict with a `__drop__: true` marker to filter rows
+- standard library imports inside the function body (do imports *inside* `def`, not at the top of the snippet)
+
+What it does **not** support inside the inline mode:
+
+- third-party pip packages — only the Python stdlib is available in the sandboxed executor for demo pipelines. If you need pandas/lxml/etc., promote to Mode B in your own org where you control the executor image.
+- multi-row aggregations — `python_row_transform` is strictly row-by-row. For windowed/aggregate logic, use `groupby` or `aggregate` stages instead.
+
+See [Python Extensions → Function Contract](/docs/python-extensions#function-contract) for the full rule set.
 
 ## Notes on limits
 
