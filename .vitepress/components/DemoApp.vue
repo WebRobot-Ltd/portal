@@ -1507,6 +1507,112 @@ go</pre>
         </div>
       </div>
     </div>
+
+    <!-- ───────── Use from CLI / SDK / curl ───────── -->
+    <div class="demo-section api-guide">
+      <h2>📡 Use the demo from CLI, SDK or plain curl</h2>
+      <p>
+        Every endpoint this page hits is exposed publicly under
+        <code>https://api.webrobot.eu/api/webrobot/api/demo/*</code>.
+        No JWT, no API key — same demo posture you see in the browser
+        is reachable from any HTTP client. OpenAPI spec at
+        <code><a href="https://api.webrobot.eu/api/openapi.json" target="_blank">api.webrobot.eu/api/openapi.json</a></code>
+        (216 paths, 25 demo).
+      </p>
+
+      <div class="api-guide-grid">
+        <div class="api-guide-card">
+          <h4>1. List available demo pipelines</h4>
+<pre class="code-block code-block-sm"><code>curl -s https://api.webrobot.eu/api/webrobot/api/demo/list \
+  | jq '.demos[] | {pipeline_name, is_draft, requires_input_dataset}'</code></pre>
+          <p class="api-guide-hint">Returns curated <code>Demo: …</code> entries plus your saved drafts <code>Generated: …</code> (<code>is_draft: true</code>).</p>
+        </div>
+
+        <div class="api-guide-card">
+          <h4>2. Run an existing pipeline</h4>
+<pre class="code-block code-block-sm"><code>EXEC=$(curl -s -X POST \
+  https://api.webrobot.eu/api/webrobot/api/demo/execute/01-wiki-us-presidents \
+  -H 'content-type: application/json' \
+  -d '{"parameters":{"limit":10}}' \
+  | jq -r '.execution_id')
+echo "execution_id=$EXEC"</code></pre>
+          <p class="api-guide-hint">Demo runs are capped at <strong>5–10 records</strong>; ignore <code>limit</code> outside that range.</p>
+        </div>
+
+        <div class="api-guide-card">
+          <h4>3. Poll status (phase-aware)</h4>
+<pre class="code-block code-block-sm"><code>watch -n 3 "curl -s \
+  https://api.webrobot.eu/api/webrobot/api/demo/executions/$EXEC/status \
+  | jq '{phase, status, executors_ready, executors_total, duration_seconds}'"</code></pre>
+          <p class="api-guide-hint"><code>phase</code> = <em>submitting / starting_driver / pulling_executors / running / completed / failed / lost</em>.</p>
+        </div>
+
+        <div class="api-guide-card">
+          <h4>4. Read the output</h4>
+<pre class="code-block code-block-sm"><code># preview rows (via Trino → MinIO/Parquet)
+curl -s "https://api.webrobot.eu/api/webrobot/api/demo/executions/$EXEC/output?limit=10" \
+  | jq '{source, columns, rows: (.rows | length)}'</code></pre>
+          <p class="api-guide-hint">Response includes <code>source: "trino"</code> (preferred) or <code>"minio-direct"</code> (fallback). Format-agnostic.</p>
+        </div>
+
+        <div class="api-guide-card">
+          <h4>5. Tail driver / executor logs</h4>
+<pre class="code-block code-block-sm"><code>curl -s "https://api.webrobot.eu/api/webrobot/api/demo/executions/$EXEC/logs?tail=200&podType=driver"  | jq -r '.logs'
+curl -s "https://api.webrobot.eu/api/webrobot/api/demo/executions/$EXEC/logs?tail=200&podType=executor&executorIndex=1" | jq -r '.logs'</code></pre>
+          <p class="api-guide-hint">Direct <code>kubectl logs</code>-equivalent, sanitized server-side (secrets / pod names / internal classpaths stripped).</p>
+        </div>
+
+        <div class="api-guide-card">
+          <h4>6. Save & run your own YAML</h4>
+<pre class="code-block code-block-sm"><code>cat &gt; /tmp/my.yaml &lt;&lt;'EOF'
+pipeline:
+  - stage: wget
+    args: ["https://en.wikipedia.org/wiki/Apache_Spark"]
+  - stage: extract
+    args:
+      - { selector: "h1#firstHeading", method: "text", as: "title" }
+EOF
+
+curl -s -X POST https://api.webrobot.eu/api/webrobot/api/demo/save-generated-pipeline \
+  -H 'content-type: application/json' \
+  -d "{\"pipeline_name\":\"my-pipe\",\"pipeline_yaml\":$(jq -Rs . &lt; /tmp/my.yaml),\"execute\":true}" \
+  | jq '{agent_id, status, execution: .execution.execution_id}'</code></pre>
+          <p class="api-guide-hint">Same YAML schema the wizard emits. The new agent shows up in <code>/demo/list</code> as <code>Generated: my-pipe</code> with <code>is_draft: true</code>.</p>
+        </div>
+
+        <div class="api-guide-card">
+          <h4>7. Validate selectors (no Spark needed)</h4>
+<pre class="code-block code-block-sm"><code>curl -s -X POST https://api.webrobot.eu/api/webrobot/api/demo/wizard/validate \
+  -H 'content-type: application/json' \
+  -d "{\"yaml\":$(jq -Rs . &lt; /tmp/my.yaml)}" \
+  | jq '{valid, record_count, steps: (.steps | map({stage, status}))}'</code></pre>
+          <p class="api-guide-hint">Opens an ephemeral Camoufox session, replays the fetch trace, samples up to 5 records. Cheap dry-run before launching the Spark job.</p>
+        </div>
+
+        <div class="api-guide-card">
+          <h4>8. Live stage catalog</h4>
+<pre class="code-block code-block-sm"><code>curl -s https://api.webrobot.eu/api/webrobot/api/demo/catalog/stages \
+  | jq '.data[] | {stage_name, args: (.arg_schema | map(.name))}'</code></pre>
+          <p class="api-guide-hint">62 stages, dynamic. Same source the wizard reads. New stages here without rebuilding any client.</p>
+        </div>
+      </div>
+
+      <div class="api-guide-pointers">
+        <p>
+          <strong>SDKs</strong>:
+          <code><a href="https://github.com/WebRobot-Ltd/sdks" target="_blank">github.com/WebRobot-Ltd/sdks</a></code>
+          generates Python / TypeScript / PHP / Go clients from the same OpenAPI spec
+          (<code>./generate-sdks.sh</code> after a refresh).
+        </p>
+        <p>
+          <strong>CLI</strong>:
+          <code><a href="https://github.com/WebRobot-Ltd/webrobot-cli" target="_blank">github.com/WebRobot-Ltd/webrobot-cli</a></code>
+          — Scala CLI for the agent / manifest / bundle surface;
+          a dedicated <code>demo</code> subcommand is on the roadmap, in the
+          meantime the curl recipes above cover the demo flow end-to-end.
+        </p>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -5233,6 +5339,54 @@ if (typeof window !== 'undefined') {
   gap: 1rem;
   flex-wrap: wrap;
 }
+
+/* API guide section — bottom of the demo page */
+.api-guide { border-left: 4px solid #6366f1; }
+.api-guide > p { color: var(--vp-c-text-2, #4b5563); }
+.api-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+.api-guide-card {
+  background: var(--vp-c-bg, #ffffff);
+  border: 1px solid var(--vp-c-divider, #e5e7eb);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.api-guide-card h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.96em;
+  color: var(--vp-c-text-1, #111827);
+}
+.code-block-sm {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+  overflow-x: auto;
+  white-space: pre;
+  margin: 0;
+}
+.api-guide-hint {
+  margin: 8px 0 0 0;
+  font-size: 0.82em;
+  color: var(--vp-c-text-2, #6b7280);
+  line-height: 1.45;
+}
+.api-guide-pointers {
+  margin-top: 18px;
+  padding: 12px 14px;
+  background: var(--vp-c-bg-soft, #f3f4f6);
+  border-radius: 6px;
+  font-size: 0.88em;
+}
+.api-guide-pointers p { margin: 4px 0; }
+.api-guide-pointers code { background: transparent; padding: 0; }
 
 /* Private Demo Styles */
 .auth-card {
