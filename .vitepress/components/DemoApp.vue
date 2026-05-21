@@ -4267,6 +4267,32 @@ async function runValidation() {
 // Uses /demo/list's pre-parsed `stages` array (server-side YAML parse)
 // so we don't need a YAML lib in the browser. Positional args get
 // mapped back to named via the catalog's arg_schema order.
+// Convert an action map from the runtime YAML format
+// ({action, selector, text, seconds, pixels, direction}) back into
+// the wizard's internal trace action shape ({type, selector, text, ms, y}).
+// Mirror of traceActionToYamlMap() — keep these two in sync.
+function actionMapToTrace(m) {
+  if (!m || typeof m !== 'object') return null
+  const action = String(m.action || m.factory || '').toLowerCase()
+  if (action === 'click') {
+    return m.selector ? { type: 'Click', selector: String(m.selector) } : null
+  }
+  if (action === 'input' || action === 'type' || action === 'fill') {
+    if (!m.selector) return null
+    return { type: 'Type', selector: String(m.selector), text: String(m.text != null ? m.text : (m.value || '')) }
+  }
+  if (action === 'wait' || action === 'sleep') {
+    const sec = m.seconds != null ? Number(m.seconds) : (m.ms != null ? Number(m.ms) / 1000 : 1)
+    return { type: 'Wait', ms: Math.round(sec * 1000) }
+  }
+  if (action === 'scroll') {
+    const pixels = Math.abs(Number(m.pixels != null ? m.pixels : (m.y != null ? m.y : 600)))
+    const dir = String(m.direction || 'down').toLowerCase()
+    return { type: 'Scroll', y: (dir === 'up' ? -pixels : pixels) }
+  }
+  return null
+}
+
 function cloneToWizard() {
   if (!selectedPipelineInfo.value) return
   if (wizPipeline.value.length > 0) {
@@ -4275,18 +4301,64 @@ function cloneToWizard() {
   const stages = selectedPipelineInfo.value.stages || []
   const next = []
   for (const s of stages) {
-    const spec = findStageSpec(s.stage)
-    const argNames = (spec && spec.arg_schema || []).map(a => a.name)
     const argsObj = {}
-    if (Array.isArray(s.args)) {
-      // Positional → named by catalog order.
-      for (let i = 0; i < s.args.length && i < argNames.length; i++) {
-        argsObj[argNames[i]] = s.args[i]
+    let fields = null   // structured field list for extract / flatSelect
+    let trace  = null   // recorded actions for fetch / visit / wget
+
+    if (s.stage === 'extract') {
+      // YAML: args = [{selector, method, as}, …] — every positional
+      // entry is a field map. Push them all into _fields; leave
+      // args empty so the structured panel is the only data source.
+      if (Array.isArray(s.args)) {
+        fields = s.args.filter(a => a && typeof a === 'object').map(a => ({
+          selector: String(a.selector || ''),
+          method:   String(a.method || 'text'),
+          as:       String(a.as || ''),
+        }))
       }
-    } else if (s.args && typeof s.args === 'object') {
-      Object.assign(argsObj, s.args)
+    } else if (s.stage === 'flatSelect') {
+      // YAML: args = [segmentSelector, [{selector, method, as}, …]]
+      // First positional is the container; second is the field list.
+      if (Array.isArray(s.args)) {
+        if (s.args.length > 0) argsObj.selector = String(s.args[0] || '')
+        if (s.args.length > 1 && Array.isArray(s.args[1])) {
+          fields = s.args[1].filter(a => a && typeof a === 'object').map(a => ({
+            selector: String(a.selector || ''),
+            method:   String(a.method || 'text'),
+            as:       String(a.as || ''),
+          }))
+        }
+      }
+    } else if (Array.isArray(s.args) && (s.stage === 'fetch' || s.stage === 'visit' || s.stage === 'wget')) {
+      // YAML: args = [url, [{action, selector, text, …}, …]]
+      // First positional is the URL — map by catalog arg_schema.
+      const spec = findStageSpec(s.stage)
+      const argNames = (spec && spec.arg_schema || []).map(a => a.name)
+      if (s.args.length > 0 && argNames.length > 0) {
+        argsObj[argNames[0]] = s.args[0]
+      }
+      // Second positional, if present and a list, is the embedded
+      // trace. Convert back to {type, selector, text, ms, y}.
+      if (s.args.length > 1 && Array.isArray(s.args[1])) {
+        trace = s.args[1].map(actionMapToTrace).filter(Boolean)
+      }
+    } else {
+      // Generic stages — positional → named via catalog order.
+      const spec = findStageSpec(s.stage)
+      const argNames = (spec && spec.arg_schema || []).map(a => a.name)
+      if (Array.isArray(s.args)) {
+        for (let i = 0; i < s.args.length && i < argNames.length; i++) {
+          argsObj[argNames[i]] = s.args[i]
+        }
+      } else if (s.args && typeof s.args === 'object') {
+        Object.assign(argsObj, s.args)
+      }
     }
-    next.push({ stage: s.stage, args: argsObj })
+
+    const row = { stage: s.stage, args: argsObj }
+    if (fields && fields.length) row._fields = fields
+    if (trace  && trace.length)  row._trace  = trace
+    next.push(row)
   }
   wizPipeline.value = next
   wizPipelineName.value = (selectedPipelineInfo.value.id || 'cloned') + '-edit'
