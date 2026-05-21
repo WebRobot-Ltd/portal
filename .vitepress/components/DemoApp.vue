@@ -6052,17 +6052,33 @@ if (typeof window !== 'undefined') {
   font-size: 0.85em;
   height: auto;
   width: auto;
-  /* Selects/inputs inherited browser default + theme conflicts: on
-     the VitePress soft-bg section the dropdown text washed out.
-     Pin to theme primary text on the theme input background. */
-  background: var(--vp-c-bg, #ffffff);
-  color: var(--vp-c-text-1, #111827);
-  border: 1px solid var(--vp-c-divider, #d0d0d0);
+  /* Selects/inputs inherited browser default + theme conflicts: the
+     dropdown text was washing out to light gray against the soft
+     section background. Pin explicit white bg + near-black text so
+     it reads no matter what theme is loaded. Options inside the
+     dropdown also need explicit colors — browsers respect them on
+     <option> when set here on the parent select. */
+  background: #ffffff;
+  color: #111827;
+  border: 1px solid #d1d5db;
   border-radius: 4px;
+}
+.text-input-sm option {
+  background: #ffffff;
+  color: #111827;
 }
 .text-input-sm:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+.dark .text-input-sm {
+  background: #1f2937;
+  color: #f9fafb;
+  border-color: #374151;
+}
+.dark .text-input-sm option {
+  background: #1f2937;
+  color: #f9fafb;
 }
 .exec-logs-checkbox {
   display: inline-flex;
