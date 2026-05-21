@@ -6039,19 +6039,38 @@ if (typeof window !== 'undefined') {
   flex-wrap: wrap;
   margin-bottom: 8px;
 }
-.exec-logs-controls .exec-logs-title { margin: 0 auto 0 0; }
+.exec-logs-controls .exec-logs-title {
+  margin: 0 auto 0 0;
+  /* h3 inherited an off-tone in light mode and disappeared on dark
+     mode; pin it to the theme primary so it reads on both. */
+  color: var(--vp-c-text-1, #111827);
+  font-size: 1.05em;
+  font-weight: 600;
+}
 .text-input-sm {
   padding: 4px 8px;
   font-size: 0.85em;
   height: auto;
   width: auto;
+  /* Selects/inputs inherited browser default + theme conflicts: on
+     the VitePress soft-bg section the dropdown text washed out.
+     Pin to theme primary text on the theme input background. */
+  background: var(--vp-c-bg, #ffffff);
+  color: var(--vp-c-text-1, #111827);
+  border: 1px solid var(--vp-c-divider, #d0d0d0);
+  border-radius: 4px;
+}
+.text-input-sm:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 .exec-logs-checkbox {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   font-size: 0.85em;
-  color: #555;
+  /* Was a hardcoded #555 — invisible in dark mode. */
+  color: var(--vp-c-text-2, #4b5563);
 }
 .exec-logs-stream {
   background: #1e1e1e;
