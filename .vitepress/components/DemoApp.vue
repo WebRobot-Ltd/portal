@@ -739,7 +739,13 @@ go</pre>
                   :disabled="!wizValid || validateOpen"
                   @click="openValidate"
                   title="Run the pipeline on a real Camoufox session and preview up to 5 records before launching the Spark job">🔬 Validate selectors</button>
-          <button class="btn btn-secondary" @click="openPicker(null, null, 'action-record')" title="Record a sequence of click/type/scroll actions on a target page (for fetch/visit trace args)">⏺ Record actions</button>
+          <!--
+            Standalone "Record actions" button removed: action-record
+            is reachable via the 🎯 button on any fetch/visit/wget
+            stage's trace arg, which is the natural entry point. A
+            bottom-bar version without a target stage was confusing —
+            users would record actions with nowhere to apply them.
+          -->
           <button class="btn btn-ghost" @click="wizardReset">Reset</button>
           <div v-if="wizStatus.kind" :class="['wizard-status', 'wizard-status-' + wizStatus.kind]">
             {{ wizStatus.text }}
