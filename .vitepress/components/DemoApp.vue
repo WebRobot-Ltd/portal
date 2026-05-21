@@ -5838,15 +5838,27 @@ if (typeof window !== 'undefined') {
 
 /* ─── Scope banner ─────────────────────────────────────────── */
 .scope-banner {
-  background: rgba(102, 126, 234, 0.08);
-  border: 1px solid rgba(102, 126, 234, 0.25);
-  color: #333;
+  /* Opaque pale-amber instead of near-transparent purple — the
+     previous rgba(102,126,234,0.08) on top of the demo page's
+     gradient background made the text barely visible. */
+  background: #fff8e1;
+  border: 1px solid #f6c065;
+  color: #1f2937;
   padding: 12px 16px;
   border-radius: 8px;
   font-size: 0.9rem;
   margin-bottom: 1.5rem;
   line-height: 1.5;
 }
+.scope-banner strong { color: #111827; }
+/* Dark mode (VitePress class toggle) — keep contrast on a slate
+   background instead of trying to invert the amber. */
+.dark .scope-banner {
+  background: #2a2417;
+  border-color: #f59e0b;
+  color: #fde68a;
+}
+.dark .scope-banner strong { color: #fef3c7; }
 
 /* ─── Live execution panel ─────────────────────────────────── */
 .exec-panel {
