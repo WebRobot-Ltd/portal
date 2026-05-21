@@ -2413,7 +2413,7 @@ const isExecutionRunning = computed(() => {
   return s === 'RUNNING' || s === 'SUBMITTED'
 })
 
-const TERMINAL_LIFECYCLE = new Set(['completed', 'failed', 'cancelled'])
+const TERMINAL_LIFECYCLE = new Set(['completed', 'failed', 'cancelled', 'lost'])
 const isExecutionTerminal = computed(() => {
   const s = statusData.value && statusData.value.status
   const p = statusData.value && statusData.value.phase
@@ -2444,6 +2444,8 @@ const PHASE_META = {
                         detail: 'See the error message above and the Spark driver logs.' },
   cancelled:          { icon: '🛑', spinner: false, label: 'Cancelled',
                         detail: 'User cancelled this run.' },
+  lost:               { icon: '⚠️', spinner: false, label: 'Lost — no pods materialised',
+                        detail: 'The Spark Operator removed the SparkApplication CRD before the webhook could close this run. The DB row was auto-marked FAILED. Click "Forget run" to dismiss.' },
   unknown:            { icon: '❓', spinner: false, label: 'Status unknown',
                         detail: 'The execution record can\'t be located. It may have been pruned.' },
 }
