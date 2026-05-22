@@ -18,10 +18,12 @@ The interactive UI at [/demo](/demo) is just one client of these endpoints — t
 ## Base URL
 
 ```
-https://api.webrobot.eu/webrobot/api/demo
+https://api.webrobot.eu/api/webrobot/api/demo
 ```
 
-No `Authorization` header is required.  If you do send one (a real API key or JWT) the platform attributes usage to your org for analytics — useful but optional.
+The first `/api` is the Jersey servlet mount (`Main.java` maps the servlet to `/api/*` in Tomcat); the second `/webrobot/api/demo/...` is the resource path. The OpenAPI spec at `https://api.webrobot.eu/api/openapi.json` already encodes the prefix via its `servers[].url`, so any generated SDK or MCP client that composes `<server> + <path>` will resolve correctly without manual surgery.
+
+No `Authorization` header is required. If you do send one (a real API key or JWT) the platform attributes usage to your org for analytics — useful but optional.
 
 ## Endpoint surface
 
@@ -30,7 +32,7 @@ The plugin exposes **25 operations**, grouped into five areas:
 | Area | Endpoints |
 | --- | --- |
 | Run flow | `GET list`, `GET info`, `POST execute/{pipeline-name}`, `GET executions/{id}/status`, `GET executions/{id}/logs`, `GET executions/{id}/output`, `DELETE executions/{id}` |
-| Pipeline generation | `POST generate-pipeline`, `POST save-generated-pipeline`, `POST reload-pipelines` |
+| Pipeline generation | `POST generate-pipeline` *(draft — selectors hypothesised, not validated; [agentic version on roadmap](#generate-a-pipeline-from-a-prompt-draft-selectors-not-validated))*, `POST save-generated-pipeline`, `POST reload-pipelines` |
 | Dataset upload | `POST upload-dataset/{pipeline-name}` (multipart) |
 | Catalog | `GET catalog/stages?search=` |
 | Wizard | `POST wizard/cmf/{open,step}`, `DELETE wizard/cmf/{sessionId}`, `POST wizard/{suggest,infer-actions,infer-fields,infer-segment,infer-selector,suggest-field-names,validate}`, `GET wizard/proxy?url=&strategy=` |
@@ -44,20 +46,20 @@ The OpenAPI definition is at <https://api.webrobot.eu/api/openapi.json> — sear
 
 ```bash
 # 1. list the demo pipelines bundled in the plugin
-curl -s https://api.webrobot.eu/webrobot/api/demo/list | jq .
+curl -s https://api.webrobot.eu/api/webrobot/api/demo/list | jq .
 
 # 2. trigger one (returns { executionId, status, ... })
 EXEC=$(curl -s -X POST -H 'Content-Type: application/json' -d '{}' \
-  https://api.webrobot.eu/webrobot/api/demo/execute/01-static-books | jq -r .executionId)
+  https://api.webrobot.eu/api/webrobot/api/demo/execute/01-static-books | jq -r .executionId)
 
 # 3. poll status
-curl -s "https://api.webrobot.eu/webrobot/api/demo/executions/$EXEC/status" | jq .
+curl -s "https://api.webrobot.eu/api/webrobot/api/demo/executions/$EXEC/status" | jq .
 
 # 4. tail driver logs
-curl -s "https://api.webrobot.eu/webrobot/api/demo/executions/$EXEC/logs?tail=200&podType=driver" | jq .
+curl -s "https://api.webrobot.eu/api/webrobot/api/demo/executions/$EXEC/logs?tail=200&podType=driver" | jq .
 
 # 5. preview output rows once status=COMPLETED
-curl -s "https://api.webrobot.eu/webrobot/api/demo/executions/$EXEC/output?limit=20" | jq .
+curl -s "https://api.webrobot.eu/api/webrobot/api/demo/executions/$EXEC/output?limit=20" | jq .
 ```
 
 `executionId` is the only state you need to carry between calls.
@@ -90,7 +92,7 @@ webrobot demo output <executionId> --limit 20
 webrobot demo cancel <executionId>        # if still running
 ```
 
-### Generate a pipeline from a prompt
+### Generate a pipeline from a prompt (draft — selectors not validated)
 
 ```bash
 webrobot demo generate-pipeline -b '{"prompt":"scrape books.toscrape.com — title, price, stock"}'
@@ -98,6 +100,12 @@ webrobot demo generate-pipeline -b '{"prompt":"scrape books.toscrape.com — tit
 webrobot demo save-generated-pipeline -b @generated.json
 webrobot demo reload-pipelines           # refresh the in-memory registry
 ```
+
+::: warning Draft generator — verify selectors before relying on the output
+The current `generate-pipeline` is **text-in / text-out**: a single LLM call that produces YAML from the prompt and a few-shot examples loaded from the curated archive. It does **not** visit the target URL and does **not** verify that the CSS selectors it emits exist in the page. For well-known sites (books.toscrape, Hacker News, the demos in the archive) selectors are usually right because the model has seen them in training data and few-shot. For a long-tail target site, expect the selectors to need a manual pass.
+
+**Coming soon — agentic generator.** A second endpoint `generate-pipeline-agentic` will close the loop: it fetches the seed URL via `wizard/proxy`, infers the repeated segment via `wizard/infer-segment`, extracts grounded CSS selectors via `wizard/infer-selector` per field, and assembles a YAML where every selector has been verified against the real DOM. Same input shape `{prompt, seed_url}`, much higher fidelity, slightly higher latency / LLM cost. See the [wizard skills](#with-mcp-claude-code-cursor-any-mcp-client) — the building blocks are already public, the orchestration is the missing piece.
+:::
 
 ### Upload an input CSV
 
@@ -447,11 +455,11 @@ The `clean_price` function ran on every row, added two columns, and the output p
 
 `python_define` is the sweet spot for AI code generation — the function source is small, the contract is fixed (`row: dict → dict`), and the whole thing ships inline so the model doesn't need to know anything about your infra. Two complementary patterns work here:
 
-**1. Use the platform's own `generate-pipeline` endpoint.** Ask for the pipeline AND the transform together. The demo backend can emit both stages in the same YAML:
+**1. Use the platform's own `generate-pipeline` endpoint.** Ask for the pipeline AND the transform together. The demo backend can emit a `python_extensions` block plus a `python_row_transform:<name>` reference in the same YAML:
 
 ```bash
 webrobot demo generate-pipeline -b '{
-  "prompt": "Scrape books.toscrape.com and add a clean numeric `price` (GBP) column parsed from the raw price string. Include the python_define stage inline."
+  "prompt": "Scrape books.toscrape.com and add a clean numeric `price` (GBP) column parsed from the raw price string. Use a python_row_transform via python_extensions."
 }' | tee draft.json
 
 webrobot demo save-generated-pipeline -b @draft.json
@@ -459,7 +467,7 @@ webrobot demo reload-pipelines
 webrobot demo execute books-with-extension --follow
 ```
 
-The model is prompted to emit a complete `pipeline:` block that already references `python_row_transform:<name>` after the corresponding `python_define`.
+> ⚠️ Same caveat as the [draft generator](#generate-a-pipeline-from-a-prompt-draft-selectors-not-validated): the CSS selectors are *hypothesised* by the LLM from the prompt + curated few-shot, not *verified* against the live page. Re-check them, especially for sites outside the demo archive. The agentic generator (coming soon) will close this loop.
 
 **2. Use a coding agent (Claude Code, Cursor) against your editor.** Same prompt, just delivered to the IDE — the agent edits the YAML in place. Because the function is plain Python that satisfies a tiny contract, agents land it correctly on the first try almost every time. Just remember the rules the runtime enforces (stdlib-only, imports inside `def`, return a `dict`, preserve fields with `{**row, ...}`).
 
@@ -478,7 +486,7 @@ The benefit of named skills over raw LLM calls: every client (CLI, demo UI, your
 
 ```bash
 # ask the server to generate the function — no system prompt on the client
-curl -s -X POST https://api.webrobot.eu/webrobot/api/demo/wizard/generate-python-transform \
+curl -s -X POST https://api.webrobot.eu/api/webrobot/api/demo/wizard/generate-python-transform \
   -H 'Content-Type: application/json' \
   -d '{
     "intent": "Parse raw_price (any common European/UK format) into numeric `price`; add `currency` with detected ISO code.",
@@ -521,12 +529,12 @@ Recommended flow before saving a pipeline with custom Python:
 
 ```bash
 # 1. static contract — pass either `functionBody` (canonical) or `code` (legacy)
-curl -s -X POST https://api.webrobot.eu/webrobot/api/demo/wizard/validate-python-transform \
+curl -s -X POST https://api.webrobot.eu/api/webrobot/api/demo/wizard/validate-python-transform \
   -H 'Content-Type: application/json' \
   -d "$(jq -n --arg b "$BODY" '{functionBody:$b}')" | jq .
 
 # 2. LLM security review — fail closed on `safe:false`
-curl -s -X POST https://api.webrobot.eu/webrobot/api/demo/wizard/security-check-python-transform \
+curl -s -X POST https://api.webrobot.eu/api/webrobot/api/demo/wizard/security-check-python-transform \
   -H 'Content-Type: application/json' \
   -d "$(jq -n --arg b "$BODY" '{functionBody:$b}')" | jq .
 ```
