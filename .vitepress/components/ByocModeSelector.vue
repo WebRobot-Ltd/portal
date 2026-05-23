@@ -103,10 +103,20 @@
             <strong>{{ effectiveVmCount }} × Hetzner <code>cpx42</code></strong>
             (8 vCPU AMD Epyc, 16 GB RAM, 240 GB SSD, Ubuntu 22.04)
             in <strong>nbg1</strong> (Nuremberg, EU).
-            VMs join your run's k3s node group via Tailscale; each is tagged
-            <code>webrobot.eu/role=brain</code> or <code>webrobot.eu/role=executor</code>
-            (currently <strong>{{ effectiveSplit.brain }} brain + {{ effectiveSplit.executor }} executor</strong>)
-            so Ray/Camoufox land on the brain VMs and Spark executors land on the executor VMs.
+            VMs join your run's k3s node group via Tailscale.
+            <template v-if="effectiveSplit.brain > 0 && effectiveSplit.executor > 0">
+              Each is tagged <code>webrobot.eu/role=brain</code> or <code>webrobot.eu/role=executor</code>
+              (currently <strong>{{ effectiveSplit.brain }} brain + {{ effectiveSplit.executor }} executor</strong>)
+              so Ray/Camoufox land on the brain VMs and Spark executors land on the executor VMs.
+            </template>
+            <template v-else-if="effectiveSplit.brain > 0">
+              All {{ effectiveSplit.brain }} VM{{ effectiveSplit.brain === 1 ? ' is' : 's are' }} tagged
+              <code>webrobot.eu/role=brain</code> — your agentic Ray/Camoufox workload runs there.
+            </template>
+            <template v-else>
+              All {{ effectiveSplit.executor }} VMs are tagged
+              <code>webrobot.eu/role=executor</code> — Spark executor pods land on them.
+            </template>
             All torn down automatically when the job ends, even on failure or browser close.
           </li>
           <li>
@@ -273,6 +283,13 @@ function clearKey() {
 // recomputes vmRoles from the same rules, so the frontend and backend
 // must agree on the breakdown — keep the table in sync if you add a
 // new preset.
+// Preset visibility per context — keep the list tight to what makes
+// sense on each page so the user doesn't have to mentally dismiss
+// irrelevant options. The /demo page runs Spark directly (no
+// agentic Ray to orchestrate), so the Combined preset is hidden
+// there. The /agentic page gets the full menu because an agentic
+// profile may or may not involve browser/Spark depending on its
+// crew composition.
 const PRESETS = [
   {
     id: 'minimal',
@@ -300,7 +317,7 @@ const PRESETS = [
     label: 'Combined — agentic spawns Spark',
     description: 'Pattern 4: the agentic profile generates a manifest then executes it as a Spark sub-job. 1 brain VM (Ray + Camoufox) + 3 executor VMs (Spark).',
     vmCount: 4, brain: 1, executor: 3,
-    contexts: ['agentic', 'etl'],
+    contexts: ['agentic'],   // not on ETL — that page can't spawn agentic from below
   },
 ]
 
