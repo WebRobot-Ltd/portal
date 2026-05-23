@@ -36,11 +36,41 @@
       <div class="byoc-disclaimer">
         <strong>🔐 About your Hetzner Cloud API token</strong>
         <ul>
-          <li>Used <strong>only</strong> to provision ephemeral VMs for this run (auto-destroyed at the end).</li>
-          <li>Saved in <strong>your browser's localStorage</strong> so you don't re-paste it every time. WebRobot servers <strong>do not persist</strong> the token.</li>
-          <li>Transmitted over HTTPS only during the provisioning step of your run.</li>
-          <li>You can clear it from this page any time. We recommend a scoped read/write token rather than your master one.</li>
-          <li>Estimated cost: &lt; €0.05 per ~5-minute run on a single cx21.</li>
+          <li>
+            <strong>What we allocate on your account</strong> — for each run we provision
+            <strong>{{ vmCount }} × Hetzner <code>cpx42</code></strong>
+            (8 vCPU AMD Epyc, 16 GB RAM, 240 GB SSD, Ubuntu 22.04)
+            in <strong>nbg1</strong> (Nuremberg, EU). VMs join your run's k3s
+            node group via Tailscale, then get torn down automatically when
+            the job ends — even if the job fails or the browser tab closes.
+          </li>
+          <li>
+            <strong>Estimated cost</strong> — Hetzner bills <code>cpx42</code>
+            by the second at ~€0.045/h. A typical 5-minute demo run with
+            {{ vmCount }} VM{{ vmCount === 1 ? '' : 's' }} costs
+            <strong>~€{{ estCost }}</strong>. The cluster is in the EU
+            (data sovereignty); no third-country processors in the demo
+            execution path.
+          </li>
+          <li>
+            <strong>Token usage</strong> — used <strong>only</strong> to
+            provision and tear down these VMs on your account, never for
+            any other operation. Transmitted over HTTPS only during the
+            provisioning step of your run.
+          </li>
+          <li>
+            <strong>Storage</strong> — saved in <strong>your browser's
+            localStorage</strong> so you don't re-paste it every time.
+            WebRobot servers <strong>do not persist</strong> the token; it
+            lives in the Jersey JVM heap only for the duration of the
+            provisioning call.
+          </li>
+          <li>
+            You can clear it from this page any time. We recommend a
+            <strong>scoped read/write token</strong> rather than your
+            master one. Audit logs of provisioning calls show only the
+            last 4 characters of the token (fingerprint).
+          </li>
         </ul>
       </div>
 
@@ -168,6 +198,26 @@ const byocSubtitle = computed(() => {
 // Show a small "coming soon" badge whenever the backend provisioner
 // hasn't landed for this context. Toggle to '' once Phase-4 ships.
 const byocBadge = computed(() => 'Phase-4 — UI ready, provisioner lands next')
+
+// VM allocation transparency. These numbers reflect what
+// PreSparkExecutionProvisioner allocates today via the Ansible playbook
+// in elastic-vm-ansible/infra/ansible/group_vars/all.yml:
+//   hcloud_server_type: cpx42   (8 vCPU AMD, 16 GB RAM, 240 GB SSD)
+//   hcloud_location: nbg1
+//   hcloud_image: ubuntu-22.04
+// VM count differs by workload — Spark needs a small worker pool to
+// parallelise stages, Ray for the agentic demo needs one worker.
+// Keep this in sync with the Java side when override params land.
+const vmCount = computed(() => props.context === 'etl' ? 2 : 1)
+// Hetzner cpx42 list price ~€0.045/hour, billed by the second.
+// 5 min ≈ 1/12 hour. Round to 3 decimals so the disclaimer reads
+// honestly without false precision.
+const estCost = computed(() => {
+  const HOURLY = 0.045
+  const HOURS  = 5 / 60
+  const total  = HOURLY * HOURS * vmCount.value
+  return total.toFixed(3)
+})
 </script>
 
 <style scoped>
