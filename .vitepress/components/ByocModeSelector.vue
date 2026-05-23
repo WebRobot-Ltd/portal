@@ -258,15 +258,17 @@ const STORAGE_KEY = `webrobot.byoc.${props.context}.hetznerKey`
 const visible = ref(false)
 
 // Token validation state — driven by the "✓" button next to the token
-// field. The endpoint is /webrobot/api/demo/byoc/validate-hetzner-token
-// (under /demo/ so unauth, same posture as the run endpoint that also
-// accepts an unauth BYOC token). Returns {valid, message, serverCount?}
-// — we surface the boolean as a pill next to the label and the
-// message as small text underneath. Resets when the token changes.
+// field. The endpoint is /webrobot/api/demo/agentic/byoc/validate-hetzner-token
+// — class-level path on DemoAgenticApi.java is "/webrobot/api/demo/agentic"
+// so the byoc/* methods land there, not under /demo/* directly. The
+// auth posture is the same (UnifiedAuthFilter allowlists any path
+// containing /demo/). Returns {valid, message, serverCount?} — we
+// surface the boolean as a pill next to the label and the message
+// as small text underneath. Resets when the token changes.
 const validateStatus      = ref('')   // '' | 'checking' | 'valid' | 'invalid' | 'error'
 const validateMessage     = ref('')
 const validateServerCount = ref(null)
-const VALIDATE_ENDPOINT   = 'https://api.webrobot.eu/api/webrobot/api/demo/byoc/validate-hetzner-token'
+const VALIDATE_ENDPOINT   = 'https://api.webrobot.eu/api/webrobot/api/demo/agentic/byoc/validate-hetzner-token'
 
 async function validateToken() {
   if (!props.hetznerKey || props.hetznerKey.trim() === '') return
