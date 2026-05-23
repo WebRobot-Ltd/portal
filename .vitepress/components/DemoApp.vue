@@ -2667,7 +2667,18 @@ const phaseMeta = computed(() => {
   const p = statusData.value && statusData.value.phase
   return PHASE_META[p] || PHASE_META.unknown
 })
-const phaseLabel      = computed(() => phaseMeta.value.label)
+// During the BYOC async window (V43, ~3-5 min before any pod exists),
+// the workload stamps a fine-grained progress_message on
+// job_executions ("Provisioning Hetzner VMs via Ansible...",
+// "Submitting Spark application...") that is far more informative
+// than the pod-state-derived synthetic phase. Prefer it when present.
+// Falls back to the existing PHASE_META label once the workload
+// transitions into pod-visible territory (or the row predates V43).
+const phaseLabel = computed(() => {
+  const pm = statusData.value && statusData.value.progress_message
+  if (pm && !isExecutionTerminal.value) return pm
+  return phaseMeta.value.label
+})
 const phaseDetail     = computed(() => phaseMeta.value.detail)
 const phaseIcon       = computed(() => phaseMeta.value.icon)
 const phaseShowSpinner = computed(() => phaseMeta.value.spinner)
