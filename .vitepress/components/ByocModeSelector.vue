@@ -401,16 +401,12 @@ const byocSubtitle = computed(() => {
   }
   return 'Provisions ephemeral Ray/Camoufox/Spark VMs on your Hetzner account for this run (split by workload class), then tears them down.'
 })
-// Backend provisioner lifecycle:
-//   agentic context — wired end-to-end (core-library 8d5a727 +
-//     webrobot-etl-api 82434355 / 38a614ca). No badge.
-//   etl context — Spark BYOC still pending (DemoService refactor +
-//     V43 + Spark completion observer). Keep a soft "coming soon"
-//     badge so we don't promise something that's not there yet.
-const byocBadge = computed(() => {
-  if (props.context === 'etl') return 'ETL BYOC — coming soon'
-  return ''
-})
+// Backend provisioner lifecycle: wired end-to-end for both contexts.
+//   agentic: core-library 8d5a727 + webrobot-etl-api 82434355 / 38a614ca / 0c1944b0
+//   etl:     webrobot-etl-api 139c7699 (DemoPlugin/DemoService/ProjectServiceImpl
+//            BYOC branch reusing the existing elastic-VM provisioner)
+// No badge in either context.
+const byocBadge = computed(() => '')
 
 const defaultPresetForContext = computed(() =>
   props.context === 'etl' ? 'etl' : 'minimal'
