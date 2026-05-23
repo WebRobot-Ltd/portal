@@ -107,15 +107,20 @@
 
         <!-- Execution mode (Shared Spark cluster vs. BYOC ephemeral
              Spark workers). Hetzner key collection + disclaimer +
-             localStorage persistence are all delegated to the
-             shared component. context="etl" namespaces the storage
-             key so a token saved here doesn't auto-fill the agentic
-             demo (and vice-versa) — operators that want one token to
-             rule them both can paste it in both places. -->
+             localStorage persistence + VM preset are all delegated
+             to the shared component. context="etl" namespaces the
+             storage key so a token saved here doesn't auto-fill the
+             agentic demo (and vice-versa) — operators that want one
+             token to rule them both can paste it in both places.
+             The default preset on this page is "etl" (2 executors,
+             0 brain) — Spark only, no agentic involved. -->
         <div v-if="selectedPipeline" class="exec-mode-wrap">
           <ByocModeSelector
             v-model:executionMode="executionMode"
             v-model:hetznerKey="hetznerKey"
+            v-model:vmPreset="vmPreset"
+            @update:vmCount="vmCount = $event"
+            @update:vmRoles="vmRoles = $event"
             :disabled="isExecuting"
             context="etl"
           />
@@ -1647,13 +1652,17 @@ const pipelinesError = ref(null)
 
 // BYOC — bound two-way to <ByocModeSelector>. executionMode = 'shared'
 // is the existing behaviour (shared Spark cluster). 'byoc' adds the
-// user's Hetzner token to the execute payload; the demo plugin
-// validates the token and currently returns 501 because the Spark
-// ephemeral provisioner isn't wired yet (it lands with elastic Ray
-// workers Phase-4). hetznerKey lives in the user's localStorage,
-// namespace 'etl' — see ByocModeSelector for the persistence rules.
+// user's Hetzner token, a VM preset (default 'etl' = 2 executors,
+// 0 brain), and the derived vmCount/vmRoles to the execute payload.
+// hetznerKey lives in the user's localStorage, namespace 'etl' — see
+// ByocModeSelector for the persistence rules. The demo plugin currently
+// returns 501 because the Spark ephemeral provisioner isn't wired yet
+// (it lands with elastic Ray workers Phase-4).
 const executionMode = ref('shared')
 const hetznerKey    = ref('')
+const vmPreset      = ref('etl')        // ETL context default — 2 × executor
+const vmCount       = ref(2)
+const vmRoles       = ref(['executor', 'executor'])
 
 // CSV upload state for demo pipelines
 const demoUploadFile = ref(null)
@@ -2159,6 +2168,9 @@ async function executePipeline(datasetIdParam = null) {
     requestBody.executionMode = executionMode.value
     if (executionMode.value === 'byoc' && hetznerKey.value) {
       requestBody.cloudCredentials = { hetznerApiKey: hetznerKey.value }
+      requestBody.vmPreset = vmPreset.value
+      requestBody.vmCount  = vmCount.value
+      requestBody.vmRoles  = vmRoles.value
     }
 
     // Log a redacted copy so we don't dump the BYOC token to the

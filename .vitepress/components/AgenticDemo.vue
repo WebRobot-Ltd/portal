@@ -82,10 +82,17 @@
           <small v-if="spec.help" class="input-help">{{ spec.help }}</small>
         </div>
 
-        <!-- Execution mode + BYOC key (reusable component) -->
+        <!-- Execution mode + BYOC key + VM preset (reusable component).
+             The component owns localStorage for the Hetzner token and the
+             preset→vmCount/vmRoles derivation; the parent only forwards
+             the derived values to the backend POST. -->
         <ByocModeSelector
           v-model:executionMode="executionMode"
           v-model:hetznerKey="hetznerKey"
+          v-model:vmPreset="vmPreset"
+          @update:vmCount="vmCount = $event"
+          @update:vmRoles="vmRoles = $event"
+          :recommendedPreset="selectedDemo?.recommendedPreset || null"
           :disabled="running"
           context="agentic"
         />
@@ -212,10 +219,14 @@ const inputs         = ref({})
 
 // ── BYOC ──────────────────────────────────────────────────────────────
 // Two-way bound to <ByocModeSelector>. The component owns localStorage
-// persistence for hetznerKey; we just keep refs to forward to the
-// backend POST body.
-const executionMode  = ref('shared')   // 'shared' | 'byoc'
+// persistence for hetznerKey and the preset→vmCount derivation; we
+// keep refs here so the backend POST body has the same shape the
+// future BYOC provisioner expects.
+const executionMode  = ref('shared')                    // 'shared' | 'byoc'
 const hetznerKey     = ref('')
+const vmPreset       = ref('minimal')                   // 'minimal' | 'browser' | 'etl' | 'combined' | 'custom'
+const vmCount        = ref(1)                           // derived from preset
+const vmRoles        = ref(['brain'])                   // derived from preset
 
 async function loadDemos() {
   loadingDemos.value = true
@@ -277,6 +288,9 @@ async function onRun() {
       // or echoed — the Jersey side consumes it within the provisioning
       // call and never persists it to the DB.
       body.cloudCredentials = { hetznerApiKey: hetznerKey.value }
+      body.vmPreset = vmPreset.value
+      body.vmCount  = vmCount.value
+      body.vmRoles  = vmRoles.value
     }
     const resp = await api('POST', `/webrobot/api/demo/agentic/run/${encodeURIComponent(selectedDemo.value.name)}`, body)
     // /start returns the standard agentic response shape
