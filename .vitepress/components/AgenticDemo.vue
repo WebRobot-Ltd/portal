@@ -128,6 +128,7 @@
           <span class="status-pill" :class="'pill-' + (execution.status || 'PENDING').toLowerCase()">
             {{ execution.status }}
           </span>
+          <small v-if="progressPhase" class="progress-phase">{{ progressPhase }}</small>
         </div>
         <div v-if="execution.llmProvider">
           <span class="lbl">LLM</span>
@@ -274,10 +275,72 @@ const runError  = ref('')
 const execution = ref(null)
 let pollTimer = null
 
+// Tracks whether the active run was launched in BYOC mode. The phase
+// derivation below uses this to pick the right timeline (BYOC takes
+// 2-5 min for VM provisioning + image pull; shared cluster is <30s).
+// Set by onRun() at submit time; reset when the user picks a different
+// profile or clicks Run again.
+const activeRunIsByoc = ref(false)
+
+// Cheap wall-clock tick so the phase recomputes every 5s even when
+// the row from the server hasn't changed. Without this the
+// progressPhase would only update on poll refresh (4s) which is fine
+// but causes the phase to lag the actual stage by up to a poll cycle.
+const wallTick = ref(Date.now())
+let wallTimer = null
+
+// Human-friendly progress phase for the PENDING state. Status is
+// canonical (PENDING/RUNNING/COMPLETED/FAILED/CANCELLED) but PENDING
+// hides a 2-5 min sequence of [provision VM → join k3s → label →
+// pull image → start Ray]. The user staring at "PENDING" doesn't
+// know if anything is happening — this caption tells them.
+//
+// Timeline empirically observed on cpx42 in nbg1:
+//    0-15s   secret + ConfigMap (instant for shared cluster)
+//   15-90s   Hetzner API create + cloud-init + SSH ready
+//   90-180s  Tailscale + k3s install + LUKS setup + join cluster
+//  180-240s  apply node labels + KubeRay schedules pods
+//  240-300s  pull agentic-runtime image (~1 GB)
+//  300s+     image pulled, Ray cluster starting → RUNNING soon
+//
+// For shared cluster the whole PENDING window is <30s so the
+// "Setting up cluster" line is all the user sees before RUNNING.
+const progressPhase = computed(() => {
+  // Status comes from the polled row — keep dependency to trigger
+  // recompute on poll refresh too.
+  const status = execution.value?.status
+  if (!status || status !== 'PENDING') return null
+  if (!execution.value?.startedAt) return null
+
+  // Re-read tick so Vue recomputes every wallTimer fire.
+  void wallTick.value
+
+  const started = new Date(execution.value.startedAt).getTime()
+  if (Number.isNaN(started)) return null
+  const elapsedSec = (Date.now() - started) / 1000
+
+  if (!activeRunIsByoc.value) {
+    // Shared cluster: very short PENDING window.
+    if (elapsedSec < 5)  return 'Setting up cluster…'
+    if (elapsedSec < 30) return 'Submitting Ray job…'
+    return 'Starting Ray cluster…'
+  }
+  // BYOC: long PENDING window with provisioning stages.
+  if (elapsedSec <  15) return 'Setting up per-execution Secret + ConfigMap…'
+  if (elapsedSec <  90) return 'Provisioning ephemeral VM on your Hetzner account…'
+  if (elapsedSec < 180) return 'Joining VM to k3s cluster + applying workload labels…'
+  if (elapsedSec < 240) return 'Pulling agentic-runtime image on the new VM…'
+  if (elapsedSec < 300) return 'Starting Ray cluster + crew actors…'
+  return 'Still working — BYOC runs typically complete within 5 min, please wait…'
+})
+
 async function onRun() {
   if (!selectedDemo.value || !canRun.value) return
   running.value = true
   runError.value = ''
+  // Capture BYOC flag for the phase derivation below — independent
+  // of executionMode (which may change in the UI mid-run).
+  activeRunIsByoc.value = executionMode.value === 'byoc'
   try {
     const body = {
       inputs:        { ...inputs.value },
@@ -324,12 +387,16 @@ function startPolling() {
     await refreshExecution()
     if (isTerminal.value) stopPolling()
   }, 4000)
+  // Faster phase recompute (every 5s) so the progressPhase caption
+  // ticks even on poll-refresh misses.
+  wallTimer = setInterval(() => { wallTick.value = Date.now() }, 5000)
   // First refresh shortly after submit so the user sees status flip from
   // SUBMITTED → PENDING/RUNNING within ~1s.
   setTimeout(refreshExecution, 1500)
 }
 function stopPolling() {
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+  if (wallTimer) { clearInterval(wallTimer); wallTimer = null }
 }
 
 const isTerminal = computed(() => {
@@ -566,6 +633,20 @@ onUnmounted(stopPolling)
 .pill-cancelled { background: #fef3c7; color: #92400e; }
 .pill-running, .pill-submitted { background: #dbeafe; color: #1e40af; }
 .pill-pending   { background: #e5e7eb; color: #374151; }
+
+/* Caption shown under the status pill during PENDING — gives the
+ * user a sense of what stage the run is in. Computed from elapsed
+ * time + BYOC flag; see progressPhase in <script>. */
+.progress-phase {
+  display: block;
+  margin-top: 0.3rem;
+  font-size: 0.78rem;
+  font-style: italic;
+  color: var(--vp-c-text-2);
+  line-height: 1.4;
+  max-width: 28rem;
+}
+.dark .progress-phase { color: #9ca3af; }
 
 .progress-row {
   display: flex;
