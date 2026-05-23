@@ -1,42 +1,30 @@
 ---
 layout: page
 title: Agentic Studio
-description: Browse, edit and execute agentic profiles (multi-crew CrewAI orchestrations) backed by the WebRobot Ray runtime
+description: Launch curated agentic processes on the WebRobot Ray runtime (multi-crew CrewAI orchestrations, EU-sovereign)
 ---
 
 <div class="agentic-page-wrapper">
 
 # 🤖 Agentic Studio
 
-Browse, edit and execute **agentic profiles** — declarative multi-crew CrewAI
-orchestrations that compose tool-using agents into DAGs. Each profile is a single
-YAML that describes:
+Curated **agentic profiles** running on the WebRobot Ray cluster. Each profile is
+a declarative multi-crew CrewAI orchestration: tool-using agents wired into a
+DAG, executed as a `RayJob` on the EU-sovereign cluster.
 
-- **Tools** an agent can call (Jersey REST, Camoufox browser, MCP servers, RAG)
-- **Crews** of agents working together (sequential / hierarchical / delegation)
-- **Inter-crew orchestration** (the DAG that wires crew outputs into the next crew's inputs)
-- **Runtime budgets** (per-crew CPU/RAM, timeouts, token caps)
-
-Profiles execute on the WebRobot Ray cluster as `RayJob` CRDs. Each crew is a Ray
-`@remote` actor; tools are long-lived Ray named actors. The runner serialises a
-profile YAML into a DAG of actor invocations, streams progress, and posts back
-to a Jersey completion webhook on terminal status.
-
-::: tip For builders
-The **`webrobot-etl-builder`** profile (ships out-of-the-box) is the canonical
-example: it turns a natural-language scraping goal into a WebRobot ETL pipeline
-manifest YAML, then validates it via the Jersey Manifest API. Clone it to start
-from a working two-crew DAG.
+::: tip What you can do here
+Pick a profile, fill the inputs, hit Run. The page polls the live execution
+and shows the structured outputs (and the token bill) when the run terminates.
 :::
 
-::: warning Browser grounding
-The **`selector-grounding`** profile (the Camoufox + browser-use fork path,
-verifies CSS selectors against the live DOM) is the business differentiator
-for the agentic generator. It's currently being **collaudata end-to-end** —
-expect the LLM-only `webrobot-etl-builder` to be the most stable path today.
+::: warning Browser-grounded profiles
+The browser-grounding path (Camoufox + the browser-use fork that verifies CSS
+selectors on the live DOM) is the business differentiator for the agentic
+generator. It's currently being **collaudata end-to-end** &mdash; expect the
+LLM-only profiles below to be the most stable choice for now.
 :::
 
-<AgenticStudio />
+<AgenticDemo />
 
 </div>
 
@@ -44,7 +32,7 @@ expect the LLM-only `webrobot-etl-builder` to be the most stable path today.
 .agentic-page-wrapper {
   margin: 1.5rem 0;
   padding: 0 2rem 3rem;
-  max-width: 1400px;
+  max-width: 1100px;
   margin-left: auto;
   margin-right: auto;
 }
