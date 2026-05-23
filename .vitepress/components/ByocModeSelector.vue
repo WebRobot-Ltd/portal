@@ -128,16 +128,23 @@
           </li>
           <li>
             <strong>Token usage</strong> — used <strong>only</strong> to
-            provision and tear down these VMs on your account, never for
-            any other operation. Transmitted over HTTPS only during the
-            provisioning step of your run.
+            provision the VMs at the start of your run and to tear them
+            down at the end. Never re-used for anything else, never
+            shared between runs. Transmitted over HTTPS.
           </li>
           <li>
             <strong>Storage</strong> — saved in <strong>your browser's
-            localStorage</strong> so you don't re-paste it every time.
-            WebRobot servers <strong>do not persist</strong> the token;
-            it lives in the Jersey JVM heap only for the duration of the
-            provisioning call.
+            localStorage</strong> so you don't re-paste it every time
+            (clear button on the right of the field).
+            On our side, the token lives only in a per-execution
+            <strong>Kubernetes Secret</strong>
+            (<code>hetzner-byoc-&lt;executionId&gt;</code>, RBAC-scoped to
+            the provisioning Service Account) and is <strong>deleted at
+            the end of your run</strong>. The token never lands in
+            Postgres or any log — only the Secret's <em>name</em> is
+            recorded in our audit table so we know which Secret to
+            destroy alongside the VMs. A safety-net cron sweeps any
+            stale Secrets after 30 min if the completion webhook missed.
           </li>
           <li>
             You can clear it from this page any time. We recommend a
