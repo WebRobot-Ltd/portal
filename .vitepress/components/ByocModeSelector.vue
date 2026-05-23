@@ -163,6 +163,18 @@
           <span v-if="hetznerKey && hetznerKey === storedHetznerKey" class="saved-pill">
             saved · …{{ fingerprint }}
           </span>
+          <span
+            v-if="validateStatus"
+            class="validate-pill"
+            :class="'validate-' + validateStatus"
+          >
+            <template v-if="validateStatus === 'checking'">checking…</template>
+            <template v-else-if="validateStatus === 'valid'">
+              ✓ valid<span v-if="validateServerCount != null"> · {{ validateServerCount }} server{{ validateServerCount === 1 ? '' : 's' }}</span>
+            </template>
+            <template v-else-if="validateStatus === 'invalid'">✗ invalid</template>
+            <template v-else>✗ error</template>
+          </span>
         </span>
         <div class="key-row">
           <input
@@ -187,6 +199,16 @@
           <button
             type="button"
             class="btn-icon"
+            :disabled="!hetznerKey || disabled || validateStatus === 'checking'"
+            @click="validateToken"
+            title="Quick check against Hetzner API"
+          >
+            <span v-if="validateStatus === 'checking'" class="mini-spinner"></span>
+            <span v-else>✓</span>
+          </button>
+          <button
+            type="button"
+            class="btn-icon"
             :disabled="!hetznerKey || disabled"
             @click="clearKey"
             title="Remove from localStorage"
@@ -194,6 +216,9 @@
             ✕
           </button>
         </div>
+        <small v-if="validateMessage" class="validate-message" :class="'validate-' + validateStatus">
+          {{ validateMessage }}
+        </small>
         <small class="input-help">
           Get one at <a href="https://console.hetzner.cloud" target="_blank" rel="noopener noreferrer">console.hetzner.cloud</a>
           → your project → Security → API Tokens → Generate.
@@ -231,6 +256,48 @@ const emit = defineEmits([
 // ── Persisted Hetzner token (same as before) ─────────────────────────
 const STORAGE_KEY = `webrobot.byoc.${props.context}.hetznerKey`
 const visible = ref(false)
+
+// Token validation state — driven by the "✓" button next to the token
+// field. The endpoint is /webrobot/api/demo/byoc/validate-hetzner-token
+// (under /demo/ so unauth, same posture as the run endpoint that also
+// accepts an unauth BYOC token). Returns {valid, message, serverCount?}
+// — we surface the boolean as a pill next to the label and the
+// message as small text underneath. Resets when the token changes.
+const validateStatus      = ref('')   // '' | 'checking' | 'valid' | 'invalid' | 'error'
+const validateMessage     = ref('')
+const validateServerCount = ref(null)
+const VALIDATE_ENDPOINT   = 'https://api.webrobot.eu/api/webrobot/api/demo/byoc/validate-hetzner-token'
+
+async function validateToken() {
+  if (!props.hetznerKey || props.hetznerKey.trim() === '') return
+  validateStatus.value = 'checking'
+  validateMessage.value = ''
+  validateServerCount.value = null
+  try {
+    const res = await fetch(VALIDATE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hetznerApiKey: props.hetznerKey }),
+    })
+    if (!res.ok) {
+      validateStatus.value = 'error'
+      validateMessage.value = 'Validation endpoint unavailable (HTTP ' + res.status + ').'
+      return
+    }
+    const data = await res.json()
+    if (data && data.valid === true) {
+      validateStatus.value = 'valid'
+      validateMessage.value = data.message || 'Token is valid.'
+      if (typeof data.serverCount === 'number') validateServerCount.value = data.serverCount
+    } else {
+      validateStatus.value = 'invalid'
+      validateMessage.value = (data && data.message) || 'Token is invalid.'
+    }
+  } catch (e) {
+    validateStatus.value = 'error'
+    validateMessage.value = 'Validation request failed: ' + (e && e.message ? e.message : String(e))
+  }
+}
 const storedHetznerKey = ref('')
 
 function loadFromStorage() {
@@ -277,7 +344,14 @@ function onPresetChange(p) {
   userTouchedPreset = true
   emit('update:vmPreset', p)
 }
-function onKeyInput(v) { emit('update:hetznerKey', v) }
+function onKeyInput(v) {
+  emit('update:hetznerKey', v)
+  // Reset validation when the token changes — what's valid for an
+  // old token may not be for a new one.
+  validateStatus.value = ''
+  validateMessage.value = ''
+  validateServerCount.value = null
+}
 function clearKey() {
   emit('update:hetznerKey', '')
   saveToStorage('')
@@ -585,6 +659,37 @@ const fingerprint = computed(() => {
 }
 
 .key-row { display: flex; gap: 0.4rem; align-items: stretch; }
+.validate-pill {
+  text-transform: none;
+  font-size: 0.7rem;
+  letter-spacing: 0;
+  padding: 0.05rem 0.4rem;
+  border-radius: 8px;
+  font-weight: 600;
+  font-family: var(--vp-font-family-mono, monospace);
+  margin-left: 0.3rem;
+}
+.validate-pill.validate-checking { background: #dbeafe; color: #1e40af; }
+.validate-pill.validate-valid    { background: #d1fae5; color: #065f46; }
+.validate-pill.validate-invalid  { background: #fee2e2; color: #991b1b; }
+.validate-pill.validate-error    { background: #fef3c7; color: #92400e; }
+.validate-message {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.78rem;
+}
+.validate-message.validate-valid   { color: #065f46; }
+.validate-message.validate-invalid { color: #991b1b; }
+.validate-message.validate-error   { color: #92400e; }
+.mini-spinner {
+  display: inline-block;
+  width: 0.7rem; height: 0.7rem;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
 .input-text {
   flex: 1;
   font-family: var(--vp-font-family-mono, monospace);
@@ -621,6 +726,13 @@ const fingerprint = computed(() => {
 .dark .byoc-disclaimer { color: #fcd34d; }
 .dark .badge-soon { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
 .dark .saved-pill { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
+.dark .validate-pill.validate-checking { background: rgba(56, 139, 253, 0.2); color: #79c0ff; }
+.dark .validate-pill.validate-valid    { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
+.dark .validate-pill.validate-invalid  { background: rgba(220, 38, 38, 0.2); color: #fca5a5; }
+.dark .validate-pill.validate-error    { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
+.dark .validate-message.validate-valid   { color: #6ee7b7; }
+.dark .validate-message.validate-invalid { color: #fca5a5; }
+.dark .validate-message.validate-error   { color: #fcd34d; }
 .dark .badge-rec { background: rgba(16, 185, 129, 0.2); color: #6ee7b7; }
 .dark .input-text { background: rgba(255,255,255,0.04); }
 .dark .btn-icon { background: rgba(255,255,255,0.04); }
