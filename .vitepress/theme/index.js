@@ -3,6 +3,7 @@ import './custom.css'
 import ContactForm from '../components/ContactForm.vue'
 import ContactPage from '../components/ContactPage.vue'
 import DemoApp from '../components/DemoApp.vue'
+import AgenticStudio from '../components/AgenticStudio.vue'
 
 export default {
   extends: DefaultTheme,
@@ -10,6 +11,7 @@ export default {
     app.component('ContactForm', ContactForm)
     app.component('ContactPage', ContactPage)
     app.component('DemoApp', DemoApp)
+    app.component('AgenticStudio', AgenticStudio)
   }
 }
 

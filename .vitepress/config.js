@@ -18,6 +18,7 @@ export default defineConfig({
       { text: 'Features', link: '/features' },
       { text: 'Docs', link: '/docs/introduction' },
       { text: 'Demo', link: '/demo' },
+      { text: 'Agentic', link: '/agentic' },
       { text: 'Use Cases', link: '/use-cases' },
       { text: 'About', link: '/about' }
     ],

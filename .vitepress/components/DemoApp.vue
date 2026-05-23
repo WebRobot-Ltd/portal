@@ -1,12 +1,14 @@
 <template>
   <div class="demo-app">
 
-    <!-- Scope banner: this demo runs on the Spark ETL subsystem only.
-         The Ray agentic runtime is not yet in production. -->
+    <!-- Scope banner: this demo runs on the Spark ETL subsystem.
+         The Ray agentic runtime is live as of 2026-05-22 — point users
+         to the dedicated /agentic page rather than crowd this one. -->
     <div class="scope-banner">
-      ⚙️ This demo runs on the <strong>Apache Spark ETL subsystem</strong> only.
-      The agentic <strong>Ray</strong> runtime (multi-agent crews, adaptive pipelines, LLM oracle cascade)
-      is currently in development and <strong>not yet in production</strong>.
+      ⚙️ This demo runs on the <strong>Apache Spark ETL subsystem</strong>.
+      The agentic <strong>Ray</strong> runtime (multi-agent crews, adaptive
+      pipelines, LLM oracle cascade) is now live &mdash; try it on the
+      <a href="/agentic">Agentic Studio</a> page.
     </div>
 
     <!-- Sovereignty banner: where the workload physically runs.
