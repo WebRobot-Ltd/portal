@@ -282,6 +282,63 @@ let pollTimer = null
 // profile or clicks Run again.
 const activeRunIsByoc = ref(false)
 
+// localStorage key for re-attaching to a non-terminal run after a
+// browser reload. We persist a small {executionId, mode, profileName,
+// startedAt} blob on submit, and on mount we rehydrate by fetching
+// the row server-side. If the run is still PENDING/RUNNING we resume
+// polling; if terminal we show the outcome view; if not found we
+// clear stale storage.
+const ACTIVE_EXEC_STORAGE_KEY = 'webrobot.agentic.activeExecution'
+
+function persistActiveExecution(exec, mode) {
+  if (!exec || !exec.executionId) return
+  try {
+    localStorage.setItem(ACTIVE_EXEC_STORAGE_KEY, JSON.stringify({
+      executionId:  exec.executionId,
+      mode:         mode,
+      profileName:  exec.profileName || (selectedDemo.value && selectedDemo.value.name) || null,
+      startedAt:    exec.startedAt || new Date().toISOString(),
+    }))
+  } catch (_) { /* localStorage may be disabled / full */ }
+}
+
+function clearActiveExecution() {
+  try { localStorage.removeItem(ACTIVE_EXEC_STORAGE_KEY) } catch (_) { /* ignore */ }
+}
+
+async function restoreActiveExecution() {
+  let saved
+  try { saved = JSON.parse(localStorage.getItem(ACTIVE_EXEC_STORAGE_KEY) || 'null') }
+  catch (_) { return }
+  if (!saved || !saved.executionId) return
+  // Fetch the current state from the server before deciding to
+  // restore — the run may have completed or vanished while the
+  // browser was closed.
+  try {
+    const fresh = await api('GET',
+            `/webrobot/api/demo/agentic/executions/${encodeURIComponent(saved.executionId)}`)
+    if (!fresh || !fresh.executionId) {
+      clearActiveExecution()
+      return
+    }
+    // Match the SPA back to the profile that started it (so the
+    // detail view's labels match), best-effort.
+    if (saved.profileName && Array.isArray(demos.value)) {
+      const match = demos.value.find(d => d.name === saved.profileName)
+      if (match) selectedDemo.value = match
+    }
+    execution.value = fresh
+    activeRunIsByoc.value = saved.mode === 'byoc'
+    // Resume polling if still in flight.
+    if (!isTerminal.value) startPolling()
+  } catch (e) {
+    // Network glitch or 404 — drop the entry so the user isn't
+    // staring at stale info next time. The detail can always be
+    // re-attached via the executions list.
+    clearActiveExecution()
+  }
+}
+
 // Cheap wall-clock tick so the phase recomputes every 5s even when
 // the row from the server hasn't changed. Without this the
 // progressPhase would only update on poll refresh (4s) which is fine
@@ -363,6 +420,9 @@ async function onRun() {
       llmProvider: resp.llmProvider,
       startedAt:   resp.createdAt || new Date().toISOString(),
     }
+    // Persist for browser reload — user can come back to a non-terminal
+    // run without losing context.
+    persistActiveExecution(execution.value, executionMode.value)
     startPolling()
   } catch (e) {
     runError.value = e.message
@@ -407,12 +467,14 @@ const isTerminal = computed(() => {
 function runAgain() {
   execution.value = null
   stopPolling()
+  clearActiveExecution()
 }
 function pickDifferent() {
   execution.value = null
   selectedDemo.value = null
   inputs.value = {}
   stopPolling()
+  clearActiveExecution()
 }
 
 // ── Output formatting ─────────────────────────────────────────────────
@@ -449,7 +511,12 @@ function formatTokens(n) {
 }
 
 // ── Lifecycle ─────────────────────────────────────────────────────────
-onMounted(loadDemos)
+onMounted(async () => {
+  // Load profiles first so restoreActiveExecution can match
+  // saved.profileName against a demo card for the detail view.
+  await loadDemos()
+  await restoreActiveExecution()
+})
 onUnmounted(stopPolling)
 </script>
 
