@@ -5,6 +5,7 @@ import ContactPage from '../components/ContactPage.vue'
 import DemoApp from '../components/DemoApp.vue'
 import AgenticDemo from '../components/AgenticDemo.vue'
 import AgenticStudio from '../components/AgenticStudio.vue'
+import ByocModeSelector from '../components/ByocModeSelector.vue'
 
 export default {
   extends: DefaultTheme,
@@ -14,6 +15,7 @@ export default {
     app.component('DemoApp', DemoApp)
     app.component('AgenticDemo', AgenticDemo)
     app.component('AgenticStudio', AgenticStudio)
+    app.component('ByocModeSelector', ByocModeSelector)
   }
 }
 

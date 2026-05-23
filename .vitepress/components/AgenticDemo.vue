@@ -52,6 +52,8 @@
       <p v-if="selectedDemo.description" class="profile-desc">{{ selectedDemo.description }}</p>
 
       <form class="inputs-form" @submit.prevent="onRun">
+
+        <!-- Inputs (schema-driven) -->
         <div
           v-for="spec in (selectedDemo.inputs || [])"
           :key="spec.name"
@@ -79,6 +81,14 @@
           />
           <small v-if="spec.help" class="input-help">{{ spec.help }}</small>
         </div>
+
+        <!-- Execution mode + BYOC key (reusable component) -->
+        <ByocModeSelector
+          v-model:executionMode="executionMode"
+          v-model:hetznerKey="hetznerKey"
+          :disabled="running"
+          context="agentic"
+        />
 
         <div class="form-actions">
           <button
@@ -200,6 +210,13 @@ const demosError     = ref('')
 const selectedDemo   = ref(null)
 const inputs         = ref({})
 
+// ── BYOC ──────────────────────────────────────────────────────────────
+// Two-way bound to <ByocModeSelector>. The component owns localStorage
+// persistence for hetznerKey; we just keep refs to forward to the
+// backend POST body.
+const executionMode  = ref('shared')   // 'shared' | 'byoc'
+const hetznerKey     = ref('')
+
 async function loadDemos() {
   loadingDemos.value = true
   demosError.value = ''
@@ -236,6 +253,7 @@ const canRun = computed(() => {
   for (const spec of (selectedDemo.value.inputs || [])) {
     if (spec.required && !inputs.value[spec.name]) return false
   }
+  if (executionMode.value === 'byoc' && !hetznerKey.value) return false
   return true
 })
 
@@ -250,9 +268,17 @@ async function onRun() {
   running.value = true
   runError.value = ''
   try {
-    const resp = await api('POST', `/webrobot/api/demo/agentic/run/${encodeURIComponent(selectedDemo.value.name)}`, {
-      inputs: { ...inputs.value },
-    })
+    const body = {
+      inputs:        { ...inputs.value },
+      executionMode: executionMode.value,
+    }
+    if (executionMode.value === 'byoc') {
+      // Sent only when the user explicitly opts into BYOC. Never logged
+      // or echoed — the Jersey side consumes it within the provisioning
+      // call and never persists it to the DB.
+      body.cloudCredentials = { hetznerApiKey: hetznerKey.value }
+    }
+    const resp = await api('POST', `/webrobot/api/demo/agentic/run/${encodeURIComponent(selectedDemo.value.name)}`, body)
     // /start returns the standard agentic response shape
     execution.value = {
       executionId: resp.executionId,

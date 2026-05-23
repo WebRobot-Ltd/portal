@@ -105,9 +105,25 @@
           </div>
         </div>
 
-        <button 
+        <!-- Execution mode (Shared Spark cluster vs. BYOC ephemeral
+             Spark workers). Hetzner key collection + disclaimer +
+             localStorage persistence are all delegated to the
+             shared component. context="etl" namespaces the storage
+             key so a token saved here doesn't auto-fill the agentic
+             demo (and vice-versa) — operators that want one token to
+             rule them both can paste it in both places. -->
+        <div v-if="selectedPipeline" class="exec-mode-wrap">
+          <ByocModeSelector
+            v-model:executionMode="executionMode"
+            v-model:hetznerKey="hetznerKey"
+            :disabled="isExecuting"
+            context="etl"
+          />
+        </div>
+
+        <button
           class="btn btn-primary"
-          :disabled="!selectedPipeline || isExecuting"
+          :disabled="!selectedPipeline || isExecuting || (executionMode === 'byoc' && !hetznerKey)"
           @click="handleExecutePipeline"
         >
           <span v-if="isExecuting" class="loading-spinner"></span>
@@ -1629,6 +1645,16 @@ const executionResult = ref(null)
 const loadingPipelines = ref(false)
 const pipelinesError = ref(null)
 
+// BYOC — bound two-way to <ByocModeSelector>. executionMode = 'shared'
+// is the existing behaviour (shared Spark cluster). 'byoc' adds the
+// user's Hetzner token to the execute payload; the demo plugin
+// validates the token and currently returns 501 because the Spark
+// ephemeral provisioner isn't wired yet (it lands with elastic Ray
+// workers Phase-4). hetznerKey lives in the user's localStorage,
+// namespace 'etl' — see ByocModeSelector for the persistence rules.
+const executionMode = ref('shared')
+const hetznerKey    = ref('')
+
 // CSV upload state for demo pipelines
 const demoUploadFile = ref(null)
 const demoCsvText = ref('')
@@ -2126,8 +2152,25 @@ async function executePipeline(datasetIdParam = null) {
       console.warn('Pipeline requires input dataset but no datasetId provided!')
     }
     
-    console.log('Executing pipeline request:', JSON.stringify(requestBody, null, 2))
-    
+    // BYOC fields — sent only when the user explicitly opts in via
+    // the ByocModeSelector. cloudCredentials.hetznerApiKey is the
+    // user's own token; we never echo it to logs (request body logs
+    // below pre-stringify so the token would leak — sanitise it).
+    requestBody.executionMode = executionMode.value
+    if (executionMode.value === 'byoc' && hetznerKey.value) {
+      requestBody.cloudCredentials = { hetznerApiKey: hetznerKey.value }
+    }
+
+    // Log a redacted copy so we don't dump the BYOC token to the
+    // console.
+    const redactedForLog = {
+      ...requestBody,
+      cloudCredentials: requestBody.cloudCredentials
+        ? { hetznerApiKey: '***redacted***' }
+        : undefined,
+    }
+    console.log('Executing pipeline request:', JSON.stringify(redactedForLog, null, 2))
+
     // Call backend API to execute demo pipeline
     const response = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/execute/${encodeURIComponent(pipelineName)}`, {
       method: 'POST',
