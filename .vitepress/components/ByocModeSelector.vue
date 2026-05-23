@@ -26,7 +26,7 @@
           <strong>My own Hetzner VMs (BYOC)</strong>
           <small>
             {{ byocSubtitle }}
-            <span class="badge-soon">{{ byocBadge }}</span>
+            <span v-if="byocBadge" class="badge-soon">{{ byocBadge }}</span>
           </small>
         </span>
       </label>
@@ -401,7 +401,16 @@ const byocSubtitle = computed(() => {
   }
   return 'Provisions ephemeral Ray/Camoufox/Spark VMs on your Hetzner account for this run (split by workload class), then tears them down.'
 })
-const byocBadge = computed(() => 'Phase-4 — UI ready, provisioner lands next')
+// Backend provisioner lifecycle:
+//   agentic context — wired end-to-end (core-library 8d5a727 +
+//     webrobot-etl-api 82434355 / 38a614ca). No badge.
+//   etl context — Spark BYOC still pending (DemoService refactor +
+//     V43 + Spark completion observer). Keep a soft "coming soon"
+//     badge so we don't promise something that's not there yet.
+const byocBadge = computed(() => {
+  if (props.context === 'etl') return 'ETL BYOC — coming soon'
+  return ''
+})
 
 const defaultPresetForContext = computed(() =>
   props.context === 'etl' ? 'etl' : 'minimal'
