@@ -7436,6 +7436,169 @@ if (typeof window !== 'undefined') {
 }
 .validate-iframe { flex: 1; width: 100%; border: 1px solid #e0e0e0; border-radius: 6px; background: white; }
 .validate-final-url { font-size: 0.78em; color: #6b7280; margin-top: 6px; word-break: break-all; }
+
+/* ──────────────────────────────────────────────────────────────
+ * Mobile responsiveness pass (≤768px = tablet portrait, ≤480px = phone)
+ *
+ * The custom CSS above this point was authored for desktop and the
+ * existing 768px block at line ~6032 only covers a handful of
+ * selectors. This block sweeps the high-impact layouts so the demo
+ * is actually usable on a phone:
+ *   - any responsive grid collapses to a single column;
+ *   - flex rows wrap or stack vertically;
+ *   - buttons stretch to full width and group as columns;
+ *   - tables get horizontal scroll instead of overflowing the body;
+ *   - code blocks force-wrap so curl examples don't push the
+ *     viewport wider than the screen;
+ *   - sticky elements (exec-panel, modal) shrink to fit.
+ * ──────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Section spacing — give back horizontal room */
+  .demo-section { padding: 1rem; margin: 1rem 0; }
+  .demo-section h2 { font-size: 1.2rem; }
+  .demo-section > p { font-size: 0.9rem; }
+
+  /* All multi-column auto-fill grids → single column */
+  .demo-grid,
+  .private-demos-grid,
+  .pipelines-grid,
+  .results-grid,
+  .images-grid,
+  .demos-grid,
+  .wizard-cols,
+  .wizard-meta,
+  .auth-tabs-content {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem;
+  }
+
+  /* Pipeline / dataset / job cards — full width, shorter padding */
+  .pipeline-card,
+  .private-demo-card,
+  .demo-card,
+  .stat-item {
+    width: 100%;
+    padding: 0.75rem;
+  }
+
+  /* Common flex rows: wrap, then stack */
+  .pipeline-meta,
+  .pipeline-actions,
+  .result-stats,
+  .generation-actions,
+  .exec-meta,
+  .exec-actions,
+  .auth-status-bar,
+  .auth-form-row,
+  .api-guide-header,
+  .picker-toolbar,
+  .picker-ai-row,
+  .picker-multi-row,
+  .wizard-actions,
+  .wizard-filters,
+  .demo-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  /* Buttons full-width inside stacked rows */
+  .btn,
+  .btn-primary,
+  .btn-secondary,
+  .btn-success,
+  .btn-danger,
+  .btn-icon {
+    width: 100%;
+    justify-content: center;
+    min-height: 40px; /* easier tap target */
+  }
+  /* But keep inline icon buttons inside rows compact */
+  .picker-toolbar .btn-icon,
+  .wizard-actions .btn-icon,
+  .exec-actions .btn-icon {
+    width: auto;
+    min-width: 40px;
+  }
+
+  /* Tables: horizontal scroll inside their wrapper, smaller font */
+  .results-table-wrapper,
+  .columns-table-wrapper,
+  .preview-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .results-table,
+  .columns-table,
+  .preview-table {
+    font-size: 0.78rem;
+    min-width: 480px; /* let horizontal scroll kick in */
+  }
+
+  /* Execution panel — kill the sticky/full-width behaviour */
+  .exec-panel {
+    position: relative;
+    top: auto;
+    width: 100%;
+  }
+  .exec-phase-row { flex-wrap: wrap; }
+  .exec-phase-pods { flex-direction: column; align-items: flex-start; }
+
+  /* Logs viewer: shrink ts column, allow content to wrap */
+  .exec-logs-line { flex-wrap: wrap; }
+  .exec-logs-ts    { min-width: 0; font-size: 0.7rem; }
+  .exec-logs-level { min-width: 0; }
+  .exec-logs-body { white-space: pre-wrap; word-break: break-word; }
+
+  /* Code blocks (curl examples) — wrap aggressively */
+  .code-block,
+  pre.code-block,
+  .api-guide pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    font-size: 0.78rem;
+    padding: 0.6rem;
+  }
+
+  /* Modal / picker — fit the screen */
+  .picker-modal,
+  .picker-modal-content,
+  .upload-modal,
+  .auth-modal {
+    width: 100vw;
+    max-width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  .picker-iframe-wrapper { height: 60vh; }
+
+  /* Pipeline meta tags / status pills — wrap so they don't overflow */
+  .pipeline-tags,
+  .pipeline-status,
+  .exec-phase-pill { flex-wrap: wrap; }
+
+  /* Hero / intro headlines lighter on mobile */
+  h1 { font-size: 1.6rem; }
+  h2 { font-size: 1.25rem; }
+  h3 { font-size: 1.05rem; }
+}
+
+@media (max-width: 480px) {
+  /* Extra-tight pass for phones in portrait */
+  .demo-section { padding: 0.75rem; }
+  .pipeline-card,
+  .private-demo-card,
+  .demo-card { padding: 0.6rem; }
+  .results-table,
+  .columns-table,
+  .preview-table { font-size: 0.72rem; }
+  .exec-logs-body { font-size: 0.72rem; }
+  /* Stat values stay readable, labels shrink */
+  .stat-label { font-size: 0.7rem; }
+  .stat-value { font-size: 0.95rem; }
+}
 </style>
 
 

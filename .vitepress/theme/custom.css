@@ -327,3 +327,74 @@ a:hover {
   color: var(--vp-c-text-2);
 }
 
+/* ──────────────────────────────────────────────────────────────
+ * Site-wide mobile fixes (docs pages, hero, navigation extras).
+ * VitePress's default theme is already responsive; this only
+ * patches the custom additions that bleed off the viewport on
+ * phones (wide code blocks, side-by-side tables, hero CTAs).
+ * Component-specific responsive blocks live inside DemoApp.vue
+ * and AgenticDemo.vue.
+ * ──────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Markdown content: force long words to break, wrap code */
+  .vp-doc { word-break: break-word; overflow-wrap: anywhere; }
+  .vp-doc h1 { font-size: 1.5rem; line-height: 1.3; }
+  .vp-doc h2 { font-size: 1.25rem; }
+  .vp-doc h3 { font-size: 1.05rem; }
+
+  /* Code blocks inside docs — wrap, smaller font, tighter padding */
+  .vp-doc div[class*='language-'] pre code,
+  .vp-doc pre code,
+  .vp-doc div[class*='language-'] {
+    font-size: 0.78rem;
+  }
+  .vp-doc div[class*='language-'] pre {
+    padding: 0.6rem 0.75rem;
+  }
+  .vp-doc div[class*='language-'] pre code {
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+  }
+  /* Line numbers wrapper — give the gutter less room on phones */
+  .vp-doc .line-numbers-wrapper { padding-left: 0.5rem; }
+
+  /* Tables: horizontal scroll instead of squashing columns */
+  .vp-doc table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    font-size: 0.85rem;
+  }
+  .vp-doc th, .vp-doc td { padding: 0.4rem 0.6rem; }
+
+  /* Custom hero / CTA rows on home page */
+  .VPHero .actions,
+  .vp-doc .button-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+  .VPHero .actions .VPButton,
+  .vp-doc .button-row a {
+    width: 100%;
+    text-align: center;
+  }
+
+  /* Feature grids on landing pages → single column */
+  .VPFeatures .container .items,
+  .vp-doc .features {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* In-doc images don't exceed viewport */
+  .vp-doc img { max-width: 100%; height: auto; }
+}
+
+@media (max-width: 480px) {
+  .vp-doc h1 { font-size: 1.35rem; }
+  .vp-doc h2 { font-size: 1.15rem; }
+  .vp-doc table { font-size: 0.78rem; }
+  .vp-doc div[class*='language-'] pre code { font-size: 0.72rem; }
+}
+

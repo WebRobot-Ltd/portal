@@ -875,4 +875,76 @@ onUnmounted(stopPolling)
 .dark .pill-running, .dark .pill-submitted { background: rgba(56, 139, 253, 0.2); color: #79c0ff; }
 .dark .pill-pending   { background: rgba(255,255,255,0.1); color: #c9d1d9; }
 .dark .pill-cancelled { background: rgba(245, 158, 11, 0.2); color: #fcd34d; }
+
+/* ──────────────────────────────────────────────────────────────
+ * Mobile responsiveness (≤768px tablet portrait, ≤480px phone).
+ * Mirrors the DemoApp.vue pass so /agentic feels consistent on
+ * smartphones: grids collapse, flex rows stack, buttons stretch,
+ * code blocks wrap, sticky panels relax.
+ * ──────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* Section spacing */
+  .agentic-demo,
+  .demo-section { padding: 1rem; margin: 1rem 0; }
+
+  /* Multi-column grids → single column */
+  .agentic-grid,
+  .profiles-grid,
+  .input-grid,
+  .runs-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.75rem;
+  }
+
+  /* Flex rows that pack horizontal content stack vertically */
+  .profile-actions,
+  .agentic-actions,
+  .run-meta,
+  .run-actions,
+  .byoc-row,
+  .vm-preset-row,
+  .vm-roles-row,
+  .auth-status-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  /* Buttons full-width for tap targets */
+  .btn,
+  .btn-primary,
+  .btn-secondary,
+  .btn-success,
+  .btn-danger {
+    width: 100%;
+    justify-content: center;
+    min-height: 40px;
+  }
+
+  /* Logs / output panels: wrap aggressively */
+  .agentic-logs,
+  .agentic-output,
+  pre,
+  code {
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    font-size: 0.78rem;
+  }
+
+  /* Pill row wraps so status chips don't overflow */
+  .pills-row,
+  .pipeline-tags { flex-wrap: wrap; }
+
+  /* Headings lighter */
+  h1 { font-size: 1.6rem; }
+  h2 { font-size: 1.25rem; }
+  h3 { font-size: 1.05rem; }
+}
+
+@media (max-width: 480px) {
+  .agentic-demo,
+  .demo-section { padding: 0.75rem; }
+  pre, code { font-size: 0.72rem; }
+}
 </style>
