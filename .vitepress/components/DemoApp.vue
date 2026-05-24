@@ -2535,6 +2535,17 @@ async function pollStatusOnce() {
     if (!r.ok) return
     const s = await r.json()
     statusData.value = s
+    // Adopt the output_dataset_id once the backend stamps it (V44 —
+    // populated by DemoService.executeDemo right after the dataset is
+    // materialised). On async BYOC runs the /demo/execute 202 returns
+    // before the dataset exists, so this is the only way the SPA
+    // learns about the id without a follow-up call.
+    if (s.output_dataset_id && !executionState.value.output_dataset_id) {
+      executionState.value = {
+        ...executionState.value,
+        output_dataset_id: s.output_dataset_id,
+      }
+    }
     if (s.status && TERMINAL_STATUSES.has(s.status)) {
       stopExecPolling()
       pollLogsOnce()
