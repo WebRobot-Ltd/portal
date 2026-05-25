@@ -74,7 +74,7 @@ export default defineConfig({
     
     // Social links
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/webrobot' }
+      { icon: 'github', link: 'https://github.com/WebRobot-Ltd' }
     ],
     
     // Footer

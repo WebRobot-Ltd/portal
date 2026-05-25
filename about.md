@@ -52,7 +52,7 @@ Designed for extensibility:
 
 WebRobot is built for the community. We welcome contributions, feedback, and collaboration.
 
-- **GitHub**: [github.com/webrobot](https://github.com/webrobot)
+- **GitHub**: [github.com/WebRobot-Ltd](https://github.com/WebRobot-Ltd)
 - **Documentation**: [docs.webrobot.eu](https://docs.webrobot.eu)
 - **Support**: [support.webrobot.eu](https://support.webrobot.eu)
 

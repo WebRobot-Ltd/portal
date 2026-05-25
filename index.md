@@ -14,7 +14,7 @@ hero:
       link: https://docs.webrobot.eu/
     - theme: alt
       text: View on GitHub
-      link: https://github.com/webrobot
+      link: https://github.com/WebRobot-Ltd
 
 features:
   - icon: 
@@ -72,7 +72,7 @@ webrobot pipeline run -f pipeline.yaml --follow
 - [Documentation](https://docs.webrobot.eu/) - Comprehensive guides and tutorials
 - [API Reference](https://docs.webrobot.eu/#-api-reference) - Complete API documentation
 - [Use Cases](/use-cases) - Real-world examples and solutions
-- [Examples](https://github.com/webrobot/examples) - Sample pipelines and code
+- [Examples](https://github.com/WebRobot-Ltd) - Sample pipelines and code
 
 ---
 
