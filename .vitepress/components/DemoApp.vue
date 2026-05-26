@@ -920,13 +920,19 @@ go</pre>
         <div class="picker-modal-header">
           <strong>🎯 Page picker</strong>
           <div class="picker-mode-tabs">
-            <button :class="['picker-tab', pickerMode === 'selector-single' && 'active']" @click="setPickerMode('selector-single')">🎯 Single</button>
-            <button :class="['picker-tab', pickerMode === 'selector-list'   && 'active']" @click="setPickerMode('selector-list')">📋 List</button>
-            <button :class="['picker-tab', pickerMode === 'multi-sample'    && 'active']"
-                    title="Click 2+ examples of the repeating link/card you want the crawler to follow. The picker generalises a CSS selector that matches all of them — meant for explore-stage args."
-                    @click="setPickerMode('multi-sample')">📍 Repeating</button>
+            <!-- When the picker was opened from a fetch / visit / explore
+                 (trace-capable) stage, the only useful mode is action
+                 recording — selectors live on extract/flatSelect/etc.
+                 Hide the other tabs there to reduce visual noise. -->
+            <template v-if="!pickerOriginIsTraceCapable">
+              <button :class="['picker-tab', pickerMode === 'selector-single' && 'active']" @click="setPickerMode('selector-single')">🎯 Single</button>
+              <button :class="['picker-tab', pickerMode === 'selector-list'   && 'active']" @click="setPickerMode('selector-list')">📋 List</button>
+              <button :class="['picker-tab', pickerMode === 'multi-sample'    && 'active']"
+                      title="Click 2+ examples of the repeating link/card you want the crawler to follow. The picker generalises a CSS selector that matches all of them — meant for explore-stage args."
+                      @click="setPickerMode('multi-sample')">📍 Repeating</button>
+            </template>
             <button :class="['picker-tab', pickerMode === 'action-record'   && 'active']" @click="setPickerMode('action-record')">⏺ Record actions</button>
-            <button :class="['picker-tab', pickerMode === 'ai-magic'        && 'active']" @click="setPickerMode('ai-magic')">🪄 AI Magic</button>
+            <button v-if="!pickerOriginIsTraceCapable" :class="['picker-tab', pickerMode === 'ai-magic' && 'active']" @click="setPickerMode('ai-magic')">🪄 AI Magic</button>
           </div>
           <div class="picker-strategy-tabs" title="wget = fast HTTP (static sites). Camoufox = real browser (JS-heavy / Cloudflare-protected). Required for Record actions.">
             <button :class="['picker-tab-small', pickerStrategy === 'wget' && 'active']"
@@ -4318,6 +4324,15 @@ function openTraceRecorder(stageIdx) {
 // and can't replay browser actions either.
 const TRACE_CAPABLE_STAGES = new Set(['fetch', 'explore', 'join'])
 function isTraceCapableStage(name) { return TRACE_CAPABLE_STAGES.has(name) }
+
+// True when the picker was opened from a fetch / visit / explore stage —
+// drives the toolbar to show only "Record actions" (the other tabs are
+// for selector picking, which doesn't apply to trace-capable stages).
+const pickerOriginIsTraceCapable = computed(() => {
+  const idx = pickerTargetStageIdx.value
+  if (idx == null || !wizPipeline.value[idx]) return false
+  return isTraceCapableStage(wizPipeline.value[idx].stage)
+})
 const tracableStages = computed(() => {
   return wizPipeline.value
     .map((row, idx) => ({ idx, stage: row.stage }))
