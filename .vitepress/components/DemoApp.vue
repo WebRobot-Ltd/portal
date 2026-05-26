@@ -680,9 +680,17 @@ go</pre>
                   <div class="wizard-fields-head">
                     <strong>📋 Fields ({{ (row._fields || []).length }})</strong>
                     <div class="wizard-fields-actions">
-                      <button class="btn btn-secondary btn-xs" @click="openMultiFieldPicker(idx)" title="Open the picker in multi-field mode — click each field on the page">🎯 Pick fields</button>
+                      <button class="btn btn-secondary btn-xs"
+                              :disabled="!flatSelectSegmentReady(row)"
+                              :title="flatSelectSegmentReady(row)
+                                ? 'Open the picker in multi-field mode — click each field on the page'
+                                : 'flatSelect: imposta prima il selettore di riga (segmentSelector/selector) qui sotto, poi torna qui per i fields'"
+                              @click="openMultiFieldPicker(idx)">🎯 Pick fields</button>
                       <button class="btn btn-primary btn-xs"
-                              title="Open the picker and describe the fields you want — LLM fills the table"
+                              :disabled="!flatSelectSegmentReady(row)"
+                              :title="flatSelectSegmentReady(row)
+                                ? 'Open the picker and describe the fields you want — LLM fills the table'
+                                : 'flatSelect: imposta prima il selettore di riga'"
                               @click="openAiSuggestFields(idx)">🪄 AI suggest fields</button>
                       <button class="btn btn-secondary btn-xs"
                               :disabled="suggestNamesLoading || !(row._fields && row._fields.length)"
@@ -691,8 +699,22 @@ go</pre>
                         <span v-if="suggestNamesLoading" class="loading-spinner"></span>
                         🪄 Suggest names
                       </button>
-                      <button class="btn btn-ghost btn-xs" @click="addField(idx)">+ Add empty</button>
+                      <button class="btn btn-ghost btn-xs"
+                              :disabled="!flatSelectSegmentReady(row)"
+                              :title="flatSelectSegmentReady(row) ? 'Add an empty field row' : 'flatSelect: imposta prima il selettore di riga'"
+                              @click="addField(idx)">+ Add empty</button>
                     </div>
+                  </div>
+                  <!-- flatSelect 2-step flow guard: the field selectors below
+                       are RELATIVE to the row segment, so picking fields
+                       before the segment selector is set produces selectors
+                       that don't resolve at runtime. Surface this loudly. -->
+                  <div v-if="row.stage === 'flatSelect' && !flatSelectSegmentReady(row)"
+                       class="wizard-fields-warn">
+                    ⚠️ <strong>Prima imposta il selettore di riga</strong>
+                    ({{ flatSelectSegmentArgName(row) }}) qui sotto — i field selectors
+                    di questa tabella saranno relativi ad ogni riga matched. Senza un
+                    segment selector valido, "Pick fields" + "AI suggest" sono disabilitati.
                   </div>
                   <table v-if="(row._fields || []).length" class="wizard-fields-table">
                     <thead>
@@ -4325,6 +4347,24 @@ function openTraceRecorder(stageIdx) {
 const TRACE_CAPABLE_STAGES = new Set(['fetch', 'explore', 'join'])
 function isTraceCapableStage(name) { return TRACE_CAPABLE_STAGES.has(name) }
 
+// flatSelect needs a row/segment selector populated BEFORE the user
+// can pick fields — field selectors are relative to each row. extract
+// (single-row scope) doesn't carry this constraint and reports ready
+// regardless. Other structured-fields stages: be permissive (return
+// true) so we don't gate them by accident.
+function flatSelectSegmentArgName(row) {
+  if (!row || row.stage !== 'flatSelect') return null
+  // The flatSelect spec uses `segmentSelector`; older specs / yaml
+  // fixtures fall back to `selector`. Accept either as the row anchor.
+  return (row.args && row.args.segmentSelector != null) ? 'segmentSelector' : 'selector'
+}
+function flatSelectSegmentReady(row) {
+  if (!row) return false
+  if (row.stage !== 'flatSelect') return true
+  const seg = row.args && (row.args.segmentSelector || row.args.selector)
+  return seg != null && String(seg).trim() !== ''
+}
+
 // True when the picker was opened from a fetch / visit / explore stage —
 // drives the toolbar to show only "Record actions" (the other tabs are
 // for selector picking, which doesn't apply to trace-capable stages).
@@ -7692,6 +7732,18 @@ if (typeof window !== 'undefined') {
   display: flex;
   gap: 6px;
 }
+.wizard-fields-warn {
+  margin: 6px 0;
+  padding: 8px 10px;
+  background: #fff8e1;
+  border: 1px solid #f6c065;
+  border-left: 4px solid #b45309;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: #1f2937;
+  line-height: 1.45;
+}
+.wizard-fields-warn strong { color: #92400e; }
 .wizard-fields-table {
   width: 100%;
   border-collapse: collapse;
