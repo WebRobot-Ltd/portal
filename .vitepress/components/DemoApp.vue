@@ -8578,6 +8578,118 @@ if (typeof window !== 'undefined') {
   .stat-label { font-size: 0.7rem; }
   .stat-value { font-size: 0.95rem; }
 }
+
+/* ────────────────────────────────────────────────────────────────
+ * Mobile pass 2 — components added after the original responsive
+ * sweep. Without these the new HITL bell, python extensions editor,
+ * AI Magic flatSelect preview and picker tabs overflow on phones.
+ * ──────────────────────────────────────────────────────────────── */
+@media (max-width: 768px) {
+  /* HITL notification bell — pinned bottom-right on mobile so it
+     doesn't overlap the VitePress sticky topbar / nav drawer that
+     occupies the top edge on touch. */
+  .cmf-notif-bell-wrap {
+    top: auto;
+    bottom: 20px;
+    right: 16px;
+  }
+  .cmf-notif-bell { padding: 8px 12px; font-size: 1rem; }
+  .cmf-notif-dropdown {
+    /* Don't claim 340px on a 360px viewport — let it span almost the
+       full width and anchor under the bell. */
+    top: auto;
+    bottom: 56px;
+    right: 0;
+    min-width: 0;
+    width: calc(100vw - 32px);
+    max-width: 360px;
+  }
+
+  /* Picker mode tabs (Single / List / Repeating / Record / AI Magic):
+     wrap onto multiple rows, tighter padding, keep them legible. */
+  .picker-modal-header { padding: 8px; gap: 6px; }
+  .picker-mode-tabs    { flex-wrap: wrap; gap: 4px; justify-content: flex-start; }
+  .picker-tab          { padding: 4px 8px; font-size: 0.78em; }
+  .picker-strategy-tabs { flex-wrap: wrap; }
+
+  /* Picker iframe: keep its 1440px desktop layout (sites expect it)
+     but let the modal body scroll horizontally on small screens.
+     Cap height so the action panel below the iframe stays in view. */
+  .picker-iframe { min-height: 380px; height: 50vh; }
+  .picker-iframe-wrapper, .picker-modal-body { max-height: 60vh; }
+
+  /* Apply panel + committed panel + multi-field result panel — stack
+     their flex rows so buttons aren't squeezed off-screen. */
+  .picker-apply-trace { flex-direction: column; align-items: stretch; }
+  .picker-apply-select { max-width: 100% !important; }
+  .picker-committed-head { flex-wrap: wrap; }
+
+  /* AI Magic flatSelect preview table — overflow scroll instead of
+     squashing column widths to illegible. */
+  .picker-ai-flat-head { flex-wrap: wrap; }
+  .picker-ai-flat-seg  { max-width: 100%; word-break: break-all; white-space: normal; }
+  .picker-ai-flat-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    min-width: 0;
+  }
+  .picker-ai-flat-sample { max-width: 120px; }
+
+  /* Python post-processing block — stack header, full-width buttons +
+     full-width name input, code textarea fills the row. */
+  .wizard-python-block { padding: 10px; }
+  .wizard-python-head  { flex-direction: column; align-items: stretch; gap: 6px; }
+  .wizard-python-head .btn { width: 100%; }
+  .wizard-python-entry { padding: 8px; }
+  .wizard-python-entry-head { flex-wrap: wrap; }
+  .wizard-python-name  { width: 100%; flex: 1 0 100%; }
+  .wizard-python-aimagic { flex-direction: column; gap: 6px; }
+  .wizard-python-body  { font-size: 0.75rem; min-height: 160px; }
+
+  /* Fields editor (extract / flatSelect): stack actions, smaller
+     table fonts, allow horizontal scroll on the fields table. */
+  .wizard-fields-head    { flex-direction: column; align-items: stretch; gap: 6px; }
+  .wizard-fields-actions { flex-direction: column; gap: 6px; }
+  .wizard-fields-actions .btn { width: 100%; }
+  .wizard-fields-table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    font-size: 0.78rem;
+  }
+
+  /* Stage / arg input rows: stack the "[input] [🎯 Pick]" pair so the
+     pick button doesn't squeeze the field. */
+  .wizard-arg-input-row { flex-direction: column; align-items: stretch; gap: 4px; }
+  .wizard-arg-input-row .btn { width: 100%; }
+
+  /* Notification dropdown buttons — keep them inline ("Apri mirror" /
+     "Ignora" pair), but constrain so they don't blow past the dropdown
+     width on the smallest screens. */
+  .cmf-notif-actions { flex-wrap: wrap; }
+  .cmf-notif-actions .btn { flex: 1 1 auto; min-width: 0; }
+
+  /* Trace YAML pre + wizard YAML preview wrap aggressively. */
+  .picker-actions-yaml,
+  .wizard-yaml { font-size: 0.72rem; padding: 6px; white-space: pre-wrap; word-break: break-word; }
+
+  /* Banners at the top of the demo page: tighter padding, smaller
+     font so they don't dominate the screen. */
+  .scope-banner,
+  .sovereignty-banner,
+  .design-banner,
+  .perf-banner { padding: 8px 10px; font-size: 0.78rem; margin-bottom: 0.75rem; line-height: 1.4; }
+}
+
+@media (max-width: 480px) {
+  /* Phone-portrait extras for the new sections. */
+  .cmf-notif-dropdown { max-width: 90vw; }
+  .wizard-python-body { font-size: 0.72rem; min-height: 140px; }
+  .picker-mode-tabs   { gap: 3px; }
+  .picker-tab         { padding: 3px 6px; font-size: 0.72em; }
+  .picker-iframe      { min-height: 320px; height: 45vh; }
+}
 </style>
 
 
