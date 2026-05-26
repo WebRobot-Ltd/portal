@@ -4370,13 +4370,22 @@ function flatSelectSegmentReady(row) {
   return seg != null && String(seg).trim() !== ''
 }
 
-// True when the picker was opened from a fetch / visit / explore stage —
-// drives the toolbar to show only "Record actions" (the other tabs are
-// for selector picking, which doesn't apply to trace-capable stages).
+// Picker-toolbar gating: hide selector tabs (Single / List / Repeating /
+// AI Magic) when the picker was opened from a stage whose primary work
+// is navigation rather than CSS selection — fetch, explore, join AND
+// every visit*/wget*/intelligent* variant of those families. The
+// canonical TRACE_CAPABLE_STAGES set is intentionally smaller (used by
+// the Apply panel to gate where a recorded trace can be saved); this
+// computed is purely cosmetic.
+const TOOLBAR_ONLY_RECORD_STAGES = new Set([
+  'fetch',
+  'explore', 'visitExplore', 'wgetExplore', 'intelligentExplore', 'intelligentWgetExplore',
+  'join',    'visitJoin',    'wgetJoin',    'intelligentJoin',    'intelligentWgetJoin',
+])
 const pickerOriginIsTraceCapable = computed(() => {
   const idx = pickerTargetStageIdx.value
   if (idx == null || !wizPipeline.value[idx]) return false
-  return isTraceCapableStage(wizPipeline.value[idx].stage)
+  return TOOLBAR_ONLY_RECORD_STAGES.has(wizPipeline.value[idx].stage)
 })
 const tracableStages = computed(() => {
   return wizPipeline.value
