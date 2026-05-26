@@ -3136,29 +3136,97 @@ async function sendStagedActionsToCamoufox() {
 
 // Mirror cmfBlock changes into the notification inbox so the user can
 // find their way back even after closing the modal. Dedup by sid.
-function recordBlockNotification(sid, block) {
+// Entries from local cmfBlock events have id=null; entries reconciled
+// from Strapi have a numeric id and survive a page reload.
+function recordBlockNotification(sid, block, opts) {
   if (!sid || !block) return
   const existing = cmfBlockNotifications.value.find(n => n.sid === sid)
   if (existing) {
     existing.kind = block.kind || existing.kind
     existing.url  = block.url  || existing.url
+    if (opts && opts.id && !existing.id) existing.id = opts.id
     return
   }
   cmfBlockNotifications.value = [
     ...cmfBlockNotifications.value,
     {
+      id:    (opts && opts.id) || null,    // Strapi row id, null if local-only
       sid:   sid,
       kind:  block.kind || 'unknown',
       url:   block.url  || pickerLoadedUrl.value || '',
-      since: Date.now(),
+      since: (opts && opts.since) || Date.now(),
       html:  pickerHtml.value || '',
+      source: (opts && opts.source) || 'demo_wizard',
     },
   ]
 }
-function dismissBlockNotif(sid) {
+async function dismissBlockNotif(sid) {
+  const row = cmfBlockNotifications.value.find(n => n.sid === sid)
   cmfBlockNotifications.value = cmfBlockNotifications.value.filter(n => n.sid !== sid)
   if (cmfBlockNotifications.value.length === 0) cmfNotifOpen.value = false
+  // If the row is persisted in Strapi, mark it resolved server-side so
+  // it doesn't reappear on the next poll. Best-effort.
+  if (row && row.id) {
+    try {
+      await authenticatedDemoFetch(
+        `${API_BASE_URL}/api/webrobot/api/demo/notifications/captcha/${row.id}/resolve`,
+        { method: 'POST' }
+      )
+    } catch (_) {}
+  }
 }
+
+// Periodic poll of the Strapi-backed inbox. Reconciles into the same
+// cmfBlockNotifications array so the bell shows both:
+//   - blocks the current tab caused in its own wizard session
+//     (already present via recordBlockNotification from /cmf/* paths)
+//   - blocks from other tabs / sessions / ETL pipelines persisted in DB
+// Dedup is by sid. Local-only rows (id=null) get their id upgraded if
+// the DB poll finds the matching sid.
+let cmfNotifPollTimer = null
+async function pollCaptchaNotifications() {
+  try {
+    const r = await authenticatedDemoFetch(
+      `${API_BASE_URL}/api/webrobot/api/demo/notifications/captcha?limit=50`,
+      { method: 'GET' }
+    )
+    if (!r.ok) return
+    const j = await r.json()
+    const rows = Array.isArray(j.data) ? j.data : []
+    // Reconcile: add unseen sids, upgrade ids on existing local rows,
+    // remove local rows whose Strapi twin is now resolved (resolvedAt
+    // set) — though the listUnresolved query already excludes them.
+    const seenSids = new Set()
+    for (const row of rows) {
+      if (!row || !row.sessionId) continue
+      seenSids.add(row.sessionId)
+      recordBlockNotification(row.sessionId, { kind: row.kind, url: row.url }, {
+        id:     row.id,
+        since:  row.createdAt ? new Date(row.createdAt).getTime() : Date.now(),
+        source: row.source || 'demo_wizard',
+      })
+    }
+    // Drop persisted entries whose backing row was resolved by another
+    // tab. Local-only rows (id=null) are kept — they're the in-flight
+    // ones the current tab just produced.
+    cmfBlockNotifications.value = cmfBlockNotifications.value.filter(n => {
+      if (!n.id) return true
+      return seenSids.has(n.sid)
+    })
+  } catch (_) {
+    // Silent: persistence layer down should not spam the wizard.
+  }
+}
+function startCaptchaNotifPoll() {
+  if (cmfNotifPollTimer) return
+  pollCaptchaNotifications()
+  cmfNotifPollTimer = setInterval(pollCaptchaNotifications, 30_000)
+}
+function stopCaptchaNotifPoll() {
+  if (cmfNotifPollTimer) { clearInterval(cmfNotifPollTimer); cmfNotifPollTimer = null }
+}
+onMounted(() => { startCaptchaNotifPoll() })
+onBeforeUnmount(() => { stopCaptchaNotifPoll() })
 function clearBlockNotifFor(sid) {
   if (!sid) return
   dismissBlockNotif(sid)
