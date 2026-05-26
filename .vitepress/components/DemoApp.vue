@@ -1,6 +1,33 @@
 <template>
   <div class="demo-app">
 
+    <!-- Captcha / HITL notification bell. Pinned top-right of the demo
+         pane. Counts active captcha blocks across any open or parked
+         Camoufox sessions; click opens a dropdown that lets the user
+         jump back into the mirror to resolve them. -->
+    <div v-if="cmfBlockNotifications.length > 0" class="cmf-notif-bell-wrap">
+      <button class="cmf-notif-bell" @click="cmfNotifOpen = !cmfNotifOpen"
+              :title="cmfBlockNotifications.length + ' blocco/i in attesa di risoluzione'">
+        🔔 <span class="cmf-notif-badge">{{ cmfBlockNotifications.length }}</span>
+      </button>
+      <div v-if="cmfNotifOpen" class="cmf-notif-dropdown" @click.stop>
+        <div class="cmf-notif-header">
+          🚨 Blocchi in attesa di risoluzione
+          <button class="cmf-notif-close" @click="cmfNotifOpen = false">✕</button>
+        </div>
+        <div v-for="n in cmfBlockNotifications" :key="n.sid" class="cmf-notif-item">
+          <div class="cmf-notif-meta">
+            <strong>{{ n.kind }}</strong> · {{ shortHost(n.url) }}
+            <span class="cmf-notif-since">· {{ relTime(n.since) }}</span>
+          </div>
+          <div class="cmf-notif-actions">
+            <button class="btn btn-primary btn-sm" @click="openMirrorForBlock(n)">Apri mirror</button>
+            <button class="btn btn-ghost btn-sm" @click="dismissBlockNotif(n.sid)">Ignora</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Scope banner: this demo runs on the Spark ETL subsystem.
          The Ray agentic runtime is live as of 2026-05-22 — point users
          to the dedicated /agentic page rather than crowd this one. -->
@@ -2803,6 +2830,12 @@ const cmfSessionId        = ref(null)         // active Camoufox session id (cmf
 // succeeds.
 const cmfBlock            = ref(null)
 const cmfResumeBusy       = ref(false)
+// In-app notification inbox for captcha blocks. Each entry mirrors a
+// distinct session that's currently waiting on HITL resolution. The
+// bell icon in the demo header reads from this; "Apri mirror" reopens
+// the picker modal on that sid so the user can solve the challenge.
+const cmfBlockNotifications = ref([])   // [{sid, kind, url, since, html}]
+const cmfNotifOpen          = ref(false)
 const pickerLoading       = ref(false)
 const pickerLoadingStartedAt = ref(0)               // ms timestamp when the current step kicked off
 const pickerLoadingElapsedS  = ref(0)               // updated by setInterval while loading
@@ -3041,6 +3074,7 @@ async function openWithCamoufox(url) {
     // webrobot-picker-ready when cmfBlock is set).
     cmfBlock.value = j.block || null
     pushBlockStateToIframe()
+    if (cmfBlock.value) recordBlockNotification(cmfSessionId.value, cmfBlock.value)
     // Remember where the trace started — applyCommittedTrace seeds
     // this onto the target stage's url arg when the user hasn't typed
     // one manually, so the runtime knows where to navigate before
@@ -3100,6 +3134,73 @@ async function sendStagedActionsToCamoufox() {
   forwardStepToCamoufox(queue)
 }
 
+// Mirror cmfBlock changes into the notification inbox so the user can
+// find their way back even after closing the modal. Dedup by sid.
+function recordBlockNotification(sid, block) {
+  if (!sid || !block) return
+  const existing = cmfBlockNotifications.value.find(n => n.sid === sid)
+  if (existing) {
+    existing.kind = block.kind || existing.kind
+    existing.url  = block.url  || existing.url
+    return
+  }
+  cmfBlockNotifications.value = [
+    ...cmfBlockNotifications.value,
+    {
+      sid:   sid,
+      kind:  block.kind || 'unknown',
+      url:   block.url  || pickerLoadedUrl.value || '',
+      since: Date.now(),
+      html:  pickerHtml.value || '',
+    },
+  ]
+}
+function dismissBlockNotif(sid) {
+  cmfBlockNotifications.value = cmfBlockNotifications.value.filter(n => n.sid !== sid)
+  if (cmfBlockNotifications.value.length === 0) cmfNotifOpen.value = false
+}
+function clearBlockNotifFor(sid) {
+  if (!sid) return
+  dismissBlockNotif(sid)
+}
+// Click "Apri mirror" in the notification dropdown — bring the wizard
+// modal back up on that exact session so the user can solve the
+// captcha in-place. Reuses the parked-session path because the modal
+// may have been closed (or a different sid was active).
+function openMirrorForBlock(n) {
+  if (!n || !n.sid) return
+  cmfNotifOpen.value = false
+  if (cmfSessionId.value && cmfSessionId.value !== n.sid && pickerLoadedUrl.value && pickerHtml.value) {
+    pausedCmfSession.value = {
+      sessionId: cmfSessionId.value,
+      html:      pickerHtml.value,
+      url:       pickerLoadedUrl.value,
+      savedAt:   Date.now(),
+    }
+  }
+  cmfSessionId.value    = n.sid
+  pickerHtml.value      = n.html || ''
+  pickerLoadedUrl.value = n.url
+  pickerStrategy.value  = 'cmf'
+  cmfBlock.value        = { kind: n.kind, url: n.url }
+  cmfReloadKey.value++
+  pickerOpen.value = true
+  // The iframe will remount and ask for picker-ready; the existing
+  // handler re-sends webrobot-picker-block when cmfBlock is set.
+}
+function shortHost(u) {
+  if (!u) return '—'
+  try { return new URL(u).host } catch (_) { return u.slice(0, 40) }
+}
+function relTime(ts) {
+  if (!ts) return ''
+  const s = Math.floor((Date.now() - ts) / 1000)
+  if (s < 60) return s + 's fa'
+  const m = Math.floor(s / 60)
+  if (m < 60) return m + 'm fa'
+  return Math.floor(m / 60) + 'h fa'
+}
+
 // Forward the current cmfBlock state to the picker iframe (or clear it
 // if cmfBlock is null). picker.js shows/hides its red banner accordingly
 // and suspends/restores click interception so the user can interact
@@ -3132,6 +3233,7 @@ async function resumeAfterCaptcha() {
     if (r.ok && !j.blocked) {
       cmfBlock.value = null
       pushBlockStateToIframe()
+      clearBlockNotifFor(cmfSessionId.value)
       // Bump the iframe so the picker re-mounts on whatever post-captcha
       // page Camoufox now exposes — many WAFs replace the body wholesale
       // after solving.
@@ -3208,6 +3310,7 @@ async function forwardStepToCamoufox(actionOrBatch) {
       cmfReloadKey.value++
       cmfBlock.value = j.block
       pushBlockStateToIframe()
+      recordBlockNotification(cmfSessionId.value, j.block)
       return
     }
     if (!r.ok || j.error) throw new Error(j.error || 'cmf/step failed')
@@ -3221,12 +3324,14 @@ async function forwardStepToCamoufox(actionOrBatch) {
     if (j.block) {
       cmfBlock.value = j.block
       pushBlockStateToIframe()
+      recordBlockNotification(cmfSessionId.value, j.block)
     } else if (cmfBlock.value) {
       // Previous step was blocked but this one cleared it (e.g. the
       // session was already past the challenge by the time we sent
       // another action). Drop the banner.
       cmfBlock.value = null
       pushBlockStateToIframe()
+      clearBlockNotifFor(cmfSessionId.value)
     }
     // Successful round-trip: the batch we just sent really ran on the
     // live Camoufox tab. Append to the committed log — that's the
@@ -6331,6 +6436,90 @@ if (typeof window !== 'undefined') {
 }
 
 /* ─── Scope banner ─────────────────────────────────────────── */
+/* Captcha / HITL notification bell — pinned top-right of the demo
+   pane, dropdown surfaces the list of blocked sessions. */
+.cmf-notif-bell-wrap {
+  position: fixed;
+  top: 80px;
+  right: 24px;
+  z-index: 1000;
+}
+.cmf-notif-bell {
+  background: #dc2626;
+  color: white;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-size: 1.1rem;
+  font-weight: bold;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  animation: cmf-notif-pulse 2s ease-in-out infinite;
+}
+.cmf-notif-bell:hover { background: #b91c1c; }
+.cmf-notif-badge {
+  background: white;
+  color: #dc2626;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 0.85rem;
+  min-width: 22px;
+  text-align: center;
+}
+@keyframes cmf-notif-pulse {
+  0%, 100% { box-shadow: 0 4px 12px rgba(220, 38, 38, 0.4); }
+  50%      { box-shadow: 0 4px 22px rgba(220, 38, 38, 0.7); }
+}
+.cmf-notif-dropdown {
+  position: absolute;
+  top: 52px;
+  right: 0;
+  min-width: 340px;
+  max-width: 420px;
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.16);
+  overflow: hidden;
+}
+.cmf-notif-header {
+  background: #fef2f2;
+  color: #991b1b;
+  padding: 10px 14px;
+  font-weight: 600;
+  font-size: 0.95rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #fecaca;
+}
+.cmf-notif-close {
+  background: transparent;
+  border: none;
+  color: #991b1b;
+  cursor: pointer;
+  font-size: 1rem;
+}
+.cmf-notif-item {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f3f4f6;
+}
+.cmf-notif-item:last-child { border-bottom: none; }
+.cmf-notif-meta {
+  font-size: 0.9rem;
+  color: #1f2937;
+  margin-bottom: 8px;
+  word-break: break-all;
+}
+.cmf-notif-since { color: #6b7280; font-size: 0.8rem; }
+.cmf-notif-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .scope-banner {
   /* Opaque pale-amber instead of near-transparent purple — the
      previous rgba(102,126,234,0.08) on top of the demo page's
