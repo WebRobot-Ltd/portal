@@ -971,14 +971,21 @@ go</pre>
           <div v-else-if="pickerLoadError" class="picker-empty" style="color:#b00020;">
             Load failed: {{ pickerLoadError }} — try switching strategy to Camoufox (top-right toggle).
           </div>
-          <!-- Camoufox path: rendered HTML comes back from /cmf/open, we
-               mount it via srcdoc so the iframe is same-origin with the
-               portal (picker.js postMessage works). -->
+          <!-- Camoufox path: iframe SRC points at /wizard/iframe/<sessionId>/
+               proxy endpoint. Every asset roundtrips through the live
+               Camoufox session (cookies, headers, Cloudflare clearance
+               preserved) and the iframe has a real origin so JS dynamic
+               fetch/XHR resolve against the proxy (not against the parent
+               portal origin). Side effect: nested captcha iframes can now
+               post back via window.top.postMessage and finalize the
+               challenge. The cmfReloadKey query param is bumped on every
+               /cmf/step success to force a refresh after committed
+               actions. -->
           <iframe
-            v-else-if="pickerStrategy === 'cmf' && pickerHtml"
+            v-else-if="pickerStrategy === 'cmf' && cmfSessionId"
             id="wr-picker-iframe"
-            :srcdoc="pickerHtml"
-            sandbox="allow-same-origin allow-scripts allow-forms"
+            :src="cmfIframeSrc"
+            sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
             class="picker-iframe"
           ></iframe>
           <!-- wget path (legacy): direct GET on /wizard/proxy via src. -->
@@ -1797,6 +1804,17 @@ const eanError = ref(null)
 
 // Available pipelines - loaded dynamically from backend
 const availablePipelines = ref([])
+
+/**
+ * Camoufox picker iframe URL — points at the Jersey proxy endpoint that
+ * serves the session's live HTML + every asset roundtrip via the live
+ * Camoufox BrowserContext. cmfReloadKey is bumped on every committed
+ * /cmf/step so the iframe refreshes to show the post-action DOM.
+ */
+const cmfIframeSrc = computed(() => {
+  if (!cmfSessionId.value) return ''
+  return `${API_BASE_URL}/api/webrobot/api/demo/wizard/iframe/${encodeURIComponent(cmfSessionId.value)}/?_v=${cmfReloadKey.value}`
+})
 
 /**
  * Group pipelines by category for the gallery <optgroup>. Returns an array
@@ -2774,7 +2792,8 @@ const wizSuggestedSet = computed(() => new Set(wizSuggested.value))
 const pickerOpen          = ref(false)
 const pickerUrl           = ref('https://books.toscrape.com/')
 const pickerLoadedUrl     = ref(null)
-const pickerHtml          = ref('')           // for iframe srcdoc (Camoufox strategy)
+const pickerHtml          = ref('')           // legacy: srcdoc body (only used as fallback now — cmf flow uses cmfIframeSrc)
+const cmfReloadKey        = ref(0)            // bumped on every /cmf/step success to refresh the iframe via ?_v=…
 const pickerStrategy      = ref('wget')       // 'wget' | 'cmf'
 const cmfSessionId        = ref(null)         // active Camoufox session id (cmf strategy)
 const pickerLoading       = ref(false)
@@ -3009,6 +3028,7 @@ async function openWithCamoufox(url) {
     pickerHtml.value      = j.html || ''
     cmfSessionId.value    = j.session_id || null
     pickerLoadedUrl.value = j.current_url || url
+    cmfReloadKey.value++   // force iframe :src refresh so it points at the new session
     // Remember where the trace started — applyCommittedTrace seeds
     // this onto the target stage's url arg when the user hasn't typed
     // one manually, so the runtime knows where to navigate before
@@ -3110,6 +3130,7 @@ async function forwardStepToCamoufox(actionOrBatch) {
     if (!r.ok || j.error) throw new Error(j.error || 'cmf/step failed')
     pickerHtml.value      = j.html || pickerHtml.value
     pickerLoadedUrl.value = j.current_url || pickerLoadedUrl.value
+    cmfReloadKey.value++   // refresh iframe :src so it re-fetches the post-step HTML
     // Successful round-trip: the batch we just sent really ran on the
     // live Camoufox tab. Append to the committed log — that's the
     // sequence the user can "Apply to a fetch/visit trace". Skip
@@ -4120,6 +4141,7 @@ function resumePausedSession() {
   pickerLoadedUrl.value = p.url
   pickerLoadError.value = null
   pausedCmfSession.value = null
+  cmfReloadKey.value++   // refresh iframe :src so it reattaches to the parked session
 }
 
 // User wants a fresh start instead — release the server-side session
