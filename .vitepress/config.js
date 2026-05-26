@@ -17,6 +17,7 @@ export default defineConfig({
       { text: 'Home', link: '/' },
       { text: 'Features', link: '/features' },
       { text: 'Docs', link: '/docs/introduction' },
+      { text: 'API', link: '/api/reference' },
       { text: 'Demo', link: '/demo' },
       { text: 'Agentic', link: '/agentic' },
       { text: 'Use Cases', link: '/use-cases' },
@@ -66,6 +67,7 @@ export default defineConfig({
         {
           text: 'API Reference',
           items: [
+            { text: 'OpenAPI Reference', link: '/api/reference' },
             { text: 'Authentication', link: '/api/authentication' }
           ]
         }

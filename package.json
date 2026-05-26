@@ -8,7 +8,8 @@
     "build": "vitepress build",
     "preview": "vitepress preview",
     "docker:build": "docker build -t webrobot-vitepress-site .",
-    "docker:run": "docker run -p 8080:80 webrobot-vitepress-site"
+    "docker:run": "docker run -p 8080:80 webrobot-vitepress-site",
+    "openapi:sync": "cp ../webrobot-etl-api-doc/openapi.json public/openapi.json && echo 'openapi.json synced from webrobot-etl-api-doc' || echo 'sibling repo webrobot-etl-api-doc not found — pulled openapi.json must be updated by CI'"
   },
   "keywords": [
     "webrobot",
