@@ -3651,6 +3651,11 @@ const LIST_PICK_STAGES = new Set([
   'wgetJoin',
   'visitJoin',
   'join',
+  // flatSelect's segmentSelector/selector picks the REPEATING row that
+  // contains the fields — same UX as explore: click 2+ examples, picker
+  // generalises a CSS selector that matches all sibling rows, highlights
+  // them all so the user can see the row count before committing.
+  'flatSelect',
 ])
 function pickModeFor(stage) {
   return LIST_PICK_STAGES.has(stage) ? 'multi-sample' : 'selector-single'
