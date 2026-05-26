@@ -1179,12 +1179,17 @@ go</pre>
             <select v-model="aiMode" class="text-input picker-ai-mode">
               <option value="selector">Find selector</option>
               <option value="actions">Build action sequence</option>
+              <option value="flatselect">flatSelect: segment + fields</option>
             </select>
             <input
               v-model="aiIntent"
               type="text"
               class="text-input"
-              :placeholder="aiMode === 'actions' ? 'e.g. search for laptops and click submit' : 'e.g. the next-page link at the bottom of the catalogue'"
+              :placeholder="aiMode === 'actions'
+                ? 'e.g. search for laptops and click submit'
+                : (aiMode === 'flatselect'
+                    ? 'e.g. each product card with title, price, link, image'
+                    : 'e.g. the next-page link at the bottom of the catalogue')"
               @keyup.enter="runAiMagic"
             />
             <button class="btn btn-primary btn-sm" :disabled="aiLoading || !pickerLoadedUrl" @click="runAiMagic">
@@ -1193,6 +1198,36 @@ go</pre>
             </button>
           </div>
           <div v-if="aiError" class="picker-ai-err">{{ aiError }}</div>
+
+          <!-- flatSelect end-to-end: shows the inferred segment selector
+               + the suggested fields, with a "Apply all" CTA that fills
+               row.args.selector + row._fields in one go. -->
+          <div v-if="aiMode === 'flatselect' && aiFlatSelectResult" class="picker-ai-section">
+            <div class="picker-ai-flat-head">
+              <strong>📐 Segment</strong>
+              <code class="picker-ai-flat-seg">{{ aiFlatSelectResult.segmentSelector || '—' }}</code>
+              <span class="picker-ai-conf" v-if="aiFlatSelectResult.segmentMatches != null">{{ aiFlatSelectResult.segmentMatches }} rows</span>
+            </div>
+            <table v-if="aiFlatSelectResult.fields && aiFlatSelectResult.fields.length" class="picker-ai-flat-table">
+              <thead><tr><th>as</th><th>method</th><th>selector (relative)</th><th>sample</th></tr></thead>
+              <tbody>
+                <tr v-for="(f, fi) in aiFlatSelectResult.fields" :key="fi">
+                  <td><code>{{ f.as }}</code></td>
+                  <td><code>{{ f.method || 'text' }}</code></td>
+                  <td><code>{{ f.selector }}</code></td>
+                  <td class="picker-ai-flat-sample" :title="f.sample">{{ (f.sample || '').slice(0, 40) }}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="picker-ai-flat-actions">
+              <button class="btn btn-primary btn-sm"
+                      :disabled="!aiFlatSelectResult.segmentSelector || !(aiFlatSelectResult.fields && aiFlatSelectResult.fields.length)"
+                      @click="applyAiFlatSelect">
+                ✅ Apply segment + {{ (aiFlatSelectResult.fields || []).length }} field(s)
+              </button>
+              <button class="btn btn-ghost btn-sm" @click="aiFlatSelectResult = null">Clear</button>
+            </div>
+          </div>
 
           <!-- Algorithmic candidates (yellow) -->
           <div v-if="aiAlgoResults.length" class="picker-ai-section">
@@ -2958,7 +2993,11 @@ setInterval(() => { if (pausedCmfSession.value) pausedCmfAgeTick.value++ }, 1000
 // The algo result arrives synchronously (~ms); the LLM result fills in
 // after 1-3s and overlays a second-tier highlight in the iframe.
 const aiIntent       = ref('')
-const aiMode         = ref('selector')   // 'selector' | 'actions'
+const aiMode         = ref('selector')   // 'selector' | 'actions' | 'flatselect'
+// flatSelect AI Magic result: bundles inferred segment selector + the
+// per-row field schema so the user reviews the whole proposal at once
+// and applies it with a single click.
+const aiFlatSelectResult = ref(null)      // { segmentSelector, segmentMatches, fields:[{as, method, selector, sample}] }
 const aiLoading      = ref(false)
 const aiError        = ref(null)
 const aiAlgoResults  = ref([])           // [{selector|type, confidence, why}]
@@ -3490,6 +3529,14 @@ function setPickerMode(m) {
   if (m !== 'action-record') {
     pickerIntendedMode.value = null
   }
+  // When entering AI Magic from a flatSelect stage, default the LLM
+  // sub-mode to the segment+fields end-to-end flow (instead of plain
+  // "Find selector"). The user can still switch to selector/actions
+  // from the dropdown if they want.
+  if (m === 'ai-magic' && pickerTargetStageIdx.value != null) {
+    const row = wizPipeline.value[pickerTargetStageIdx.value]
+    if (row && row.stage === 'flatSelect') aiMode.value = 'flatselect'
+  }
   // Translate the parent's UI mode to one the iframe picker understands.
   // AI Magic uses selector-single under the hood (so click → LCA-refine works).
   const ifrMode = m === 'ai-magic' ? 'selector-single' : m
@@ -3906,6 +3953,63 @@ async function runAiMagic() {
     }
   }
 
+  // ── flatSelect end-to-end branch ───────────────────────────────
+  // Two calls: first infer-segment (skip if user already typed a row
+  // selector), then infer-fields with that segment as container. The
+  // result is bundled in aiFlatSelectResult so the user reviews and
+  // applies with one click via applyAiFlatSelect().
+  if (aiMode.value === 'flatselect') {
+    try {
+      const row = pickerTargetStageIdx.value != null ? wizPipeline.value[pickerTargetStageIdx.value] : null
+      let segSel = row && row.args && (row.args.segmentSelector || row.args.selector)
+      let segMatches = null
+      if (!segSel || !String(segSel).trim()) {
+        const r1 = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-segment`, {
+          method: 'POST',
+          body: JSON.stringify({ url: pickerLoadedUrl.value, segmentation_prompt: intent }),
+        })
+        const j1 = await r1.json()
+        if (!r1.ok || j1.error || !j1.segment_selector) {
+          throw new Error(j1.error || 'PTA could not find a repeating container')
+        }
+        segSel = j1.segment_selector
+        segMatches = j1.segment_matches || null
+      }
+      const r2 = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-fields`, {
+        method: 'POST',
+        body: JSON.stringify({ url: pickerLoadedUrl.value, intent, container_selector: segSel, stage_name: 'flatSelect' }),
+      })
+      const j2 = await r2.json()
+      if (!r2.ok || j2.error) throw new Error(j2.error || 'infer-fields failed')
+      // Server returns {algo:[…], llm:[…]} — prefer llm tier; fields
+      // come in a structured shape but field names vary; normalise.
+      const raw = (j2.llm && j2.llm.length ? j2.llm : (j2.algo || []))
+      const fields = raw.map(f => ({
+        as:       f.as || f.name || f.column || '',
+        method:   f.method || f.extract || 'text',
+        selector: f.selector || f.selector_relative || f.css || '',
+        sample:   f.sample || f.sample_text || '',
+      })).filter(f => f.selector)
+      aiFlatSelectResult.value = { segmentSelector: segSel, segmentMatches: segMatches, fields }
+      // Live preview in iframe: highlight segment rows + every field
+      // selector across all rows so the user sees the full extraction
+      // shape before committing.
+      const layers = [{ selector: segSel, color: '#3b82f6', label: 'segment' }]
+      const palette = ['#10b981','#f59e0b','#ec4899','#8b5cf6','#ef4444','#14b8a6','#eab308']
+      fields.forEach((f, fi) => {
+        // qualify the relative selector with the segment so the parent
+        // page's querySelectorAll resolves the column at each row.
+        layers.push({ selector: segSel + ' ' + f.selector, color: palette[fi % palette.length], label: f.as })
+      })
+      sendHighlightToIframe(layers)
+    } catch (e) {
+      aiError.value = e.message || String(e)
+    } finally {
+      aiLoading.value = false
+    }
+    return
+  }
+
   const path = aiMode.value === 'actions' ? 'infer-actions' : 'infer-selector'
   try {
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/${path}`, {
@@ -3944,6 +4048,40 @@ async function runAiMagic() {
   } finally {
     aiLoading.value = false
   }
+}
+
+// Apply the full flatSelect AI Magic proposal: write segmentSelector
+// into row.args + each suggested field into row._fields, then close
+// the modal. The user reviews the table in the panel before clicking
+// Apply, so this is the irreversible commit step.
+function applyAiFlatSelect() {
+  const idx = pickerTargetStageIdx.value
+  if (idx == null || !aiFlatSelectResult.value) return
+  const row = wizPipeline.value[idx]
+  if (!row) return
+  row.args = row.args || {}
+  // flatSelect spec accepts either segmentSelector OR selector — pick
+  // whichever the catalog defines first, fall back to selector for
+  // older fixtures.
+  const spec = findStageSpec(row.stage)
+  const segArg = (spec && (spec.arg_schema || []).find(a => a.name === 'segmentSelector')) ? 'segmentSelector' : 'selector'
+  row.args[segArg] = aiFlatSelectResult.value.segmentSelector
+  // Replace fields wholesale — AI Magic's whole point is "do it for me".
+  // The table is editable post-apply in the stage editor so manual
+  // tweaks are easy.
+  const palette = ['#10b981','#3b82f6','#f59e0b','#ec4899','#8b5cf6','#ef4444','#14b8a6','#eab308']
+  row._fields = aiFlatSelectResult.value.fields.map((f, fi) => ({
+    as:       f.as,
+    method:   f.method || 'text',
+    selector: f.selector,
+    _sample:  f.sample || '',
+    _color:   palette[fi % palette.length],
+  }))
+  wizPipeline.value = [...wizPipeline.value]
+  wizStatus.value = { kind: 'ok',
+    text: `🪄 AI Magic: segment "${aiFlatSelectResult.value.segmentSelector}" + ${row._fields.length} field(s) applicati a ${row.stage} (stage ${idx + 1}).` }
+  aiFlatSelectResult.value = null
+  closePicker()
 }
 
 function applyAiCandidate(c) {
@@ -7673,6 +7811,58 @@ if (typeof window !== 'undefined') {
   color: #b00020;
   font-size: 0.85em;
   margin-bottom: 6px;
+}
+.picker-ai-flat-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.picker-ai-flat-seg {
+  background: #eff6ff;
+  border: 1px solid #93c5fd;
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 0.85rem;
+  color: #1e3a8a;
+}
+.picker-ai-flat-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 0.85rem;
+}
+.picker-ai-flat-table th {
+  text-align: left;
+  background: #f3f4f6;
+  padding: 4px 8px;
+  color: #1f2937;
+  font-weight: 600;
+}
+.picker-ai-flat-table td {
+  padding: 4px 8px;
+  border-top: 1px solid #e5e7eb;
+  color: #1f2937;
+}
+.picker-ai-flat-table code {
+  font-size: 0.8rem;
+  background: #f9fafb;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+.picker-ai-flat-sample {
+  color: #6b7280;
+  font-size: 0.8rem;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.picker-ai-flat-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
 .picker-ai-section {
   margin-top: 8px;
