@@ -1263,22 +1263,28 @@ go</pre>
             <button class="btn btn-ghost btn-sm" @click="pickerActions = []">Clear staged</button>
           </div>
 
-          <!-- Post-Send commit panel: appears only after at least one
-               batch has round-tripped through Camoufox. THIS is where
-               the user picks which stage to attach the trace to —
-               explicit dropdown so a sequence can be applied to fetch,
-               visit, or any other future trace-capable stage. -->
-          <div v-if="committedActions.length" class="picker-committed-panel">
+          <!-- Apply panel: appears as soon as we have either a loaded
+               URL (URL-only commit) OR committed actions (trace + URL
+               commit). Lets the user save just the URL onto the fetch
+               stage even when they didn't record any picker action —
+               useful when the wizard is opened only to pick the target
+               URL for a fetch/visit stage. -->
+          <div v-if="committedActions.length || pickerOpenedUrl" class="picker-committed-panel">
             <div class="picker-committed-head">
-              <strong>🎬 Committed on Camoufox: {{ committedActions.length }}</strong>
-              <span class="picker-committed-hint">replayed on the live browser — ready to save as a stage trace</span>
+              <strong v-if="committedActions.length">🎬 Committed on Camoufox: {{ committedActions.length }}</strong>
+              <strong v-else>🔗 URL loaded</strong>
+              <span class="picker-committed-hint">
+                <template v-if="committedActions.length">replayed on the live browser — ready to save as a stage trace</template>
+                <template v-else>no actions recorded — applying will seed only the URL on the chosen stage</template>
+              </span>
             </div>
-            <pre class="picker-actions-yaml">{{ committedActionsYaml }}</pre>
+            <pre v-if="committedActions.length" class="picker-actions-yaml">{{ committedActionsYaml }}</pre>
+            <div v-else class="picker-actions-yaml picker-actions-draft">{{ pickerOpenedUrl }}</div>
             <div v-if="!tracableStages.length" class="picker-empty-small">
               No fetch / visit stage in the pipeline yet — add one and it'll appear here.
             </div>
             <div v-else class="picker-apply-trace">
-              <label>Apply trace to:</label>
+              <label>Apply to:</label>
               <select v-model.number="applyTraceStageIdx" class="text-input picker-apply-select">
                 <option v-for="s in tracableStages" :key="s.idx" :value="s.idx">
                   {{ s.idx + 1 }}. {{ s.stage }}
@@ -1287,15 +1293,17 @@ go</pre>
               <button class="btn btn-primary btn-sm"
                       :disabled="applyTraceStageIdx == null"
                       @click="applyCommittedTrace"
-                      title="Save the trace on the chosen stage and close. The Camoufox tab is parked automatically — the next stage's picker resumes from the same page.">
-                ✅ Apply &amp; continue
+                      :title="committedActions.length
+                        ? 'Save the trace + URL on the chosen stage and close.'
+                        : 'Seed just the URL on the chosen stage (no actions recorded).'">
+                {{ committedActions.length ? '✅ Apply & continue' : '✅ Use this URL' }}
               </button>
-              <button class="btn btn-primary btn-sm" @click="copyCommittedTrace">Copy YAML</button>
-              <button class="btn btn-ghost btn-sm" @click="committedActions = []">Clear</button>
+              <button v-if="committedActions.length" class="btn btn-primary btn-sm" @click="copyCommittedTrace">Copy YAML</button>
+              <button v-if="committedActions.length" class="btn btn-ghost btn-sm" @click="committedActions = []">Clear</button>
             </div>
           </div>
-          <div v-if="!pickerActionsYaml && !committedActions.length" class="picker-empty-small">
-            Interact with the page above (click input → type → click submit), then press <strong>▶ Send</strong>. Once Camoufox replays the batch, an "Apply trace to stage" panel appears here.
+          <div v-if="!pickerActionsYaml && !committedActions.length && !pickerOpenedUrl" class="picker-empty-small">
+            Load a URL above, then either press <strong>✅ Use this URL</strong> to seed only the URL onto a fetch/visit stage, or interact with the page (click input → type → click submit) and press <strong>▶ Send</strong> to record a trace.
           </div>
         </div>
       </div>
@@ -3080,6 +3088,14 @@ async function openWithCamoufox(url) {
     // one manually, so the runtime knows where to navigate before
     // replaying the actions.
     pickerOpenedUrl.value = j.current_url || url
+    // Default the apply-target to the first trace-capable stage so the
+    // "✅ Use this URL" button works on first load without forcing the
+    // user to choose a stage when there's exactly one fetch/visit.
+    if (applyTraceStageIdx.value == null && tracableStages.value.length) {
+      applyTraceStageIdx.value = pickerTargetStageIdx.value != null && tracableStages.value.some(s => s.idx === pickerTargetStageIdx.value)
+        ? pickerTargetStageIdx.value
+        : tracableStages.value[0].idx
+    }
   } catch (e) {
     pickerLoadError.value = e.message || String(e)
     pickerHtml.value = ''
@@ -4319,9 +4335,17 @@ const tracableStages = computed(() => {
 function applyCommittedTrace() {
   const idx = applyTraceStageIdx.value
   if (idx == null || !wizPipeline.value[idx]) return
-  if (!committedActions.value.length) return
+  // Require AT LEAST one of: committed actions (full trace apply) or a
+  // loaded picker URL (URL-only apply). The bare empty case shouldn't
+  // happen because the panel is hidden when both are absent.
+  if (!committedActions.value.length && !pickerOpenedUrl.value) return
   const row = wizPipeline.value[idx]
-  row._trace = committedActions.value.slice()
+  // Only overwrite the stage trace when we actually have new actions to
+  // commit — opening the picker just to retarget the URL must not blow
+  // away an existing trace the user spent time building earlier.
+  if (committedActions.value.length) {
+    row._trace = committedActions.value.slice()
+  }
   const spec = findStageSpec(row.stage)
   const firstArg = (spec && spec.arg_schema || [])[0]
   if (firstArg && pickerOpenedUrl.value) {
@@ -4332,10 +4356,12 @@ function applyCommittedTrace() {
     }
   }
   wizPipeline.value = [...wizPipeline.value]
-  const n = row._trace.length
-  const seededUrl = firstArg && row.args[firstArg.name]
+  const seededUrl = firstArg && row.args && row.args[firstArg.name]
   const urlNote = seededUrl ? ` — ${firstArg.name}=${seededUrl}` : ''
-  wizStatus.value = { kind: 'ok', text: `Trace (${n} actions) applied to ${row.stage} (stage ${idx + 1})${urlNote}.` }
+  const traceNote = committedActions.value.length
+    ? `Trace (${committedActions.value.length} actions) applied`
+    : `URL applied (no actions recorded)`
+  wizStatus.value = { kind: 'ok', text: `${traceNote} to ${row.stage} (stage ${idx + 1})${urlNote}.` }
   // Close the modal — the trace is saved on the stage row, picker job
   // is done. closePicker() also DELETE's the Camoufox session; the
   // sibling "💾 Apply & keep session for next stage →" is the path
@@ -5568,12 +5594,17 @@ if (typeof window !== 'undefined') {
 
 .btn-secondary {
   background: var(--vp-c-bg-soft);
-  color: var(--vp-c-text-1);
+  /* Was var(--vp-c-text-1) — on the soft-grey button bg, VitePress
+     resolves that to a mid-grey that's hard to read. Pin to near-black
+     for legibility (also matches .btn-ghost). */
+  color: #111;
+  font-weight: 600;
   border: 1px solid var(--vp-c-divider);
 }
 
 .btn-secondary:hover {
   background: var(--vp-c-bg);
+  color: #000;
 }
 
 .loading-spinner {
@@ -7062,9 +7093,12 @@ if (typeof window !== 'undefined') {
 .btn-xs  { padding: 2px 8px;  font-size: 0.8rem; }
 .btn-ghost {
   background: #eee;
-  color: #333;
+  /* Was #333 — washed out on the soft gray background. Bump to near-
+     black so the label is legible on both light and dark sections. */
+  color: #111;
+  font-weight: 600;
 }
-.btn-ghost:hover { background: #ddd; }
+.btn-ghost:hover { background: #ddd; color: #000; }
 .btn-danger {
   background: #c0392b;
   color: white;
@@ -7244,12 +7278,18 @@ if (typeof window !== 'undefined') {
 }
 .picker-tab {
   background: #eee;
+  /* Tab labels were inheriting the VitePress grey text — illegible on
+     the soft-grey tab bg. Force near-black; the active tab inverts to
+     white on a gradient bg so it stays distinguishable. */
+  color: #111;
+  font-weight: 600;
   border: 1px solid #d0d0d0;
   border-radius: 6px;
   padding: 6px 12px;
   font-size: 0.85em;
   cursor: pointer;
 }
+.picker-tab:hover:not(.active) { background: #ddd; color: #000; }
 .picker-tab.active {
   background: linear-gradient(135deg, #667eea, #764ba2);
   color: white;
