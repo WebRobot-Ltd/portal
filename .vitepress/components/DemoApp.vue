@@ -80,13 +80,19 @@
             :disabled="availablePipelines.length === 0"
           >
             <option value="">-- Choose a pipeline --</option>
-            <option
-              v-for="pipeline in availablePipelines"
-              :key="pipeline.id"
-              :value="pipeline.id"
+            <optgroup
+              v-for="group in pipelinesByCategory"
+              :key="group.category"
+              :label="group.category"
             >
-              {{ pipeline.isDraft ? '✏️ ' : '' }}{{ pipeline.name }}{{ pipeline.isDraft ? '  (draft)' : '' }}
-            </option>
+              <option
+                v-for="pipeline in group.items"
+                :key="pipeline.id"
+                :value="pipeline.id"
+              >
+                {{ pipeline.isDraft ? '✏️ ' : '' }}{{ pipeline.name }}{{ pipeline.isDraft ? '  (draft)' : '' }}
+              </option>
+            </optgroup>
           </select>
           <p v-if="!loadingPipelines && availablePipelines.length === 0 && !pipelinesError" class="hint">
             No pipelines available. Please check backend connection.
@@ -1792,6 +1798,35 @@ const eanError = ref(null)
 // Available pipelines - loaded dynamically from backend
 const availablePipelines = ref([])
 
+/**
+ * Group pipelines by category for the gallery <optgroup>. Returns an array
+ * of { category, items } in a stable order:
+ *   1. Real categories sorted alphabetically (case-insensitive).
+ *   2. "Uncategorized" last (only present if any pipeline has no category).
+ * Drafts inside each group sort to the bottom — non-drafts first.
+ */
+const pipelinesByCategory = computed(() => {
+  const map = new Map()
+  for (const p of availablePipelines.value) {
+    const cat = p.categoryName || 'Uncategorized'
+    if (!map.has(cat)) map.set(cat, [])
+    map.get(cat).push(p)
+  }
+  const groups = Array.from(map.entries()).map(([category, items]) => ({
+    category,
+    items: items.slice().sort((a, b) => {
+      if (a.isDraft !== b.isDraft) return a.isDraft ? 1 : -1
+      return (a.name || '').localeCompare(b.name || '')
+    })
+  }))
+  groups.sort((a, b) => {
+    if (a.category === 'Uncategorized') return 1
+    if (b.category === 'Uncategorized') return -1
+    return a.category.toLowerCase().localeCompare(b.category.toLowerCase())
+  })
+  return groups
+})
+
 // Initialize: try to load stored JWT token and auto-authenticate on mount
 onMounted(async () => {
   const storedToken = localStorage.getItem('demo_jwt_token')
@@ -1962,7 +1997,9 @@ async function loadPipelines() {
       requiresInputDataset: demo.requires_input_dataset || false,
       csvFormatDescription: demo.csv_format_description || null,
       pipelineYaml: demo.pipeline_yaml || null,
-      isDraft: !!demo.is_draft   // backend marks wizard-saved pipelines (Generated:* agents) so the selector can flag them
+      isDraft: !!demo.is_draft,  // backend marks wizard-saved pipelines (Generated:* agents) so the selector can flag them
+      categoryId: demo.category_id ?? null,
+      categoryName: demo.category_name || 'Uncategorized'
     }))
     
   } catch (error) {
