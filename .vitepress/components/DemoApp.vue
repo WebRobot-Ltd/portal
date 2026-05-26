@@ -5972,17 +5972,18 @@ if (typeof window !== 'undefined') {
 }
 
 .btn-secondary {
-  background: var(--vp-c-bg-soft);
-  /* Was var(--vp-c-text-1) — on the soft-grey button bg, VitePress
-     resolves that to a mid-grey that's hard to read. Pin to near-black
-     for legibility (also matches .btn-ghost). */
+  /* Fixed light bg + dark text so the label stays legible in BOTH
+     VitePress light and dark themes. Previously this used
+     var(--vp-c-bg-soft) which goes dark in dark-mode and made the
+     pinned #111 text invisible. */
+  background: #f3f4f6;
   color: #111;
   font-weight: 600;
-  border: 1px solid var(--vp-c-divider);
+  border: 1px solid #d1d5db;
 }
 
 .btn-secondary:hover {
-  background: var(--vp-c-bg);
+  background: #e5e7eb;
   color: #000;
 }
 
