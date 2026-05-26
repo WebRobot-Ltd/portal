@@ -2796,6 +2796,13 @@ const pickerHtml          = ref('')           // legacy: srcdoc body (only used 
 const cmfReloadKey        = ref(0)            // bumped on every /cmf/step success to refresh the iframe via ?_v=…
 const pickerStrategy      = ref('wget')       // 'wget' | 'cmf'
 const cmfSessionId        = ref(null)         // active Camoufox session id (cmf strategy)
+// Captcha / WAF block state — populated when /cmf/open or /cmf/step
+// returns a `block` field (or 409 status). While non-null, the wizard
+// surfaces a red banner asking the user to resolve in the mirror, and
+// further /cmf/step calls are blocked until POST /cmf/{sid}/resume
+// succeeds.
+const cmfBlock            = ref(null)
+const cmfResumeBusy       = ref(false)
 const pickerLoading       = ref(false)
 const pickerLoadingStartedAt = ref(0)               // ms timestamp when the current step kicked off
 const pickerLoadingElapsedS  = ref(0)               // updated by setInterval while loading
@@ -3029,6 +3036,11 @@ async function openWithCamoufox(url) {
     cmfSessionId.value    = j.session_id || null
     pickerLoadedUrl.value = j.current_url || url
     cmfReloadKey.value++   // force iframe :src refresh so it points at the new session
+    // First-load captcha: backend already flagged it. Forward to iframe
+    // once the picker is ready (handler in onmessage re-sends on
+    // webrobot-picker-ready when cmfBlock is set).
+    cmfBlock.value = j.block || null
+    pushBlockStateToIframe()
     // Remember where the trace started — applyCommittedTrace seeds
     // this onto the target stage's url arg when the user hasn't typed
     // one manually, so the runtime knows where to navigate before
@@ -3088,8 +3100,66 @@ async function sendStagedActionsToCamoufox() {
   forwardStepToCamoufox(queue)
 }
 
+// Forward the current cmfBlock state to the picker iframe (or clear it
+// if cmfBlock is null). picker.js shows/hides its red banner accordingly
+// and suspends/restores click interception so the user can interact
+// natively with the captcha widget.
+function pushBlockStateToIframe() {
+  const ifr = document.getElementById('wr-picker-iframe')
+  if (!ifr || !ifr.contentWindow) return
+  try {
+    if (cmfBlock.value) {
+      ifr.contentWindow.postMessage({ type: 'webrobot-picker-block', block: cmfBlock.value }, '*')
+    } else {
+      ifr.contentWindow.postMessage({ type: 'webrobot-picker-block-clear' }, '*')
+    }
+  } catch (_) {}
+}
+
+// User clicked "Resolved, resume" in the iframe banner. POST /cmf/{sid}/resume —
+// the backend re-runs the detector. If 200, the block is cleared and the
+// trace can continue; if 409, the challenge widget is still on screen
+// and the user must try again.
+async function resumeAfterCaptcha() {
+  if (!cmfSessionId.value || cmfResumeBusy.value) return
+  cmfResumeBusy.value = true
+  try {
+    const r = await authenticatedDemoFetch(
+      `${API_BASE_URL}/api/webrobot/api/demo/wizard/cmf/${cmfSessionId.value}/resume`,
+      { method: 'POST' }
+    )
+    const j = await r.json()
+    if (r.ok && !j.blocked) {
+      cmfBlock.value = null
+      pushBlockStateToIframe()
+      // Bump the iframe so the picker re-mounts on whatever post-captcha
+      // page Camoufox now exposes — many WAFs replace the body wholesale
+      // after solving.
+      cmfReloadKey.value++
+    } else if (r.status === 409 && j.block) {
+      cmfBlock.value = j.block
+      pushBlockStateToIframe()
+      wizStatus.value = { kind: 'warn',
+        text: '⚠️ Sembra che il blocco sia ancora attivo. Completa il captcha nel mirror, poi riprova.' }
+      setTimeout(() => { if (wizStatus.value && wizStatus.value.text && wizStatus.value.text.startsWith('⚠️ Sembra')) wizStatus.value = null }, 5000)
+    }
+  } catch (e) {
+    wizStatus.value = { kind: 'warn', text: 'resume failed: ' + (e.message || e) }
+  } finally {
+    cmfResumeBusy.value = false
+  }
+}
+
 async function forwardStepToCamoufox(actionOrBatch) {
   if (!cmfSessionId.value) return
+  // Guard: do not push new actions while the session is blocked by a
+  // captcha — they would either 409 again, or worse race the user's
+  // resolve gesture. The Resume button is the only path forward.
+  if (cmfBlock.value) {
+    wizStatus.value = { kind: 'warn',
+      text: '⚠️ Sessione bloccata da captcha — risolvi nel mirror prima di inviare nuove azioni.' }
+    return
+  }
   const batch = Array.isArray(actionOrBatch) ? actionOrBatch : [actionOrBatch]
   if (!batch.length) return
   const first = batch[0]
@@ -3127,10 +3197,37 @@ async function forwardStepToCamoufox(actionOrBatch) {
       }
       return
     }
+    // Captcha / WAF block returns 409 + block field + current HTML. NOT
+    // an error — keep the iframe rendered on the challenge page so the
+    // user can solve it, surface the red banner, and bail out of the
+    // committed-actions append (the click that tripped the block never
+    // really ran).
+    if (r.status === 409 && j.block) {
+      pickerHtml.value      = j.html || pickerHtml.value
+      pickerLoadedUrl.value = j.current_url || pickerLoadedUrl.value
+      cmfReloadKey.value++
+      cmfBlock.value = j.block
+      pushBlockStateToIframe()
+      return
+    }
     if (!r.ok || j.error) throw new Error(j.error || 'cmf/step failed')
     pickerHtml.value      = j.html || pickerHtml.value
     pickerLoadedUrl.value = j.current_url || pickerLoadedUrl.value
     cmfReloadKey.value++   // refresh iframe :src so it re-fetches the post-step HTML
+    // Successful step also returns a block field if the page re-armed a
+    // challenge mid-flight (e.g. PerimeterX after Nth click). Treat the
+    // same as the 409 branch but keep going through the commit pipeline
+    // — the action did run, so it goes into committedActions.
+    if (j.block) {
+      cmfBlock.value = j.block
+      pushBlockStateToIframe()
+    } else if (cmfBlock.value) {
+      // Previous step was blocked but this one cleared it (e.g. the
+      // session was already past the challenge by the time we sent
+      // another action). Drop the banner.
+      cmfBlock.value = null
+      pushBlockStateToIframe()
+    }
     // Successful round-trip: the batch we just sent really ran on the
     // live Camoufox tab. Append to the committed log — that's the
     // sequence the user can "Apply to a fetch/visit trace". Skip
@@ -3421,6 +3518,12 @@ function onPickerMessage(ev) {
     pickerActions.value = Array.isArray(d.actions) ? d.actions : []
   } else if (d.type === 'webrobot-picker-navigation') {
     // Page is reloading in action mode — buffer already received.
+  } else if (d.type === 'webrobot-picker-resume-request') {
+    // Iframe banner Resume button → POST /cmf/{sid}/resume. On success
+    // clear cmfBlock + tell iframe to drop its banner; on 409 the block
+    // is still there (user clicked Resume too early) — keep the banner
+    // and let the user try again.
+    resumeAfterCaptcha()
   } else if (d.type === 'webrobot-picker-ready') {
     // Iframe (re)loaded — picker.js boots in default 'selector-single'.
     // Echo back the current UI mode so click handling matches what the
@@ -3431,6 +3534,12 @@ function onPickerMessage(ev) {
       ? 'selector-single'
       : (pickerMode.value || 'selector-single')
     try { ev.source && ev.source.postMessage({ type: 'webrobot-picker-mode', mode: ifrMode }, '*') } catch (_) {}
+    // If we have a pending block from a previous /cmf/step response,
+    // re-send it now that the picker has remounted (iframe reload
+    // resets blockInfo inside picker.js to null).
+    if (cmfBlock.value) {
+      try { ev.source && ev.source.postMessage({ type: 'webrobot-picker-block', block: cmfBlock.value }, '*') } catch (_) {}
+    }
     // When the picker is reopened on a stage that already carries
     // row._fields (extract / flatSelect, user comes back to refine),
     // re-paint those seeds inside the iframe so the user sees
