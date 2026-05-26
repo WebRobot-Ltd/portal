@@ -811,6 +811,59 @@ go</pre>
           </div>
         </div>
 
+        <!-- Python post-processing block. Visually segregated FROM the
+             stage list above: these are DataFrame-level transformations
+             that always run AFTER all RDD-based stages — the runtime
+             expects them in the top-level `python_extensions.stages:`
+             YAML key, NOT as pipeline entries. The wizard auto-appends
+             a `python_<type>:<name>` reference at the end of the
+             pipeline[] array when emitting YAML. -->
+        <div class="wizard-python-block">
+          <div class="wizard-python-head">
+            <strong>🐍 Python post-processing</strong>
+            <span class="wizard-python-hint">
+              DataFrame transformations applied AFTER the pipeline. Always last — they consume the assembled DF, not the row stream.
+            </span>
+            <button class="btn btn-secondary btn-xs" @click="addPythonExtension('row_transform')">+ row_transform</button>
+            <button class="btn btn-secondary btn-xs" @click="addPythonExtension('dataframe_transform')">+ dataframe_transform</button>
+            <button class="btn btn-secondary btn-xs" @click="addPythonExtension('sql_query')">+ sql_query</button>
+          </div>
+          <div v-if="!wizPythonExtensions.length" class="picker-empty-small">
+            No Python post-processing yet. Click <strong>+ row_transform</strong> (per-row UDF), <strong>+ dataframe_transform</strong> (whole-DF driver-side), or <strong>+ sql_query</strong> (SQL on the current DF) to add one.
+          </div>
+          <div v-for="(ext, eIdx) in wizPythonExtensions" :key="eIdx" class="wizard-python-entry">
+            <div class="wizard-python-entry-head">
+              <span class="wizard-python-type" :class="'wizard-python-type-' + ext.type">{{ ext.type }}</span>
+              <input type="text"
+                     class="text-input wizard-python-name"
+                     placeholder="extension_name (snake_case)"
+                     :value="ext.name"
+                     @input="ext.name = $event.target.value">
+              <button class="btn btn-danger btn-xs" @click="removePythonExtension(eIdx)" title="Remove this extension">✕</button>
+            </div>
+            <div class="wizard-python-aimagic">
+              <input type="text"
+                     class="text-input"
+                     placeholder="🪄 Describe what this snippet should do (e.g. 'normalise price column, drop rows with missing url')"
+                     :value="ext.intent || ''"
+                     @input="ext.intent = $event.target.value"
+                     @keyup.enter="aiMagicForPythonExt(eIdx)">
+              <button class="btn btn-primary btn-xs"
+                      :disabled="ext._aiBusy || !(ext.intent && ext.intent.trim())"
+                      @click="aiMagicForPythonExt(eIdx)">
+                <span v-if="ext._aiBusy" class="loading-spinner"></span>
+                🪄 Generate
+              </button>
+            </div>
+            <textarea class="text-input wizard-python-body"
+                      :placeholder="pythonBodyPlaceholder(ext.type)"
+                      rows="8"
+                      :value="ext.functionBody || ''"
+                      @input="ext.functionBody = $event.target.value"></textarea>
+            <div v-if="ext._valError" class="wizard-python-err">{{ ext._valError }}</div>
+          </div>
+        </div>
+
         <h4>📄 YAML preview</h4>
         <pre class="wizard-yaml">{{ wizYamlPreview }}</pre>
 
@@ -2865,6 +2918,14 @@ const executorImagePullingNode = computed(() => {
 
 const wizCatalog       = ref([])
 const wizPipeline      = ref([])   // [{stage, args: {name: value, …}}]
+// Python post-processing extensions: top-level `python_extensions.stages`
+// in the YAML, but always invoked LAST in the runtime pipeline because
+// they operate on the assembled DataFrame (driver-side or via UDF), not
+// on the RDD pipeline mid-stream. The wizard renders these as a
+// separate section under the regular stage list and the YAML emitter
+// auto-appends `python_<type>:<name>` stage references at the end of
+// the pipeline:[...] block.
+const wizPythonExtensions = ref([])   // [{name, type, functionBody, intent?, _aiBusy?, _valError?}]
 const wizPipelineName  = ref('')
 const wizIntent        = ref('')
 const wizPluginFilter  = ref('')
@@ -4054,6 +4115,85 @@ async function runAiMagic() {
 // into row.args + each suggested field into row._fields, then close
 // the modal. The user reviews the table in the panel before clicking
 // Apply, so this is the irreversible commit step.
+// ── Python post-processing extensions ────────────────────────────
+function addPythonExtension(type) {
+  const proposedName = type === 'row_transform' ? 'transform_row'
+    : (type === 'dataframe_transform' ? 'transform_df' : 'query_df')
+  // Avoid name collisions when the user clicks + multiple times in a row.
+  let n = proposedName, suffix = 2
+  while (wizPythonExtensions.value.some(e => e.name === n)) { n = proposedName + '_' + suffix++; }
+  wizPythonExtensions.value = [
+    ...wizPythonExtensions.value,
+    { name: n, type: type, functionBody: '', intent: '' },
+  ]
+}
+function removePythonExtension(idx) {
+  const next = [...wizPythonExtensions.value]; next.splice(idx, 1); wizPythonExtensions.value = next
+}
+function pythonBodyPlaceholder(type) {
+  if (type === 'row_transform') {
+    return '# Body of def transform(row: dict) -> dict — runs as PySpark UDF per row.\n'
+      + '# Example:\n'
+      + 'import re\n'
+      + "price_str = row.get('raw_price', '') or ''\n"
+      + "m = re.search(r'\\d+(?:[.,]\\d+)?', price_str)\n"
+      + "return {**row, 'price': float(m.group().replace(',', '.')) if m else None}"
+  }
+  if (type === 'dataframe_transform') {
+    return '# Body of def transform(df, spark) -> DataFrame — driver-side, can import pyspark.sql.\n'
+      + '# Example:\n'
+      + 'from pyspark.sql.functions import col, length\n'
+      + "return df.filter(length(col('title')) > 0).orderBy(col('price').desc())"
+  }
+  return '-- SQL run against the current DataFrame (registered as `df`).\n'
+    + '-- Example:\n'
+    + 'SELECT title, price FROM df WHERE price IS NOT NULL ORDER BY price DESC LIMIT 50'
+}
+
+async function aiMagicForPythonExt(idx) {
+  const ext = wizPythonExtensions.value[idx]
+  if (!ext) return
+  const intent = (ext.intent || '').trim()
+  if (!intent) return
+  ext._aiBusy = true
+  ext._valError = null
+  // Collect upstream columns from the last extract/flatSelect _fields so
+  // the LLM has the schema to write against. Falls back to an empty hint.
+  const cols = []
+  for (const row of wizPipeline.value) {
+    if (Array.isArray(row._fields)) {
+      for (const f of row._fields) if (f.as && cols.indexOf(f.as) === -1) cols.push(f.as)
+    }
+  }
+  try {
+    const r = await authenticatedDemoFetch(
+      `${API_BASE_URL}/api/webrobot/api/demo/wizard/generate-python-transform`,
+      { method: 'POST', body: JSON.stringify({
+        intent: intent,
+        type: ext.type,
+        name: ext.name,
+        available_columns: cols,
+      }) }
+    )
+    const j = await r.json()
+    if (!r.ok || j.error) throw new Error(j.error || 'generate-python-transform failed')
+    // Server returns {name, type, functionBody, valid, security}. Honor
+    // name if the user left the default, keep type fixed (UI-driven).
+    if (j.functionBody) ext.functionBody = j.functionBody
+    if (j.name && (!ext.name || ext.name.startsWith('transform_') || ext.name.startsWith('query_'))) {
+      ext.name = j.name
+    }
+    if (j.security && j.security.warning) {
+      ext._valError = '⚠️ security: ' + j.security.warning
+    }
+  } catch (e) {
+    ext._valError = 'AI Magic failed: ' + (e.message || String(e))
+  } finally {
+    ext._aiBusy = false
+  }
+  wizPythonExtensions.value = [...wizPythonExtensions.value]
+}
+
 function applyAiFlatSelect() {
   const idx = pickerTargetStageIdx.value
   if (idx == null || !aiFlatSelectResult.value) return
@@ -4728,7 +4868,22 @@ function emitEmbeddedTraceActions(row, lines, indent) {
 function buildYamlFromPipeline(pipeline, catalog) {
   if (!pipeline || pipeline.length === 0) return '(add at least one stage)'
   const findSpec = (n) => catalog.find(s => s.stage_name === n || (s.aliases || []).includes(n))
-  const lines = ['pipeline:']
+  const lines = []
+  // Top-level python_extensions block — runtime reads this BEFORE the
+  // pipeline so each defined function is registered as a Spark UDF (or
+  // a driver-side callable) by the time the pipeline references it.
+  const pyExts = (wizPythonExtensions.value || []).filter(e => (e.name || '').trim() && (e.functionBody || '').trim())
+  if (pyExts.length) {
+    lines.push('python_extensions:')
+    lines.push('  stages:')
+    for (const ext of pyExts) {
+      lines.push(`    - name: ${ext.name}`)
+      lines.push(`      type: ${ext.type}`)
+      lines.push('      functionBody: |')
+      for (const ln of String(ext.functionBody).split('\n')) lines.push('        ' + ln)
+    }
+  }
+  lines.push('pipeline:')
   for (const row of pipeline) {
     lines.push(`  - stage: ${row.stage}`)
 
@@ -4788,6 +4943,22 @@ function buildYamlFromPipeline(pipeline, catalog) {
       if (isFetchLike && traceLen > 0) {
         emitEmbeddedTraceActions(row, lines, '      ')
       }
+    }
+  }
+  // Python post-processing references: appended at the END of the
+  // pipeline[] block in declaration order. row_transform + dataframe_transform
+  // go through the python_<type>:<name> stage shim; sql_query is a
+  // first-class stage that takes the SQL string as args[0].
+  for (const ext of pyExts) {
+    if (ext.type === 'sql_query') {
+      lines.push('  - stage: sql_query')
+      // Use literal block style so multi-line SQL survives unchanged.
+      lines.push('    args:')
+      lines.push('      - |')
+      for (const ln of String(ext.functionBody).split('\n')) lines.push('        ' + ln)
+    } else {
+      lines.push(`  - stage: python_${ext.type}:${ext.name}`)
+      lines.push('    args: []')
     }
   }
   lines.push('output:')
@@ -5234,6 +5405,7 @@ function cloneToWizard() {
 
 function wizardReset() {
   wizPipeline.value = []
+  wizPythonExtensions.value = []
   wizPipelineName.value = ''
   wizIntent.value = ''
   wizStatus.value = { kind: null, text: '' }
@@ -7948,6 +8120,77 @@ if (typeof window !== 'undefined') {
   line-height: 1.45;
 }
 .wizard-fields-warn strong { color: #92400e; }
+
+/* Python post-processing block — pinned visually under the pipeline
+   stages list (matches the runtime semantics: always runs last). */
+.wizard-python-block {
+  margin-top: 18px;
+  padding: 12px 14px;
+  background: #fef3c7;
+  border: 1px solid #f59e0b;
+  border-radius: 8px;
+  border-left: 4px solid #b45309;
+}
+.wizard-python-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.wizard-python-head strong { color: #78350f; font-size: 0.95rem; }
+.wizard-python-hint { color: #92400e; font-size: 0.82rem; flex: 1 1 100%; }
+.wizard-python-entry {
+  margin-top: 10px;
+  padding: 8px 10px;
+  background: white;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+}
+.wizard-python-entry-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.wizard-python-type {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-family: ui-monospace, monospace;
+}
+.wizard-python-type-row_transform       { background: #dbeafe; color: #1e3a8a; }
+.wizard-python-type-dataframe_transform { background: #dcfce7; color: #14532d; }
+.wizard-python-type-sql_query           { background: #fce7f3; color: #831843; }
+.wizard-python-name { flex: 1; font-family: ui-monospace, monospace; }
+.wizard-python-aimagic {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.wizard-python-aimagic .text-input { flex: 1; }
+.wizard-python-body {
+  width: 100%;
+  font-family: ui-monospace, 'Courier New', monospace;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  color: #1f2937;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 4px;
+  padding: 8px;
+  resize: vertical;
+}
+.wizard-python-err {
+  margin-top: 6px;
+  color: #b91c1c;
+  font-size: 0.8rem;
+  background: #fee2e2;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
 .wizard-fields-table {
   width: 100%;
   border-collapse: collapse;
