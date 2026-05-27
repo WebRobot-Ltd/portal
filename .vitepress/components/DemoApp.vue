@@ -4132,20 +4132,38 @@ function removePythonExtension(idx) {
 }
 function pythonBodyPlaceholder(type) {
   if (type === 'row_transform') {
-    return '# Body of def transform(row: dict) -> dict — runs as PySpark UDF per row.\n'
-      + '# Example:\n'
+    return '# Body of def NAME(row: dict) -> dict — runs as PySpark UDF per row.\n'
+      + '# Sandbox: stdlib only. For LLM calls use the pre-injected helper\n'
+      + '#   webrobot_llm(prompt, system=None, model=None, temperature=0.2)\n'
+      + '# which transparently uses the org\'s WEBROBOT_LLM_* credentials.\n'
+      + '#\n'
+      + '# Example (regex):\n'
       + 'import re\n'
       + "price_str = row.get('raw_price', '') or ''\n"
       + "m = re.search(r'\\d+(?:[.,]\\d+)?', price_str)\n"
-      + "return {**row, 'price': float(m.group().replace(',', '.')) if m else None}"
+      + "return {**row, 'price': float(m.group().replace(',', '.')) if m else None}\n"
+      + '\n'
+      + '# Example (LLM sentiment):\n'
+      + "# text = (row.get('review_text') or '').strip()\n"
+      + "# sentiment = webrobot_llm('Reply with POSITIVE/NEGATIVE/NEUTRAL: ' + text[:1500], temperature=0.0).strip().upper()\n"
+      + "# return {**row, 'sentiment': sentiment}"
   }
   if (type === 'dataframe_transform') {
-    return '# Body of def transform(df, spark) -> DataFrame — driver-side, can import pyspark.sql.\n'
-      + '# Example:\n'
-      + 'from pyspark.sql.functions import col, length\n'
-      + "return df.filter(length(col('title')) > 0).orderBy(col('price').desc())"
+    return '# Body of def NAME(df, spark) -> DataFrame — driver-side, can import pyspark.sql.\n'
+      + '# Example (groupBy + agg):\n'
+      + 'from pyspark.sql.functions import count, avg, col\n'
+      + "return (df.groupBy('category')\n"
+      + "          .agg(count('*').alias('n_items'), avg(col('price').cast('double')).alias('avg_price'))\n"
+      + "          .orderBy(col('n_items').desc()))\n"
+      + '\n'
+      + '# Example (window rank):\n'
+      + '# from pyspark.sql.functions import row_number, col\n'
+      + '# from pyspark.sql.window import Window\n'
+      + "# w = Window.partitionBy('category').orderBy(col('price').cast('double').desc())\n"
+      + "# return df.withColumn('rank_in_category', row_number().over(w))"
   }
-  return '-- SQL run against the current DataFrame (registered as `df`).\n'
+  return '-- SQL run against the upstream DataFrame (registered as `df`).\n'
+    + '-- Spark SQL dialect: ANSI-ish, backticks for reserved words, LIMIT not TOP.\n'
     + '-- Example:\n'
     + 'SELECT title, price FROM df WHERE price IS NOT NULL ORDER BY price DESC LIMIT 50'
 }
