@@ -4869,18 +4869,35 @@ function buildYamlFromPipeline(pipeline, catalog) {
   if (!pipeline || pipeline.length === 0) return '(add at least one stage)'
   const findSpec = (n) => catalog.find(s => s.stage_name === n || (s.aliases || []).includes(n))
   const lines = []
-  // Top-level python_extensions block — runtime reads this BEFORE the
-  // pipeline so each defined function is registered as a Spark UDF (or
-  // a driver-side callable) by the time the pipeline references it.
-  const pyExts = (wizPythonExtensions.value || []).filter(e => (e.name || '').trim() && (e.functionBody || '').trim())
+  // Python extensions: split into the two backend-recognized shapes:
+  //   1. row_transform / dataframe_transform → top-level python_extensions
+  //      block, KEY = function name (MAP, not LIST), with `function:` as
+  //      the field carrying the FULL `def NAME(args): …` source (the
+  //      runtime's extractFunctionBodyFromCrewAI strips the def header).
+  //   2. sql_query → first-class pipeline stage at the end of pipeline[]
+  //      with the SQL string as args[0]. NOT a python_extension.
+  // See PySparkCodeGenerator.processPythonExtensions for the canonical
+  // schema this targets.
+  const allExts = (wizPythonExtensions.value || [])
+    .filter(e => (e.name || '').trim() && (e.functionBody || '').trim())
+  const pyExts  = allExts.filter(e => e.type === 'row_transform' || e.type === 'dataframe_transform')
+  const sqlExts = allExts.filter(e => e.type === 'sql_query')
   if (pyExts.length) {
     lines.push('python_extensions:')
     lines.push('  stages:')
     for (const ext of pyExts) {
-      lines.push(`    - name: ${ext.name}`)
+      const argSig = ext.type === 'dataframe_transform' ? 'df, spark' : 'row'
+      lines.push(`    ${ext.name}:`)
       lines.push(`      type: ${ext.type}`)
-      lines.push('      functionBody: |')
-      for (const ln of String(ext.functionBody).split('\n')) lines.push('        ' + ln)
+      // `function:` field MUST contain the full def header — the runtime
+      // (PySparkCodeGenerator) extracts the body from it. Auto-prepend
+      // `def NAME(args):` so the user only has to type the body in the
+      // textarea while the YAML stays canonical.
+      lines.push('      function: |')
+      lines.push(`        def ${ext.name}(${argSig}):`)
+      for (const ln of String(ext.functionBody).split('\n')) {
+        lines.push('            ' + ln)
+      }
     }
   }
   lines.push('pipeline:')
@@ -4946,20 +4963,19 @@ function buildYamlFromPipeline(pipeline, catalog) {
     }
   }
   // Python post-processing references: appended at the END of the
-  // pipeline[] block in declaration order. row_transform + dataframe_transform
-  // go through the python_<type>:<name> stage shim; sql_query is a
-  // first-class stage that takes the SQL string as args[0].
+  // pipeline[] block in declaration order. row_transform / dataframe_transform
+  // entries get a `python_<type>:<name>` shim stage; sql_query entries
+  // get a first-class `sql_query` stage with the SQL as args[0].
   for (const ext of pyExts) {
-    if (ext.type === 'sql_query') {
-      lines.push('  - stage: sql_query')
-      // Use literal block style so multi-line SQL survives unchanged.
-      lines.push('    args:')
-      lines.push('      - |')
-      for (const ln of String(ext.functionBody).split('\n')) lines.push('        ' + ln)
-    } else {
-      lines.push(`  - stage: python_${ext.type}:${ext.name}`)
-      lines.push('    args: []')
-    }
+    lines.push(`  - stage: python_${ext.type}:${ext.name}`)
+    lines.push('    args: []')
+  }
+  for (const ext of sqlExts) {
+    lines.push('  - stage: sql_query')
+    lines.push('    args:')
+    // Literal block style so multi-line SQL survives unchanged.
+    lines.push('      - |')
+    for (const ln of String(ext.functionBody).split('\n')) lines.push('        ' + ln)
   }
   lines.push('output:')
   lines.push('  format: parquet')
