@@ -157,6 +157,27 @@
             :disabled="isExecuting"
             context="etl"
           />
+          <!-- HITL pause-on-captcha — when on, Spark pauses the row on
+               captcha detection and waits for an operator to resolve
+               the challenge in the mirror UI (via the 🔔 bell). When
+               off (default) captcha hits fail the row fast and the
+               pipeline continues with other items. -->
+          <div class="hitl-opt-wrap">
+            <label class="hitl-opt-label">
+              <input type="checkbox" v-model="hitlAwait" :disabled="isExecuting">
+              🤝 <strong>Pause on captcha for human review (HITL)</strong>
+              <span class="hitl-opt-hint">If a row hits a captcha / WAF block, pause it and notify via the 🔔 bell instead of failing fast. Operator resolves in mirror → row resumes.</span>
+            </label>
+            <div v-if="hitlAwait" class="hitl-opt-timeout">
+              <label>Wait up to
+                <input type="number" min="1" max="30" v-model="hitlTimeoutMin"
+                       :disabled="isExecuting"
+                       class="text-input hitl-opt-timeout-input">
+                minutes per block
+              </label>
+              <span class="hitl-opt-hint-small">After timeout the row fails and the pipeline continues.</span>
+            </div>
+          </div>
         </div>
 
         <button
@@ -1823,6 +1844,11 @@ const pipelinesError = ref(null)
 // returns 501 because the Spark ephemeral provisioner isn't wired yet
 // (it lands with elastic Ray workers Phase-4).
 const executionMode = ref('shared')
+// HITL pause-on-captcha toggle — when on, Spark pauses the row on
+// captcha detect and waits for an operator to mark the notification
+// resolved (via the 🔔 bell → mirror flow) instead of failing fast.
+const hitlAwait      = ref(false)
+const hitlTimeoutMin = ref('5')   // minutes; clamped to [1, 30]
 const hetznerKey    = ref('')
 const vmPreset      = ref('etl')        // ETL context default — 2 × executor
 const vmCount       = ref(2)
@@ -2377,6 +2403,16 @@ async function executePipeline(datasetIdParam = null) {
       requestBody.vmPreset = vmPreset.value
       requestBody.vmCount  = vmCount.value
       requestBody.vmRoles  = vmRoles.value
+    }
+    // HITL pause-on-captcha — when the user opts in, the Spark
+    // executor's CaptchaDetector long-polls Strapi for an operator to
+    // resolve the captcha via the mirror UI instead of failing the
+    // row. The timeout sets how long Spark waits before giving up
+    // and marking the row failed.
+    if (hitlAwait.value) {
+      requestBody.hitlAwait = true
+      const tMinutes = Math.max(1, Math.min(30, parseInt(hitlTimeoutMin.value || '5', 10)))
+      requestBody.hitlTimeoutMs = tMinutes * 60_000
     }
 
     // Log a redacted copy so we don't dump the BYOC token to the
@@ -7031,6 +7067,60 @@ if (typeof window !== 'undefined') {
 .cmf-notif-actions {
   display: flex;
   gap: 8px;
+}
+
+/* HITL pause-on-captcha toggle — sits under ByocModeSelector inside
+   the demo execution panel. Subtle styling so it doesn't compete with
+   the BYOC selector but stays clearly distinguishable. */
+.hitl-opt-wrap {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-left: 3px solid #4f46e5;
+  border-radius: 6px;
+}
+.hitl-opt-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  cursor: pointer;
+  color: #1f2937;
+}
+.hitl-opt-label input[type="checkbox"] {
+  margin-top: 3px;
+  cursor: pointer;
+  accent-color: #4f46e5;
+}
+.hitl-opt-label strong {
+  font-weight: 600;
+  color: #1f2937;
+}
+.hitl-opt-hint {
+  display: block;
+  color: #4b5563;
+  font-size: 0.82rem;
+  font-weight: 400;
+  margin-top: 2px;
+  line-height: 1.4;
+}
+.hitl-opt-timeout {
+  margin-top: 8px;
+  padding-left: 28px;
+  font-size: 0.85rem;
+  color: #1f2937;
+}
+.hitl-opt-timeout-input {
+  width: 60px;
+  display: inline-block;
+  margin: 0 6px;
+  padding: 2px 6px;
+}
+.hitl-opt-hint-small {
+  display: block;
+  color: #6b7280;
+  font-size: 0.75rem;
+  margin-top: 2px;
 }
 
 .scope-banner {
