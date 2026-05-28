@@ -1849,6 +1849,14 @@ const executionMode = ref('shared')
 // resolved (via the 🔔 bell → mirror flow) instead of failing fast.
 const hitlAwait      = ref(false)
 const hitlTimeoutMin = ref('5')   // minutes; clamped to [1, 30]
+// Anti-bot detection — set by picker.js postMessage when it spots a
+// captcha/WAF indicator while the user is recording. Used to:
+//   1. show a banner so the operator knows raw events are being captured
+//   2. mark the target stage as requires_hitl so submit-time forces
+//      hitlAwait=true (the resulting trace will likely re-hit captcha
+//      on every run — needs operator presence)
+const antiBotDetected = ref(false)
+const antiBotReason   = ref(null)
 const hetznerKey    = ref('')
 const vmPreset      = ref('etl')        // ETL context default — 2 × executor
 const vmCount       = ref(2)
@@ -2409,10 +2417,19 @@ async function executePipeline(datasetIdParam = null) {
     // resolve the captcha via the mirror UI instead of failing the
     // row. The timeout sets how long Spark waits before giving up
     // and marking the row failed.
-    if (hitlAwait.value) {
+    //
+    // Force-on if ANY stage in the pipeline carries _requires_hitl
+    // (set by onAntiBotDetected when picker.js spotted a bot
+    // challenge during recording). The trace is unreplayable headless
+    // → opt-out at submit time would mean every row immediately fails.
+    const stageRequiresHitl = (wizPipeline.value || []).some(r => r && r._requires_hitl)
+    if (hitlAwait.value || stageRequiresHitl) {
       requestBody.hitlAwait = true
       const tMinutes = Math.max(1, Math.min(30, parseInt(hitlTimeoutMin.value || '5', 10)))
       requestBody.hitlTimeoutMs = tMinutes * 60_000
+      if (stageRequiresHitl) {
+        console.log('[submit] hitlAwait forced ON: pipeline has stages tagged requires_hitl (anti-bot recording)')
+      }
     }
 
     // Log a redacted copy so we don't dump the BYOC token to the
@@ -3469,6 +3486,30 @@ function pushBlockStateToIframe() {
 // the backend re-runs the detector. If 200, the block is cleared and the
 // trace can continue; if 409, the challenge widget is still on screen
 // and the user must try again.
+// Anti-bot detected inside the iframe (picker.js heuristics). Flip the
+// UI banner, mark the target stage so its trace will be replay-tagged
+// requires_hitl, and surface a one-line warning the operator can't
+// miss.
+function onAntiBotDetected(reason) {
+  antiBotDetected.value = true
+  antiBotReason.value   = reason
+  // Tag the target stage so the YAML emitter writes a meta field
+  // forcing hitlAwait at run time.
+  if (pickerTargetStageIdx.value != null) {
+    const row = wizPipeline.value[pickerTargetStageIdx.value]
+    if (row) {
+      row._requires_hitl  = true
+      row._anti_bot_kind  = reason
+      wizPipeline.value   = [...wizPipeline.value]
+    }
+  }
+  // Force the UI checkbox on so the operator sees the linkage.
+  hitlAwait.value = true
+  wizStatus.value = { kind: 'warn',
+    text: `🤖 Anti-bot detected (${reason}) — capture switched to RAW EVENT mode. Pipeline tagged HITL-required. Each run will pause for operator captcha resolve.` }
+  // No auto-dismiss — operator should explicitly clear.
+}
+
 async function resumeAfterCaptcha() {
   if (!cmfSessionId.value || cmfResumeBusy.value) return
   cmfResumeBusy.value = true
@@ -3884,6 +3925,14 @@ function onPickerMessage(ev) {
     pickerActions.value = Array.isArray(d.actions) ? d.actions : []
   } else if (d.type === 'webrobot-picker-navigation') {
     // Page is reloading in action mode — buffer already received.
+  } else if (d.type === 'webrobot-picker-anti-bot-detected') {
+    // picker.js detected an anti-bot indicator (Cloudflare turnstile,
+    // Datadome, hCaptcha, PerimeterX, interstitial text). It has
+    // ALREADY flipped into raw-event capture mode locally; we just
+    // need to surface this to the operator and tag the target
+    // pipeline as requires_hitl so the eventual replay forces
+    // hitlAwait=true at run time.
+    onAntiBotDetected(d.reason || 'unknown')
   } else if (d.type === 'webrobot-picker-resume-request') {
     // Iframe banner Resume button → POST /cmf/{sid}/resume. On success
     // clear cmfBlock + tell iframe to drop its banner; on 409 the block
@@ -5034,6 +5083,19 @@ function buildYamlFromPipeline(pipeline, catalog) {
   lines.push('output:')
   lines.push('  format: parquet')
   lines.push('  mode: overwrite')
+  // Pipeline-level metadata. requires_hitl marks the trace as needing
+  // human-in-the-loop captcha resolution at replay — set when picker.js
+  // tripped its anti-bot heuristic during recording. Backend
+  // ProjectServiceImpl reads this and force-enables hitlAwait at submit
+  // (defense in depth: even if the user unchecks the UI box, the trace
+  // metadata wins).
+  if (pipeline.some(r => r && r._requires_hitl)) {
+    lines.push('metadata:')
+    lines.push('  requires_hitl: true')
+    const kinds = pipeline
+      .map(r => r && r._anti_bot_kind).filter(k => k)
+    if (kinds.length) lines.push(`  anti_bot_kinds: [${kinds.map(yamlScalar).join(', ')}]`)
+  }
   return lines.join('\n')
 }
 
