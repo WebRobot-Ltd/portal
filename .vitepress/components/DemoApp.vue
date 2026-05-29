@@ -1097,7 +1097,12 @@ go</pre>
           <div v-if="!pickerLoadedUrl" class="picker-empty">
             Enter a URL above and click Load. The page renders inside a sandboxed iframe — via wget for fast static sites, via Camoufox for JS-heavy ones.
           </div>
-          <div v-else-if="pickerLoadError" class="picker-empty" style="color:#b00020;">
+          <!-- Inline red banner kept ONLY for the initial-load case (no
+               iframe ever rendered yet — there's nothing to preserve, so
+               showing the error inline is fine).  Step / replay errors
+               go through the stepWarnings modal instead so the previous
+               iframe state stays mounted underneath. -->
+          <div v-else-if="pickerLoadError && !cmfSessionId" class="picker-empty" style="color:#b00020;">
             Load failed: {{ pickerLoadError }} — try switching strategy to Camoufox (top-right toggle).
           </div>
           <!-- Camoufox path: iframe SRC points at /wizard/iframe/<sessionId>/
@@ -1449,26 +1454,41 @@ go</pre>
       </div>
     </div>
 
-    <!-- Step warnings modal — non-blocking notice when /cmf/step returned
-         200 but the backend skipped 1+ actions (e.g. Hover on a not-stable
-         element under a captcha overlay). The page state stays mounted;
-         the modal lets the operator see what was dropped + decide to
-         re-send / try a different gesture. Stacks on top of the picker. -->
+    <!-- Step warnings / failure modal — replaces the loud red "Load failed"
+         banner that used to swap the iframe out (destroying the previous
+         view).  Two render paths:
+           - stepWarningsError populated → full-step failure (server
+             threw, 5xx, network) — show error text.
+           - stepWarnings populated → /cmf/step returned 200 but backend
+             skipped 1+ actions (Hover on not-stable element, etc.) —
+             show per-action table.
+         Either way the iframe stays on the previous successful state
+         (we don't bump cmfReloadKey on failure) so the operator can
+         dismiss the modal and continue from where they were. -->
     <div v-if="stepWarningsOpen" class="picker-modal-backdrop step-warn-backdrop"
-         @click.self="stepWarningsOpen = false" style="z-index: 2100;">
+         @click.self="stepWarningsOpen = false">
       <div class="picker-modal step-warn-modal">
         <div class="picker-modal-header">
-          <strong>⚠️ Some actions were skipped</strong>
+          <strong v-if="stepWarningsError">❌ Step failed</strong>
+          <strong v-else>⚠️ Some actions were skipped</strong>
         </div>
         <div class="step-warn-body">
-          <p class="step-warn-intro">
+          <p v-if="stepWarningsError" class="step-warn-intro">
+            The Camoufox replay couldn't complete. The iframe is still on
+            the page you saw BEFORE the failed step — nothing was lost.
+            Dismiss this and decide: retry the Send, change strategy
+            (wget vs Camoufox), or use ← Back in the address bar to
+            navigate the server-side browser to a known-good page.
+          </p>
+          <p v-else class="step-warn-intro">
             The Camoufox replay ran but {{ stepWarnings.length }}
             action{{ stepWarnings.length === 1 ? '' : 's' }} could not be
-            executed (most often: the target element was covered by a
-            captcha overlay or animating). The rest of the batch ran and
-            the page is on the post-step state — you can keep recording.
+            executed (most often: the target element was covered by an
+            overlay or animating). The rest of the batch ran and the
+            page is on the post-step state — you can keep recording.
           </p>
-          <table class="step-warn-table">
+          <pre v-if="stepWarningsError" class="step-warn-err-block">{{ stepWarningsError }}</pre>
+          <table v-if="stepWarnings.length" class="step-warn-table">
             <thead>
               <tr>
                 <th>#</th><th>type</th><th>selector</th><th>reason</th>
@@ -1485,7 +1505,7 @@ go</pre>
           </table>
         </div>
         <div class="step-warn-footer">
-          <button class="btn btn-primary btn-sm" @click="stepWarningsOpen = false">Got it</button>
+          <button class="btn btn-primary btn-sm" @click="dismissStepWarnings">Back</button>
         </div>
       </div>
     </div>
@@ -1902,12 +1922,29 @@ const hitlTimeoutMin = ref('5')   // minutes; clamped to [1, 30]
 const antiBotDetected = ref(false)
 const antiBotReason   = ref(null)
 
-// Per-step warnings — backend skipped 1+ actions in the batch (transient
-// errors, e.g. Hover on not-stable element). The step itself returned 200;
-// these are surfaced as a non-blocking modal so the user knows what was
-// dropped but the iframe view / committed-actions log stays intact.
-const stepWarnings     = ref([])     // [{ index, type, selector, error }]
-const stepWarningsOpen = ref(false)
+// Per-step warnings / failure surfaced via modal instead of the loud red
+// "Load failed: …" inline banner that swapped the iframe out. Keeping the
+// iframe rendered means the user keeps their previous view + can press
+// Back to restore. The modal carries:
+//  - stepWarnings: per-action skips when /cmf/step returned 200 with a
+//    warnings[] array (transient exceptions backend skipped).
+//  - stepWarningsError: the full-step exception text when the whole batch
+//    threw (server poison, network failure, 500). Either field can be
+//    populated; the modal renders whichever is present.
+//  - stepWarningsOpen: visibility.
+const stepWarnings      = ref([])     // [{ index, type, selector, error }]
+const stepWarningsError = ref(null)   // string — full-step error (5xx / poison)
+const stepWarningsOpen  = ref(false)
+function dismissStepWarnings() {
+  stepWarningsOpen.value  = false
+  stepWarnings.value      = []
+  stepWarningsError.value = null
+  // TODO (deferred per user): on dismiss after a full-step failure,
+  // optionally also goBackInCamoufox() so server state matches the
+  // iframe view exactly.  For now the iframe naturally stays on the
+  // previous successful HTML (we never bumped cmfReloadKey on failure)
+  // — visually correct, server may be one step ahead until next op.
+}
 const hetznerKey    = ref('')
 const vmPreset      = ref('etl')        // ETL context default — 2 × executor
 const vmCount       = ref(2)
@@ -3753,7 +3790,18 @@ async function forwardStepToCamoufox(actionOrBatch) {
       }
     }
   } catch (e) {
-    pickerLoadError.value = 'step failed: ' + (e.message || String(e))
+    // Step failed (5xx, poisoned session, network, etc.). DO NOT swap the
+    // iframe out for the red "Load failed: …" banner — that destroys the
+    // previous view (which is still valid: the iframe's :src points at
+    // the last successful cmfReloadKey snapshot, which we do NOT bump on
+    // failure).  Instead, surface the error via the stepWarnings modal
+    // and keep the iframe rendered on the previous page so the operator
+    // can decide whether to retry / change strategy / Back manually.
+    // TODO: auto-Back on certain failure classes (Playwright navigation
+    // timeout, mid-batch poison) — discussed but deferred.
+    stepWarningsError.value = (e && e.message) ? e.message : String(e)
+    stepWarnings.value      = []   // full-step error, no per-action warnings
+    stepWarningsOpen.value  = true
   } finally {
     pickerLoading.value = false
   }
@@ -8276,6 +8324,20 @@ if (typeof window !== 'undefined') {
   max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .step-warn-err { color: #b91c1c; font-size: 0.85em; }
+.step-warn-err-block {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-family: 'Menlo','Monaco','Courier New',monospace;
+  font-size: 0.82em;
+  margin: 0 0 12px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 240px;
+  overflow: auto;
+}
 .step-warn-footer {
   padding: 10px 18px; border-top: 1px solid #e0e0e0;
   background: #fafbfc; text-align: right;
