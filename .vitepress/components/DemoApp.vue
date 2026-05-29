@@ -5034,6 +5034,27 @@ function openFieldPicker(stageIdx, fieldIdx) {
   pickerSelected.value = null
   pickerOpen.value = true
   tryResumePausedSession()
+  // For flatSelect, the field selector MUST be relative to the row
+  // segment — otherwise selector-single computes an absolute path that
+  // includes the wrapper (ul.srp-results …) and the row :nth-of-type(N),
+  // locking the field to a single row. Push the segment selector as the
+  // picker's container so the single-pick path computes a row-relative
+  // selector (same as the bulk "Pick fields" flow). For non-flatSelect
+  // stages (extract on a detail page) we explicitly clear any stale
+  // container so selectors stay page-absolute as intended.
+  const row = wizPipeline.value[stageIdx]
+  const segSel = row && row.stage === 'flatSelect' && row.args
+    ? (row.args.segmentSelector || row.args.selector)
+    : null
+  setTimeout(() => {
+    const ifr = document.getElementById('wr-picker-iframe')
+    try {
+      if (ifr && ifr.contentWindow) {
+        ifr.contentWindow.postMessage(
+          { type: 'webrobot-picker-multi-config', containerSelector: segSel || null }, '*')
+      }
+    } catch (_) {}
+  }, 600)
 }
 
 // Open the picker in multi-field mode AND immediately prompt the
