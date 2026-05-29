@@ -82,7 +82,7 @@ export default defineConfig({
     // Footer
     footer: {
       message: 'Released under the MIT License.',
-      copyright: 'Copyright © 2025 WebRobot'
+      copyright: 'Copyright © 2026 WebRobot'
     },
     
     // Search

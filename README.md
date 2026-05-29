@@ -206,12 +206,12 @@ This portal is part of the WebRobot ecosystem. For contributions:
 
 ## 📄 License
 
-Copyright © 2025 WebRobot. All rights reserved.
+Copyright © 2026 WebRobot. All rights reserved.
 
 ## 🔗 Links
 
 - **Documentation**: [docs.webrobot.eu](https://docs.webrobot.eu)
-- **API**: [api.webrobot.eu](https://api.webrobot.eu)
+- **API (OpenAPI)**: [api.webrobot.eu/api/openapi.json](https://api.webrobot.eu/api/openapi.json)
 - **Main Website**: [www.webrobot.eu](https://www.webrobot.eu)
 
 ## 📧 Contact
