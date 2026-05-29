@@ -5086,15 +5086,20 @@ function flatSelectSegmentReady(row) {
 
 // Picker-toolbar gating: hide selector tabs (Single / List / Repeating /
 // AI Magic) when the picker was opened from a stage whose primary work
-// is navigation rather than CSS selection — fetch, explore, join AND
-// every visit*/wget*/intelligent* variant of those families. The
-// canonical TRACE_CAPABLE_STAGES set is intentionally smaller (used by
-// the Apply panel to gate where a recorded trace can be saved); this
-// computed is purely cosmetic.
+// is navigation rather than CSS selection.
+//
+// fetch + explore family: navigation-only. Record actions IS the right
+// mode — you click around the page to drive it through the flow, then
+// the trace replays at runtime.
+//
+// Join family is INTENTIONALLY OUT of this set. Per user 2026-05-29
+// feedback: visitJoin/wgetJoin/intelligentJoin pick a LINK selector to
+// follow + per-field selectors on the child page — selector picking,
+// not trace recording. They render with One element + Pick samples +
+// Ask AI tabs (driven by pickerOriginIsJoin) and NO Record actions tab.
 const TOOLBAR_ONLY_RECORD_STAGES = new Set([
   'fetch',
   'explore', 'visitExplore', 'wgetExplore', 'intelligentExplore', 'intelligentWgetExplore',
-  'join',    'visitJoin',    'wgetJoin',    'intelligentJoin',    'intelligentWgetJoin',
 ])
 const pickerOriginIsTraceCapable = computed(() => {
   const idx = pickerTargetStageIdx.value
