@@ -8315,10 +8315,12 @@ if (typeof window !== 'undefined') {
 .step-warn-table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
 .step-warn-table th, .step-warn-table td {
   text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee;
+  color: #1f2937;   /* near-black; was inheriting VitePress muted-grey */
 }
-.step-warn-table th { background: #fafbfc; color: #5a606b; font-weight: 600; }
+.step-warn-table th { background: #fafbfc; color: #374151; font-weight: 600; }
 .step-warn-table .mono {
   font-family: 'Menlo','Monaco','Courier New',monospace; font-size: 0.92em;
+  color: #111827;   /* explicit dark for readability against white bg */
 }
 .step-warn-table .ellipsis {
   max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
