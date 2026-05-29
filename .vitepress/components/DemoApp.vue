@@ -4676,28 +4676,42 @@ const wizFilteredCatalog = computed(() => {
 // matching pipeline flow (source → crawl → extract → transform → sink).
 // Categories not in CATEGORY_ORDER fall back to alphabetical at the end.
 // "Uncategorized" always last.
+// Pipeline-flow order — categories listed here surface in this exact
+// order at the top of the catalog browser. Anything not listed falls
+// to the alphabetical tail; "Uncategorized" always last.
+// Keys MUST match the `category` strings in stage-catalog.json
+// (see live JSON; current set: connector, analytics, io, external-api,
+// crawling, utility, intelligent, use-case, rag, extraction, matching,
+// python — counts as of 2026-05-29).
 const CATEGORY_ORDER = [
-  'source', 'connector', 'external-api',
-  'crawling', 'browsing',
-  'extraction',
-  'transformation', 'python',
-  'analytics', 'ml',
+  'source', 'io', 'connector', 'external-api',
+  'crawling', 'browsing', 'intelligent',
+  'extraction', 'matching',
+  'transformation', 'python', 'utility',
+  'analytics', 'rag', 'ml',
   'sink', 'output',
+  'use-case',
 ]
 const CATEGORY_LABELS = {
   'source':         '📥 Sources',
+  'io':             '📂 I/O',
   'connector':      '🔌 Connectors',
   'external-api':   '🌐 External APIs',
   'crawling':       '🕷 Crawling',
   'browsing':       '🌍 Browsing',
+  'intelligent':    '🪄 Intelligent (LLM)',
   'extraction':     '🎯 Extraction',
+  'matching':       '🔗 Matching',
   'transformation': '🔧 Transformation',
   'python':         '🐍 Python',
+  'utility':        '🔩 Utility',
   'analytics':      '📊 Analytics',
-  'ml':             '🧠 ML',
+  'rag':            '🧠 RAG',
+  'ml':             '🤖 ML',
   'sink':           '💾 Sinks',
   'output':         '📤 Output',
-  'Uncategorized':  '📦 Other',
+  'use-case':       '📦 Use cases',
+  'Uncategorized':  '· Other',
 }
 const wizCatalogByCategory = computed(() => {
   const map = new Map()
