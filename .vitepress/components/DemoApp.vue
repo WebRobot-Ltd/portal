@@ -4095,6 +4095,20 @@ function onPickerMessage(ev) {
         closePicker()
       }
     }
+  } else if (d.type === 'webrobot-pick-multi-field-refine') {
+    // picker.js detected that this click is the SAME logical column
+    // as an existing field but in a different row → it generalised
+    // the existing field's selector (stripped :nth-of-type chains).
+    // Update the matching field in-place; do NOT append a duplicate.
+    if (pickerTargetStageIdx.value != null && typeof d.index === 'number') {
+      const stageIdx = pickerTargetStageIdx.value
+      const fields = wizPipeline.value[stageIdx]?._fields
+      if (Array.isArray(fields) && fields[d.index]) {
+        fields[d.index].selector = d.selector
+        if (d.matches != null) fields[d.index]._matches = d.matches
+        wizPipeline.value = [...wizPipeline.value]
+      }
+    }
   } else if (d.type === 'webrobot-pick-multi-field') {
     // Multi-field picker accumulates clicks. Each click appends a new
     // field row on the target stage.
