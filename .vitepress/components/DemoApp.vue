@@ -4011,6 +4011,15 @@ function isSelectorArg(arg) {
   const n = arg.name.toLowerCase()
   // Pure URL fields (or hybrid url/selector fields) get URL treatment.
   if (n.includes('url') || n === 'href' || n === 'src') return false
+  // `on` is the join-family row anchor: "Column reference ($col) or CSS
+  // selector to join on". Bare `join` / wgetJoin / intelligentJoin use
+  // this name instead of `selector` — so without this branch the 🎯
+  // Pick button wouldn't render on the only stage arg that needs it.
+  if (n === 'on') return true
+  // Defensive: any catalog arg whose description explicitly mentions
+  // "CSS selector" should expose the picker even if its name doesn't
+  // end in `selector` (covers future / plugin-defined args).
+  if (arg.description && /css\s*selector/i.test(arg.description)) return true
   return /selector$/i.test(arg.name) || n === 'selector';
 }
 
