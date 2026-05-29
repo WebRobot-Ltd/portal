@@ -711,7 +711,9 @@ go</pre>
                       <button class="btn btn-secondary btn-xs"
                               :disabled="!flatSelectSegmentReady(row)"
                               :title="flatSelectSegmentReady(row)
-                                ? 'Open the picker in multi-field mode — click each field on the page'
+                                ? (row.stage === 'flatSelect'
+                                    ? 'Open the picker. Click each field INSIDE one row — selectors are computed relative to the segment so they apply to every matched row. All rows highlight in real time.'
+                                    : 'Open the picker. Click each field on the page — each click adds a new row to the fields table. Keep clicking until you have every field you want.')
                                 : 'flatSelect: set the row selector (segmentSelector/selector) below first, then come back here for the fields'"
                               @click="openMultiFieldPicker(idx)">🎯 Pick fields</button>
                       <button class="btn btn-primary btn-xs"
@@ -4979,23 +4981,45 @@ async function openAiSuggestFields(stageIdx) {
 function openMultiFieldPicker(stageIdx) {
   pickerTargetStageIdx.value = stageIdx
   pickerTargetArgName.value  = '__fields_multi__'
-  pickerIntendedMode.value = 'multi-field'
-  pickerMode.value = 'action-record'   // navigate first, user promotes via CTA
+  const row = wizPipeline.value[stageIdx]
+  // Multi-field is the primary mode for "Pick fields" on BOTH:
+  //   - flatSelect (list page): user picks N field selectors RELATIVE to
+  //     the segment container, applied per-row at runtime.
+  //   - extract   (detail page): user picks N field selectors on the
+  //     current page, each becomes a row in row._fields.
+  //
+  // In both cases the user has already navigated to the target page
+  // before clicking "Pick fields" — they shouldn't need to "promote"
+  // via a navigate-first CTA. Land directly in multi-field mode.
+  //
+  // The container-selector config (flatSelect-only) drives selector
+  // computeSelectorRelativeTo + per-row highlight; for extract we
+  // skip that so selectors are absolute / page-rooted.
+  pickerIntendedMode.value = null
+  pickerMode.value = 'multi-field'
   pickerOpen.value = true
   tryResumePausedSession()
-  // If the stage is flatSelect AND has a segment selector set, push it
-  // to picker.js so it constrains clicks to descendants of one segment
-  // and produces RELATIVE selectors for the fields.
-  const row = wizPipeline.value[stageIdx]
-  if (row && row.stage === 'flatSelect' && row.args) {
-    const segSel = row.args.segmentSelector || row.args.selector
-    if (segSel) {
-      setTimeout(() => {
-        const ifr = document.getElementById('wr-picker-iframe')
-        try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-multi-config', containerSelector: segSel }, '*') } catch (_) {}
-      }, 600)
-    }
-  }
+  const segSel = row && row.stage === 'flatSelect' && row.args
+    ? (row.args.segmentSelector || row.args.selector)
+    : null
+  setTimeout(() => {
+    const ifr = document.getElementById('wr-picker-iframe')
+    try {
+      if (ifr && ifr.contentWindow) {
+        // Push the mode FIRST so picker.js knows we're in multi-field
+        // when it processes the container config + the first clicks.
+        ifr.contentWindow.postMessage({ type: 'webrobot-picker-mode', mode: 'multi-field' }, '*')
+        if (segSel) {
+          // flatSelect-only: confine clicks to descendants of one
+          // segment match and produce RELATIVE field selectors.
+          ifr.contentWindow.postMessage({ type: 'webrobot-picker-multi-config', containerSelector: segSel }, '*')
+        } else {
+          // extract: clear any stale container so selectors are absolute.
+          ifr.contentWindow.postMessage({ type: 'webrobot-picker-multi-config', containerSelector: null }, '*')
+        }
+      }
+    } catch (_) {}
+  }, 600)
 }
 
 // Open picker in action-record mode tied to a specific stage row.
