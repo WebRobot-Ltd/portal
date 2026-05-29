@@ -3413,7 +3413,27 @@ async function sendStagedActionsToCamoufox() {
   const ifr = document.getElementById('wr-picker-iframe')
   try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-flush-queue' }, '*') } catch (_) {}
   await new Promise(r => setTimeout(r, 50))
-  const queue = pickerActions.value.slice()
+  let queue = pickerActions.value.slice()
+  if (!queue.length) return
+  // Mode-dependent filter:
+  //  - NORMAL recording (non-captcha):  ship ONLY the human-readable
+  //    trace types (Click / Type / Scroll). These are the ones the
+  //    YAML emitter renders, and they're the canonical "trace" the
+  //    user expects to apply to a fetch / visit stage. Hover events
+  //    (auto-captured on menu/dropdown triggers) and any stray raw
+  //    events (MouseMove etc.) are DROPPED so the replay matches the
+  //    visible YAML preview exactly.
+  //  - CAPTCHA recording (antiBotDetected): ship EVERYTHING. Raw
+  //    mouse trajectory + Hover + keys are exactly what the CMP
+  //    needs to validate the human-mouse fingerprint at replay time.
+  if (!antiBotDetected.value) {
+    const traceTypes = new Set(['Click', 'Type', 'Scroll'])
+    const before = queue.length
+    queue = queue.filter(a => a && a.type && traceTypes.has(a.type))
+    if (before !== queue.length) {
+      console.log(`[picker] non-captcha mode: filtered ${before - queue.length} non-trace event(s) before send`)
+    }
+  }
   if (!queue.length) return
   pickerActions.value = []
   forwardStepToCamoufox(queue)
@@ -4076,14 +4096,22 @@ function onPickerMessage(ev) {
       sampleText: d.sampleText || '',
     }
   } else if (d.type === 'webrobot-step-request') {
-    // Auto-send from picker.js: the user clicked a non-editable target
-    // (link, button, submit) which picker.js treats as the commit
-    // gesture for the staged queue. Forward the batch and clear the
-    // parent's mirror of the queue so the "▶ Send (N)" badge resets
-    // immediately instead of waiting for the next pick-actions ping.
+    // Legacy auto-send path: picker.js used to emit this on every
+    // non-editable click. That auto-send was removed (see picker.js
+    // line ~460). Keep the handler as a defensive no-op-by-default —
+    // some older cached picker.js builds might still emit. Apply the
+    // same trace-only filter as sendStagedActionsToCamoufox so the
+    // user experience matches the manual Send path.
     if (cmfSessionId.value && (d.action || (Array.isArray(d.actions) && d.actions.length))) {
-      pickerActions.value = []
-      forwardStepToCamoufox(d.actions || d.action)
+      let batch = Array.isArray(d.actions) ? d.actions.slice() : [d.action]
+      if (!antiBotDetected.value) {
+        const traceTypes = new Set(['Click', 'Type', 'Scroll'])
+        batch = batch.filter(a => a && a.type && traceTypes.has(a.type))
+      }
+      if (batch.length) {
+        pickerActions.value = []
+        forwardStepToCamoufox(batch)
+      }
     }
   } else if (d.type === 'webrobot-pick-actions') {
     pickerActions.value = Array.isArray(d.actions) ? d.actions : []
