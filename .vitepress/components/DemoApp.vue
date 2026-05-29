@@ -4120,10 +4120,21 @@ function onPickerMessage(ev) {
     }
   } else if (d.type === 'webrobot-pick-multi-field') {
     // Multi-field picker accumulates clicks. Each click appends a new
-    // field row on the target stage.
+    // field row on the target stage — UNLESS the same selector is
+    // already present, in which case we no-op (double-clicking the
+    // same cell, or picker.js auto-generalising to a selector that
+    // happens to match an existing field, must not produce a dupe).
     if (pickerTargetStageIdx.value != null) {
       const stageIdx = pickerTargetStageIdx.value
       const fields = ensureFieldsArray(stageIdx) || []
+      const incomingSel = (d.selector || '').trim()
+      if (incomingSel && fields.some(f => (f.selector || '').trim() === incomingSel)) {
+        wizStatus.value = {
+          kind: 'info',
+          text: 'Selector already in the fields list — duplicate skipped.',
+        }
+        return
+      }
       // Auto-suggest a column name from the sample text if it's short
       // and not numeric — falls back to "field_N".
       const guess = (() => {
