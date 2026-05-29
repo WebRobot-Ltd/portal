@@ -705,13 +705,13 @@ go</pre>
                               :disabled="!flatSelectSegmentReady(row)"
                               :title="flatSelectSegmentReady(row)
                                 ? 'Open the picker in multi-field mode — click each field on the page'
-                                : 'flatSelect: imposta prima il selettore di riga (segmentSelector/selector) qui sotto, poi torna qui per i fields'"
+                                : 'flatSelect: set the row selector (segmentSelector/selector) below first, then come back here for the fields'"
                               @click="openMultiFieldPicker(idx)">🎯 Pick fields</button>
                       <button class="btn btn-primary btn-xs"
                               :disabled="!flatSelectSegmentReady(row)"
                               :title="flatSelectSegmentReady(row)
                                 ? 'Open the picker and describe the fields you want — LLM fills the table'
-                                : 'flatSelect: imposta prima il selettore di riga'"
+                                : 'flatSelect: set the row selector first'"
                               @click="openAiSuggestFields(idx)">🪄 AI suggest fields</button>
                       <button class="btn btn-secondary btn-xs"
                               :disabled="suggestNamesLoading || !(row._fields && row._fields.length)"
@@ -722,7 +722,7 @@ go</pre>
                       </button>
                       <button class="btn btn-ghost btn-xs"
                               :disabled="!flatSelectSegmentReady(row)"
-                              :title="flatSelectSegmentReady(row) ? 'Add an empty field row' : 'flatSelect: imposta prima il selettore di riga'"
+                              :title="flatSelectSegmentReady(row) ? 'Add an empty field row' : 'flatSelect: set the row selector first'"
                               @click="addField(idx)">+ Add empty</button>
                     </div>
                   </div>
@@ -732,10 +732,10 @@ go</pre>
                        that don't resolve at runtime. Surface this loudly. -->
                   <div v-if="row.stage === 'flatSelect' && !flatSelectSegmentReady(row)"
                        class="wizard-fields-warn">
-                    ⚠️ <strong>Prima imposta il selettore di riga</strong>
-                    ({{ flatSelectSegmentArgName(row) }}) qui sotto — i field selectors
-                    di questa tabella saranno relativi ad ogni riga matched. Senza un
-                    segment selector valido, "Pick fields" + "AI suggest" sono disabilitati.
+                    ⚠️ <strong>Set the row selector first</strong>
+                    ({{ flatSelectSegmentArgName(row) }}) below — the field selectors
+                    in this table will be relative to each matched row. Without a
+                    valid segment selector, "Pick fields" and "AI suggest" are disabled.
                   </div>
                   <table v-if="(row._fields || []).length" class="wizard-fields-table">
                     <thead>
@@ -1016,19 +1016,36 @@ go</pre>
         <div class="picker-modal-header">
           <strong>🎯 Page picker</strong>
           <div class="picker-mode-tabs">
-            <!-- When the picker was opened from a fetch / visit / explore
-                 (trace-capable) stage, the only useful mode is action
-                 recording — selectors live on extract/flatSelect/etc.
-                 Hide the other tabs there to reduce visual noise. -->
-            <template v-if="!pickerOriginIsTraceCapable">
-              <button :class="['picker-tab', pickerMode === 'selector-single' && 'active']" @click="setPickerMode('selector-single')">🎯 Single</button>
-              <button :class="['picker-tab', pickerMode === 'selector-list'   && 'active']" @click="setPickerMode('selector-list')">📋 List</button>
-              <button :class="['picker-tab', pickerMode === 'multi-sample'    && 'active']"
-                      title="Click 2+ examples of the repeating link/card you want the crawler to follow. The picker generalises a CSS selector that matches all of them — meant for explore-stage args."
-                      @click="setPickerMode('multi-sample')">📍 Repeating</button>
-            </template>
-            <button :class="['picker-tab', pickerMode === 'action-record'   && 'active']" @click="setPickerMode('action-record')">⏺ Record actions</button>
-            <button v-if="!pickerOriginIsTraceCapable" :class="['picker-tab', pickerMode === 'ai-magic' && 'active']" @click="setPickerMode('ai-magic')">🪄 AI Magic</button>
+            <!-- Tabs filtered per-stage to match the canonical use:
+                   extract / iextract       → 🎯 One element (per-field selectors)
+                   flatSelect               → 📋 List like this (segment row, 1 click)
+                                              (per-field picking via the "Pick fields"
+                                               button in the stage row)
+                   explore family           → 📍 Pick samples (links to follow, 2+ clicks)
+                   join family              → 🎯 One element (per-field on child page) +
+                                              📍 Pick samples (link to follow)
+                   fetch / visit (trace)    → ⏺ Record actions
+                   All non-trace stages also get 🪄 Ask AI as a fallback. -->
+            <button v-if="pickerOriginIsExtract || pickerOriginIsJoin"
+                    :class="['picker-tab', pickerMode === 'selector-single' && 'active']"
+                    title="Click ONE element on the page (a title, a price, a link). The picker writes a CSS selector pointing at THAT element. Use for extract / iextract per-field selectors, and for the per-field selectors on the child page of a Join stage."
+                    @click="setPickerMode('selector-single')">🎯 One element</button>
+            <button v-if="pickerOriginIsFlatSelect"
+                    :class="['picker-tab', pickerMode === 'selector-list' && 'active']"
+                    title="flatSelect segment selector: click ONE row of the repeating list (e.g. one product card). The picker writes a selector that matches all similar rows via the class/tag pattern they share. 1 click — fastest path when rows share a clean class."
+                    @click="setPickerMode('selector-list')">📋 List like this</button>
+            <button v-if="pickerOriginIsExplore || pickerOriginIsJoin"
+                    :class="['picker-tab', pickerMode === 'multi-sample' && 'active']"
+                    title="Click 2+ examples of the repeating link/card you want the crawler to follow. The picker computes the broadest CSS selector that matches ALL of them via path-piece intersection. Use for explore-stage link selector and join-stage link selector — clicks generalise across irregular markup."
+                    @click="setPickerMode('multi-sample')">📍 Pick samples</button>
+            <button v-if="pickerOriginIsTraceCapable"
+                    :class="['picker-tab', pickerMode === 'action-record' && 'active']"
+                    title="Browse the site as a user would. Every click, form input and navigation is recorded as a replayable trace — used for search-form flows, filtered pages, login walls. Camoufox strategy required."
+                    @click="setPickerMode('action-record')">⏺ Record actions</button>
+            <button v-if="!pickerOriginIsTraceCapable"
+                    :class="['picker-tab', pickerMode === 'ai-magic' && 'active']"
+                    title="Describe what you want in plain language — the LLM finds the right selector or builds the field set for you. Works for extract, iextract, flatSelect, explore, and join families."
+                    @click="setPickerMode('ai-magic')">🪄 Ask AI</button>
           </div>
           <div class="picker-strategy-tabs" title="wget = fast HTTP (static sites). Camoufox = real browser (JS-heavy / Cloudflare-protected). Required for Record actions.">
             <button :class="['picker-tab-small', pickerStrategy === 'wget' && 'active']"
@@ -4235,6 +4252,9 @@ async function runAutoSuggestFields() {
     const row = wizPipeline.value[pickerTargetStageIdx.value]
     const body = {
       url: pickerLoadedUrl.value,
+      // Camoufox-rendered HTML — server prefers this over its bare wget
+      // which 403s on anti-bot sites (Bazaraki, eBay, Amazon).
+      html: pickerHtml.value || null,
       intent,
       stage_name: row && row.stage,
     }
@@ -4316,10 +4336,15 @@ async function runAiMagic() {
       const row = pickerTargetStageIdx.value != null ? wizPipeline.value[pickerTargetStageIdx.value] : null
       let segSel = row && row.args && (row.args.segmentSelector || row.args.selector)
       let segMatches = null
+      // Send the Camoufox-rendered HTML alongside the URL — server prefers
+      // it and skips its bare-wget fetch which 403s on anti-bot sites
+      // (Bazaraki, eBay, Amazon). pickerHtml.value is the live snapshot
+      // returned by /cmf/open or /cmf/step, exactly what the user sees.
+      const liveHtml = pickerHtml.value || null
       if (!segSel || !String(segSel).trim()) {
         const r1 = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-segment`, {
           method: 'POST',
-          body: JSON.stringify({ url: pickerLoadedUrl.value, segmentation_prompt: intent }),
+          body: JSON.stringify({ url: pickerLoadedUrl.value, html: liveHtml, segmentation_prompt: intent }),
         })
         const j1 = await r1.json()
         if (!r1.ok || j1.error || !j1.segment_selector) {
@@ -4330,7 +4355,7 @@ async function runAiMagic() {
       }
       const r2 = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-fields`, {
         method: 'POST',
-        body: JSON.stringify({ url: pickerLoadedUrl.value, intent, container_selector: segSel, stage_name: 'flatSelect' }),
+        body: JSON.stringify({ url: pickerLoadedUrl.value, html: liveHtml, intent, container_selector: segSel, stage_name: 'flatSelect' }),
       })
       const j2 = await r2.json()
       if (!r2.ok || j2.error) throw new Error(j2.error || 'infer-fields failed')
@@ -4856,9 +4881,11 @@ async function openAiSuggestFields(stageIdx) {
       try {
         const prompt = (aiIntent.value || '').trim() ||
           'each repeated item / card / row in the main listing on the page'
+        // Send Camoufox-rendered HTML when available (anti-bot sites 403
+        // the server-side bare wget — see /wizard/infer-segment endpoint).
         const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-segment`, {
           method: 'POST',
-          body: JSON.stringify({ url, segmentation_prompt: prompt }),
+          body: JSON.stringify({ url, html: pickerHtml.value || null, segmentation_prompt: prompt }),
         })
         const j = await r.json()
         if (!r.ok || j.error || !j.segment_selector) {
@@ -4974,6 +5001,37 @@ const pickerOriginIsTraceCapable = computed(() => {
   const idx = pickerTargetStageIdx.value
   if (idx == null || !wizPipeline.value[idx]) return false
   return TOOLBAR_ONLY_RECORD_STAGES.has(wizPipeline.value[idx].stage)
+})
+// Stage name of the picker origin, or null. Drives per-stage tab
+// visibility — different stage families need different selector modes.
+const pickerOriginStage = computed(() => {
+  const idx = pickerTargetStageIdx.value
+  if (idx == null || !wizPipeline.value[idx]) return null
+  return wizPipeline.value[idx].stage || null
+})
+// flatSelect: 2-step flow (segment selector first, then per-field
+// selectors). The user picks the row via "Repeating" sampling, then
+// uses the dedicated "Pick fields" / "AI suggest" buttons. Single +
+// Record actions are NOT useful here.
+const pickerOriginIsFlatSelect = computed(() => pickerOriginStage.value === 'flatSelect')
+// extract / iextract: per-field selectors only. One element is the
+// right mode; List/Repeating are for segment-style stages.
+const pickerOriginIsExtract = computed(() => {
+  const s = pickerOriginStage.value
+  return s === 'extract' || s === 'iextract'
+})
+// explore family: needs to pick the repeating link/card to follow.
+// List or Repeating make sense, Record actions does not.
+const pickerOriginIsExplore = computed(() => {
+  const s = pickerOriginStage.value
+  return s === 'explore' || s === 'wgetExplore' || s === 'visitExplore' || s === 'intelligentExplore'
+})
+// join family (wgetJoin / visitJoin): hybrid — first picks a link
+// selector to follow (Pick samples), then on the child page extracts
+// per-field (One element). Enable both modes.
+const pickerOriginIsJoin = computed(() => {
+  const s = pickerOriginStage.value
+  return s === 'wgetJoin' || s === 'visitJoin' || s === 'intelligentJoin'
 })
 const tracableStages = computed(() => {
   return wizPipeline.value
