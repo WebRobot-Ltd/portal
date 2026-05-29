@@ -1025,33 +1025,35 @@ go</pre>
         <div class="picker-modal-header">
           <strong>🎯 Page picker</strong>
           <div class="picker-mode-tabs">
-            <!-- Tabs filtered per-stage to match the canonical use:
-                   extract / iextract       → 🎯 One element (per-field selectors)
-                   flatSelect               → 📋 List like this (segment row, 1 click)
-                                              (per-field picking via the "Pick fields"
-                                               button in the stage row)
-                   explore family           → 📍 Pick samples (links to follow, 2+ clicks)
-                   join family              → 🎯 One element (per-field on child page) +
-                                              📍 Pick samples (link to follow)
-                   fetch / visit (trace)    → ⏺ Record actions
-                   All non-trace stages also get 🪄 Ask AI as a fallback. -->
-            <button v-if="pickerOriginIsExtract || pickerOriginIsJoin"
-                    :class="['picker-tab', pickerMode === 'selector-single' && 'active']"
-                    title="Click ONE element on the page (a title, a price, a link). The picker writes a CSS selector pointing at THAT element. Use for extract / iextract per-field selectors, and for the per-field selectors on the child page of a Join stage."
-                    @click="setPickerMode('selector-single')">🎯 One element</button>
-            <button v-if="pickerOriginIsFlatSelect"
+            <!-- Tabs filtered per-stage so the toolbar shows only the
+                 modes that make sense for the origin stage:
+                   extract           → 🪄 Ask AI (+ "🎯 Pick fields"
+                                       button on row → multi-field)
+                   iextract          → 🪄 Ask AI (prompt-only stage —
+                                       no CSS selectors to click)
+                   flatSelect        → 📋 List · 📍 Pick samples · 🪄 Ask AI
+                                       (+ "🎯 Pick fields" on row)
+                   explore family    → 📋 List · 📍 Pick samples · ⏺ Record · 🪄 Ask AI
+                   join family       → 📋 List · 📍 Pick samples · ⏺ Record · 🪄 Ask AI
+                                       (same as explore — link selector
+                                        primary, optional trace actions)
+                   fetch             → ⏺ Record actions (pure navigation)
+                 "🎯 One element" was removed from the toolbar; it lives
+                 on as the internal selector-single mode when opened
+                 from a per-arg 🎯 icon next to a single arg input. -->
+            <button v-if="pickerOriginIsFlatSelect || pickerOriginIsExplore || pickerOriginIsJoin"
                     :class="['picker-tab', pickerMode === 'selector-list' && 'active']"
-                    title="flatSelect segment selector: click ONE row of the repeating list (e.g. one product card). The picker writes a selector that matches all similar rows via the class/tag pattern they share. 1 click — fastest path when rows share a clean class."
+                    title="Click ONE row / item / link. The picker writes a selector matching all similar elements via the class/tag pattern they share. Quick (1 click) — fall back to Pick samples if too narrow / too broad."
                     @click="setPickerMode('selector-list')">📋 List like this</button>
-            <button v-if="pickerOriginIsExplore || pickerOriginIsJoin"
+            <button v-if="pickerOriginIsFlatSelect || pickerOriginIsExplore || pickerOriginIsJoin"
                     :class="['picker-tab', pickerMode === 'multi-sample' && 'active']"
-                    title="Click 2+ examples of the repeating link/card you want the crawler to follow. The picker computes the broadest CSS selector that matches ALL of them via path-piece intersection. Use for explore-stage link selector and join-stage link selector — clicks generalise across irregular markup."
+                    title="Click 2+ examples of the repeating thing you want (rows, links, items). The picker computes the broadest CSS selector that matches ALL of them via path-piece intersection. Best when 1-click List is too narrow / too broad / irregular markup."
                     @click="setPickerMode('multi-sample')">📍 Pick samples</button>
-            <button v-if="pickerOriginIsTraceCapable"
+            <button v-if="pickerOriginIsFetch || pickerOriginIsExplore || pickerOriginIsJoin"
                     :class="['picker-tab', pickerMode === 'action-record' && 'active']"
-                    title="Browse the site as a user would. Every click, form input and navigation is recorded as a replayable trace — used for search-form flows, filtered pages, login walls. Camoufox strategy required."
+                    title="Browse the site as a user would. Every click, form input and navigation is recorded as a replayable trace — useful when the page needs filtering / pagination / login before extraction. Camoufox strategy required."
                     @click="setPickerMode('action-record')">⏺ Record actions</button>
-            <button v-if="!pickerOriginIsTraceCapable"
+            <button v-if="!pickerOriginIsFetch"
                     :class="['picker-tab', pickerMode === 'ai-magic' && 'active']"
                     title="Describe what you want in plain language — the LLM finds the right selector or builds the field set for you. Works for extract, iextract, flatSelect, explore, and join families."
                     @click="setPickerMode('ai-magic')">🪄 Ask AI</button>
@@ -3274,18 +3276,16 @@ function tryResumePausedSession() {
 function openPicker(stageIdx, argName, mode) {
   pickerTargetStageIdx.value = stageIdx != null ? stageIdx : null
   pickerTargetArgName.value  = argName || null
-  // Two-phase open: remember the requested mode but ENTER as
-  // action-record so the user can navigate freely first. The
-  // "📌 Start picking" CTA in the action-record panel promotes
-  // pickerMode to pickerIntendedMode on demand.
+  // Land DIRECTLY in the requested mode. The previous 2-phase
+  // "navigate-first then promote via CTA" pattern was confusing —
+  // when the user clicks the 🎯 icon on an arg, they intend to pick
+  // a selector NOW, not navigate first. If they need to drive the
+  // page they can use the URL bar at the top of the picker modal.
+  // openMultiFieldPicker (the "🎯 Pick fields" button) follows the
+  // same convention.
   const requested = mode || 'selector-single'
-  if (requested === 'action-record' || requested === 'ai-magic') {
-    pickerIntendedMode.value = null
-    pickerMode.value = requested
-  } else {
-    pickerIntendedMode.value = requested
-    pickerMode.value = 'action-record'
-  }
+  pickerIntendedMode.value = null
+  pickerMode.value = requested
   pickerSelected.value = null
   pickerActions.value  = []
   pickerOpen.value = true
@@ -5088,19 +5088,17 @@ function flatSelectSegmentReady(row) {
 // AI Magic) when the picker was opened from a stage whose primary work
 // is navigation rather than CSS selection.
 //
-// fetch + explore family: navigation-only. Record actions IS the right
-// mode — you click around the page to drive it through the flow, then
-// the trace replays at runtime.
-//
-// Join family is INTENTIONALLY OUT of this set. Per user 2026-05-29
-// feedback: visitJoin/wgetJoin/intelligentJoin pick a LINK selector to
-// follow + per-field selectors on the child page — selector picking,
-// not trace recording. They render with One element + Pick samples +
-// Ask AI tabs (driven by pickerOriginIsJoin) and NO Record actions tab.
+// Only `fetch` remains here — pure navigation, no selectors. explore
+// + join families ALSO need selector tabs (List / Pick samples for
+// the link/segment selector) PLUS Record actions (optional trace to
+// drive the page through filters / pagination before extracting), so
+// they're handled by per-stage computeds below, NOT by this set.
 const TOOLBAR_ONLY_RECORD_STAGES = new Set([
   'fetch',
-  'explore', 'visitExplore', 'wgetExplore', 'intelligentExplore', 'intelligentWgetExplore',
 ])
+// fetch-only: pure navigation stage. Record actions is the only useful
+// mode in the picker; selector tabs would be dead UI.
+const pickerOriginIsFetch = computed(() => pickerOriginStage.value === 'fetch')
 const pickerOriginIsTraceCapable = computed(() => {
   const idx = pickerTargetStageIdx.value
   if (idx == null || !wizPipeline.value[idx]) return false
@@ -5118,12 +5116,18 @@ const pickerOriginStage = computed(() => {
 // uses the dedicated "Pick fields" / "AI suggest" buttons. Single +
 // Record actions are NOT useful here.
 const pickerOriginIsFlatSelect = computed(() => pickerOriginStage.value === 'flatSelect')
-// extract / iextract: per-field selectors only. One element is the
-// right mode; List/Repeating are for segment-style stages.
-const pickerOriginIsExtract = computed(() => {
-  const s = pickerOriginStage.value
-  return s === 'extract' || s === 'iextract'
-})
+// extract: per-field selectors. Bulk picking via the "🎯 Pick fields"
+// button on the stage row (multi-field mode); the picker toolbar only
+// surfaces "🪄 Ask AI" as a tab (the selector-single mode used for
+// per-arg fine-tuning is reachable via the small 🎯 icon next to a
+// single arg input, programmatically — not as a tab choice).
+const pickerOriginIsExtract = computed(() => pickerOriginStage.value === 'extract')
+// iextract: natural-language prompt only — the stage takes a `prefix`
+// + a free-text intent. No CSS selectors are clicked here, the picker
+// only exposes "🪄 Ask AI" so the LLM can help draft / refine the
+// prompt. Kept separate from extract because their UX is different
+// even though they look similar in the catalog.
+const pickerOriginIsIextract = computed(() => pickerOriginStage.value === 'iextract')
 // explore family: needs to pick the repeating link/card to follow.
 // List or Repeating make sense, Record actions does not.
 const pickerOriginIsExplore = computed(() => {
