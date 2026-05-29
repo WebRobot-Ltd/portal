@@ -4255,6 +4255,30 @@ function onPickerMessage(ev) {
       ? 'selector-single'
       : (pickerMode.value || 'selector-single')
     try { ev.source && ev.source.postMessage({ type: 'webrobot-picker-mode', mode: ifrMode }, '*') } catch (_) {}
+    // CRITICAL: re-send the container (segment) selector on EVERY iframe
+    // (re)load. The one-shot setTimeout in openMultiFieldPicker /
+    // openFieldPicker fires once; if the iframe reloads afterwards (e.g.
+    // a /cmf/step navigation that replaces the srcdoc, or simply slow
+    // first paint that lands after the timeout), the fresh picker.js
+    // instance has multiContainerSelector=null and every field pick
+    // falls back to an ABSOLUTE selector (ul.srp-results > li…:nth-of-type
+    // > …). Re-deriving + re-posting the config here makes the row
+    // container sticky across reloads so field selectors stay relative.
+    if (pickerTargetStageIdx.value != null) {
+      const cfgRow = wizPipeline.value[pickerTargetStageIdx.value]
+      const isFieldCtx = ifrMode === 'multi-field'
+        || pickerIntendedMode.value === 'multi-field'
+        || pickerIsFieldSelection.value
+      if (isFieldCtx) {
+        const cfgSeg = cfgRow && cfgRow.stage === 'flatSelect' && cfgRow.args
+          ? (cfgRow.args.segmentSelector || cfgRow.args.selector)
+          : null
+        try {
+          ev.source && ev.source.postMessage(
+            { type: 'webrobot-picker-multi-config', containerSelector: cfgSeg || null }, '*')
+        } catch (_) {}
+      }
+    }
     // If we have a pending block from a previous /cmf/step response,
     // re-send it now that the picker has remounted (iframe reload
     // resets blockInfo inside picker.js to null).
