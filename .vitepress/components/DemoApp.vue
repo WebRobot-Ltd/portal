@@ -5128,18 +5128,31 @@ const pickerOriginIsExtract = computed(() => pickerOriginStage.value === 'extrac
 // prompt. Kept separate from extract because their UX is different
 // even though they look similar in the catalog.
 const pickerOriginIsIextract = computed(() => pickerOriginStage.value === 'iextract')
-// explore family: needs to pick the repeating link/card to follow.
-// List or Repeating make sense, Record actions does not.
+// explore family: every variant picks a repeating link/card selector
+// to follow. Tabs: List + Pick samples + optional Record actions.
+// Variants are aliases / strategy-specific implementations — same
+// picker UX for all of them.
 const pickerOriginIsExplore = computed(() => {
   const s = pickerOriginStage.value
-  return s === 'explore' || s === 'wgetExplore' || s === 'visitExplore' || s === 'intelligentExplore'
+  return s === 'explore'
+      || s === 'wgetExplore'
+      || s === 'visitExplore'
+      || s === 'intelligentExplore'
+      || s === 'intelligentWgetExplore'
 })
-// join family (wgetJoin / visitJoin): hybrid — first picks a link
-// selector to follow (Pick samples), then on the child page extracts
-// per-field (One element). Enable both modes.
+// join family: same shape as explore — pick a link selector to
+// follow + (optionally) record a trace to drive the page before
+// extracting. Variants ('join' is the generic base, 'wgetJoin' /
+// 'visitJoin' bind a fetch strategy, 'intelligentJoin' /
+// 'intelligentWgetJoin' add LLM nav inference). Same picker UX for
+// all of them — List + Pick samples + Record + Ask AI.
 const pickerOriginIsJoin = computed(() => {
   const s = pickerOriginStage.value
-  return s === 'wgetJoin' || s === 'visitJoin' || s === 'intelligentJoin'
+  return s === 'join'
+      || s === 'wgetJoin'
+      || s === 'visitJoin'
+      || s === 'intelligentJoin'
+      || s === 'intelligentWgetJoin'
 })
 const tracableStages = computed(() => {
   return wizPipeline.value
