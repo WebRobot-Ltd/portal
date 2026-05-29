@@ -1367,10 +1367,13 @@ go</pre>
             <div class="picker-action-buttons">
               <button v-if="pickerStrategy === 'cmf'"
                       class="btn btn-primary btn-sm"
+                      :class="{ 'btn-antibot-pulse': antiBotDetected }"
                       :disabled="pickerLoading || pickerActions.length === 0"
                       @click="sendStagedActionsToCamoufox"
-                      title="Replay the whole queue on the live Camoufox tab, then refresh the iframe">
-                ▶ Send to Camoufox ({{ pickerActions.length }})
+                      :title="antiBotDetected
+                        ? 'Anti-bot challenge detected — Send to replay full mouse trace (clicks + mousemove + keys) on Camoufox'
+                        : 'Replay the whole queue on the live Camoufox tab, then refresh the iframe'">
+                <span v-if="antiBotDetected">🛡 </span>▶ Send to Camoufox ({{ pickerActions.length }})
               </button>
               <button class="btn btn-secondary btn-sm" @click="stopActionRecording">Stop &amp; collect</button>
             </div>
@@ -3470,14 +3473,51 @@ function relTime(ts) {
 // if cmfBlock is null). picker.js shows/hides its red banner accordingly
 // and suspends/restores click interception so the user can interact
 // natively with the captcha widget.
+//
+// On block: ALSO force the picker into action-record mode + flip on
+// anti-bot capture so every mouse/key/wheel event the user produces
+// while solving the captcha is buffered for trace replay. The CMP
+// validates mouse trajectory + timing, so click-only replay fails —
+// we need the full event stream. picker.js auto-detects captcha via
+// its own 2s heuristic too, but the server-side cmfBlock signal is
+// authoritative + earlier (it fires the instant Camoufox sees the
+// challenge, before the DOM heuristic finds its markers).
 function pushBlockStateToIframe() {
   const ifr = document.getElementById('wr-picker-iframe')
   if (!ifr || !ifr.contentWindow) return
   try {
     if (cmfBlock.value) {
       ifr.contentWindow.postMessage({ type: 'webrobot-picker-block', block: cmfBlock.value }, '*')
+      // Force action-record so antiBotActive() === antiBotMode && mode==='action-record'
+      // both gate-conditions are satisfied; otherwise the listeners are no-op.
+      if (pickerMode.value !== 'action-record') {
+        pickerMode.value = 'action-record'
+        try {
+          ifr.contentWindow.postMessage(
+            { type: 'webrobot-picker-mode', mode: 'action-record' }, '*')
+        } catch (_) {}
+      }
+      try {
+        ifr.contentWindow.postMessage({
+          type: 'webrobot-picker-anti-bot-mode',
+          enabled: true,
+          reason: (cmfBlock.value && cmfBlock.value.kind) || 'server-cmfBlock',
+        }, '*')
+      } catch (_) {}
+      // Mirror the same UI side-effects as a client-side detection so
+      // the operator sees the warning banner + pipeline tagging
+      // consistently regardless of which side detected first.
+      onAntiBotDetected((cmfBlock.value && cmfBlock.value.kind) || 'server-detected')
     } else {
       ifr.contentWindow.postMessage({ type: 'webrobot-picker-block-clear' }, '*')
+      try {
+        ifr.contentWindow.postMessage({
+          type: 'webrobot-picker-anti-bot-mode',
+          enabled: false,
+        }, '*')
+      } catch (_) {}
+      // Don't auto-clear antiBotDetected — operator-only decision
+      // (mirrors the original onAntiBotDetected comment "No auto-dismiss").
     }
   } catch (_) {}
 }
@@ -8122,6 +8162,29 @@ if (typeof window !== 'undefined') {
   max-height: none;
   overflow-y: visible;
   min-height: 220px;
+}
+
+/* Visual emphasis on "▶ Send to Camoufox" when an anti-bot challenge is
+ * active. The CMP (DataDome / Cloudflare / etc.) validates mouse trace
+ * timing — the user must finish gesturing inside the iframe then press
+ * Send so we ship the full mousemove/down/up/key buffer in ONE call.
+ * Pulse draws the eye without being obnoxious; box-shadow ring keeps it
+ * legible against any modal background. */
+@keyframes wr-antibot-pulse {
+  0%   { box-shadow: 0 0 0 0  rgba(220, 38, 38, 0.55); }
+  60%  { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0); }
+  100% { box-shadow: 0 0 0 0  rgba(220, 38, 38, 0); }
+}
+.btn.btn-antibot-pulse {
+  animation: wr-antibot-pulse 1.6s cubic-bezier(0.66, 0, 0, 1) infinite;
+  background: linear-gradient(135deg, #dc2626, #b91c1c) !important;
+  border-color: #b91c1c !important;
+  color: #fff !important;
+  font-weight: 700;
+}
+.btn.btn-antibot-pulse:disabled {
+  animation: none;
+  opacity: 0.65;
 }
 .picker-result-row {
   display: flex;
