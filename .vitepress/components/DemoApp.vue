@@ -4985,8 +4985,22 @@ function applyCommittedTrace() {
   // Only overwrite the stage trace when we actually have new actions to
   // commit — opening the picker just to retarget the URL must not blow
   // away an existing trace the user spent time building earlier.
+  //
+  // Filter same as the /cmf/step send: in non-captcha mode keep only
+  // Click / Type / Scroll (the YAML emitter set). In captcha mode keep
+  // everything (raw mouse + keys + Hover all needed for HITL replay
+  // against the CMP fingerprint). Defensive — the send-time filter in
+  // sendStagedActionsToCamoufox already prevents non-trace events from
+  // landing in committedActions in non-captcha mode, but if the user
+  // mixed a captcha-era session with a normal one, we still strip the
+  // leftover raw events here so the saved row._trace stays clean.
   if (committedActions.value.length) {
-    row._trace = committedActions.value.slice()
+    if (antiBotDetected.value) {
+      row._trace = committedActions.value.slice()
+    } else {
+      const traceTypes = new Set(['Click', 'Type', 'Scroll'])
+      row._trace = committedActions.value.filter(a => a && a.type && traceTypes.has(a.type))
+    }
   }
   const spec = findStageSpec(row.stage)
   const firstArg = (spec && spec.arg_schema || [])[0]
