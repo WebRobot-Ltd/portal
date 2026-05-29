@@ -4722,10 +4722,50 @@ const CATEGORY_LABELS = {
   'use-case':       '📦 Use cases',
   'Uncategorized':  '· Other',
 }
+// Infer a category bucket from stage_name / plugin_id when the catalog
+// API doesn't carry one. The Strapi etl-stage-specs content-type was
+// historically populated without the `category` field, so the live API
+// returns category=null for ~all stages. Rather than wait for a Strapi
+// content-model migration we classify client-side via the stage's
+// canonical name + the plugin it ships from. Keep keys in sync with
+// CATEGORY_ORDER above. Returns 'Uncategorized' if nothing matches.
+function inferStageCategory(s) {
+  if (!s) return 'Uncategorized'
+  if (s.category && String(s.category).trim()) return String(s.category).trim()
+  const name = (s.stage_name || '').toLowerCase()
+  const plug = (s.plugin_id || '').toLowerCase()
+  // Plugin-id hints win first — plugins are usually mono-category.
+  if (plug.includes('rag')) return 'rag'
+  if (plug.includes('sentiment') || plug.includes('price-comparison')
+      || plug.includes('real-estate') || plug.includes('lead'))     return 'use-case'
+  if (plug.includes('python'))                                       return 'python'
+  // Stage-name suffix / prefix hints.
+  if (/^load_|^read_|^fetch_csv$|^from_/.test(name))                 return 'io'
+  if (/^save_|^write_|^to_/.test(name))                              return 'io'
+  if (name.includes('fetch') || name.includes('visit')
+      || name.includes('wget') || name.includes('explore')
+      || name.includes('crawl'))                                      return 'crawling'
+  if (name.includes('intelligent') || name.includes('aimagic')
+      || name.includes('aiSuggest') || name.endsWith('_ai'))         return 'intelligent'
+  if (name.includes('extract') || name === 'flatselect'
+      || name === 'iextract')                                         return 'extraction'
+  if (name.includes('join') || name.includes('match'))                return 'matching'
+  if (name.includes('sentiment') || name.includes('aggregate'))       return 'analytics'
+  if (name.includes('rag') || name.includes('embed')
+      || name.includes('vector'))                                     return 'rag'
+  if (name.includes('python') || name.includes('udf'))                return 'python'
+  if (name.includes('api') || name.endsWith('api')
+      || name.startsWith('macro'))                                    return 'external-api'
+  if (name.includes('filter') || name.includes('sort')
+      || name.includes('limit') || name.includes('dedupe'))           return 'utility'
+  if (name.includes('connector') || /^mysql|^postgres|^mongo|^kafka|^elastic|^cassandra/.test(name))
+                                                                       return 'connector'
+  return 'Uncategorized'
+}
 const wizCatalogByCategory = computed(() => {
   const map = new Map()
   for (const s of wizFilteredCatalog.value) {
-    const cat = (s.category || 'Uncategorized').trim() || 'Uncategorized'
+    const cat = inferStageCategory(s)
     if (!map.has(cat)) map.set(cat, [])
     map.get(cat).push(s)
   }
