@@ -1449,6 +1449,47 @@ go</pre>
       </div>
     </div>
 
+    <!-- Step warnings modal — non-blocking notice when /cmf/step returned
+         200 but the backend skipped 1+ actions (e.g. Hover on a not-stable
+         element under a captcha overlay). The page state stays mounted;
+         the modal lets the operator see what was dropped + decide to
+         re-send / try a different gesture. Stacks on top of the picker. -->
+    <div v-if="stepWarningsOpen" class="picker-modal-backdrop step-warn-backdrop"
+         @click.self="stepWarningsOpen = false" style="z-index: 2100;">
+      <div class="picker-modal step-warn-modal">
+        <div class="picker-modal-header">
+          <strong>⚠️ Some actions were skipped</strong>
+        </div>
+        <div class="step-warn-body">
+          <p class="step-warn-intro">
+            The Camoufox replay ran but {{ stepWarnings.length }}
+            action{{ stepWarnings.length === 1 ? '' : 's' }} could not be
+            executed (most often: the target element was covered by a
+            captcha overlay or animating). The rest of the batch ran and
+            the page is on the post-step state — you can keep recording.
+          </p>
+          <table class="step-warn-table">
+            <thead>
+              <tr>
+                <th>#</th><th>type</th><th>selector</th><th>reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(w, idx) in stepWarnings" :key="idx">
+                <td class="mono">{{ w.index }}</td>
+                <td class="mono">{{ w.type }}</td>
+                <td class="mono ellipsis" :title="w.selector">{{ (w.selector || '—').slice(0, 60) }}</td>
+                <td class="step-warn-err" :title="w.error">{{ (w.error || '').slice(0, 120) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="step-warn-footer">
+          <button class="btn btn-primary btn-sm" @click="stepWarningsOpen = false">Got it</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Section 3: Private Demo (Authenticated) -->
     <div class="demo-section">
       <div class="section-header">
@@ -1860,6 +1901,13 @@ const hitlTimeoutMin = ref('5')   // minutes; clamped to [1, 30]
 //      on every run — needs operator presence)
 const antiBotDetected = ref(false)
 const antiBotReason   = ref(null)
+
+// Per-step warnings — backend skipped 1+ actions in the batch (transient
+// errors, e.g. Hover on not-stable element). The step itself returned 200;
+// these are surfaced as a non-blocking modal so the user knows what was
+// dropped but the iframe view / committed-actions log stays intact.
+const stepWarnings     = ref([])     // [{ index, type, selector, error }]
+const stepWarningsOpen = ref(false)
 const hetznerKey    = ref('')
 const vmPreset      = ref('etl')        // ETL context default — 2 × executor
 const vmCount       = ref(2)
@@ -3533,6 +3581,18 @@ function pushBlockStateToIframe() {
 function onAntiBotDetected(reason) {
   antiBotDetected.value = true
   antiBotReason.value   = reason
+  // Force action-record so the UI tab + iframe listeners are aligned.
+  // picker.js does the same flip locally (enableAntiBotMode sets
+  // mode='action-record' inside the iframe) but the parent's
+  // pickerMode also has to switch so the staged-actions panel
+  // (which is v-if'd on pickerMode === 'action-record') becomes
+  // visible and the YAML emitter knows we're recording.
+  if (pickerMode.value !== 'action-record') {
+    pickerMode.value = 'action-record'
+    const ifr = document.getElementById('wr-picker-iframe')
+    try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage(
+      { type: 'webrobot-picker-mode', mode: 'action-record' }, '*') } catch (_) {}
+  }
   // Tag the target stage so the YAML emitter writes a meta field
   // forcing hitlAwait at run time.
   if (pickerTargetStageIdx.value != null) {
@@ -3586,7 +3646,14 @@ async function forwardStepToCamoufox(actionOrBatch) {
   // Guard: do not push new actions while the session is blocked by a
   // captcha — they would either 409 again, or worse race the user's
   // resolve gesture. The Resume button is the only path forward.
-  if (cmfBlock.value) {
+  //
+  // Exception: anti-bot mode is active. In that flow the user's mouse
+  // gesture IS the way to clear the challenge — we WANT to ship the
+  // staged raw-event trace (MouseMove/Down/Up/Wheel/Key) to Camoufox
+  // so it replays the human signature against the CMP. Skipping the
+  // send here would defeat the whole capture loop. Backend sniffs
+  // block after each action and stops the batch if still challenged.
+  if (cmfBlock.value && !antiBotDetected.value) {
     wizStatus.value = { kind: 'warn',
       text: '⚠️ Sessione bloccata da captcha — risolvi nel mirror prima di inviare nuove azioni.' }
     return
@@ -3643,6 +3710,15 @@ async function forwardStepToCamoufox(actionOrBatch) {
       return
     }
     if (!r.ok || j.error) throw new Error(j.error || 'cmf/step failed')
+    // Per-action warnings — backend skipped some actions (e.g. Hover on a
+    // not-stable element, MouseMove during a viewport repaint) so the
+    // batch could continue. Surface as non-blocking modal — DO NOT throw
+    // (the step DID succeed for the rest of the actions; the previous
+    // iframe view stays mounted with the post-step HTML).
+    if (Array.isArray(j.warnings) && j.warnings.length) {
+      stepWarnings.value = j.warnings
+      stepWarningsOpen.value = true
+    }
     pickerHtml.value      = j.html || pickerHtml.value
     pickerLoadedUrl.value = j.current_url || pickerLoadedUrl.value
     cmfReloadKey.value++   // refresh iframe :src so it re-fetches the post-step HTML
@@ -8174,6 +8250,35 @@ if (typeof window !== 'undefined') {
   0%   { box-shadow: 0 0 0 0  rgba(220, 38, 38, 0.55); }
   60%  { box-shadow: 0 0 0 10px rgba(220, 38, 38, 0); }
   100% { box-shadow: 0 0 0 0  rgba(220, 38, 38, 0); }
+}
+
+/* Step warnings modal — shown when /cmf/step returned 200 with a list of
+ * skipped actions.  Sized smaller than the picker modal (it's a notice,
+ * not a workspace) and stacks on top so the picker iframe stays intact
+ * behind it. */
+.step-warn-backdrop { z-index: 2100; }
+.step-warn-modal {
+  width: min(80vw, 800px) !important;
+  height: auto !important;
+  max-height: 80vh;
+}
+.step-warn-body { padding: 14px 18px; overflow: auto; flex: 1; }
+.step-warn-intro { font-size: 0.9em; color: #4d5057; margin: 0 0 14px 0; line-height: 1.5; }
+.step-warn-table { width: 100%; border-collapse: collapse; font-size: 0.85em; }
+.step-warn-table th, .step-warn-table td {
+  text-align: left; padding: 6px 8px; border-bottom: 1px solid #eee;
+}
+.step-warn-table th { background: #fafbfc; color: #5a606b; font-weight: 600; }
+.step-warn-table .mono {
+  font-family: 'Menlo','Monaco','Courier New',monospace; font-size: 0.92em;
+}
+.step-warn-table .ellipsis {
+  max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.step-warn-err { color: #b91c1c; font-size: 0.85em; }
+.step-warn-footer {
+  padding: 10px 18px; border-top: 1px solid #e0e0e0;
+  background: #fafbfc; text-align: right;
 }
 .btn.btn-antibot-pulse {
   animation: wr-antibot-pulse 1.6s cubic-bezier(0.66, 0, 0, 1) infinite;
