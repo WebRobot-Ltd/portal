@@ -1405,7 +1405,7 @@ go</pre>
                easily mismatch the live Camoufox tab. -->
           <pre v-if="pickerActionsYaml" class="picker-actions-yaml picker-actions-draft">{{ pickerActionsYaml }}</pre>
           <div v-if="pickerActionsYaml" class="picker-actions">
-            <button class="btn btn-ghost btn-sm" @click="pickerActions = []">Clear staged</button>
+            <button class="btn btn-ghost btn-sm" @click="clearStagedActions">Clear staged</button>
           </div>
 
           <!-- Apply panel: appears as soon as we have either a loaded
@@ -3404,6 +3404,21 @@ async function goBackInCamoufox() {
 // batch. First ask the iframe to commit any in-progress typing so
 // the last keystroke isn't dropped, then snapshot+clear the queue
 // and forward.
+// "Clear staged" button. Wipes BOTH the parent's pickerActions mirror
+// AND the picker.js side `actions[]` buffer — otherwise the very next
+// pick-actions throttled ping would replay the (still-populated)
+// iframe-side queue back to the parent and the staged list would
+// "reappear" a beat after the user clicked Clear.  See
+// webrobot-picker-clear-queue handler in demo-wizard-picker.js.
+function clearStagedActions() {
+  pickerActions.value = []
+  const ifr = document.getElementById('wr-picker-iframe')
+  try {
+    ifr && ifr.contentWindow && ifr.contentWindow.postMessage(
+      { type: 'webrobot-picker-clear-queue' }, '*')
+  } catch (_) {}
+}
+
 async function sendStagedActionsToCamoufox() {
   if (pickerStrategy.value !== 'cmf' || !cmfSessionId.value) return
   // Flush pending Type inside the iframe; it'll bounce back a
