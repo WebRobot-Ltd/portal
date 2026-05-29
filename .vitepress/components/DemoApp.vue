@@ -1358,7 +1358,7 @@ go</pre>
              batch to /cmf/step. That stops the "page changed after the
              first click before I could type" surprise the old live-
              forward flow had. -->
-        <div v-if="pickerMode === 'action-record'" class="picker-result">
+        <div v-if="pickerMode === 'action-record'" class="picker-result picker-result-tall">
           <div class="picker-result-row">
             <strong>
               <span v-if="pickerStrategy === 'cmf'">📥 Staged actions: {{ pickerActions.length }}</span>
@@ -7820,7 +7820,10 @@ if (typeof window !== 'undefined') {
   /* Use most of the screen — sites like ebay/amazon don't fit in 1100px
      and force their own horizontal scroll that the picker can't see. */
   width: min(95vw, 1600px);
-  height: min(95vh, 900px);
+  /* Use ~full viewport so action-record panel (with "Use this URL" CTA at
+     the bottom) is never pushed below the fold.  Previously capped at
+     900px which caused an outer scrollbar on common laptop displays. */
+  height: min(98vh, 1280px);
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
@@ -8109,6 +8112,16 @@ if (typeof window !== 'undefined') {
   background: white;
   max-height: 200px;
   overflow-y: auto;
+}
+/* Action-record panel needs full visibility for the staged-actions list +
+ * the "Use this URL" / "Apply & continue" CTA at the bottom — capping at
+ * 200px would hide the button behind an inner scrollbar.  Bigger min so the
+ * panel is always prominent (matches the "view sotto piu grande" ask).
+ * The picker-modal-body iframe (flex: 1) auto-shrinks to fit. */
+.picker-result.picker-result-tall {
+  max-height: none;
+  overflow-y: visible;
+  min-height: 220px;
 }
 .picker-result-row {
   display: flex;
