@@ -636,19 +636,26 @@ go</pre>
             </div>
             <div class="wizard-catalog-list">
               <div v-if="wizFilteredCatalog.length === 0" class="wizard-empty">no stages match the filters</div>
-              <div
-                v-for="s in wizFilteredCatalog"
-                :key="s.id"
-                class="wizard-catalog-row"
-                :title="'Click to append to your pipeline'"
-                @click="addStageToPipeline(s.stage_name)"
-              >
-                <div class="wizard-catalog-row-top">
-                  <strong>{{ s.stage_name }}</strong>
-                  <span class="wizard-catalog-row-tag">{{ s.plugin_id || '' }} · {{ s.plugin_type || '' }}</span>
+              <!-- Grouped by category so the user can scan stages by
+                   pipeline phase (Sources → Crawling → Extraction →
+                   Transformation → Analytics → Sinks). The order
+                   inside CATEGORY_ORDER matches typical pipeline flow. -->
+              <template v-for="g in wizCatalogByCategory" :key="g.category">
+                <div class="wizard-catalog-group-head">{{ g.label }} <span class="wizard-catalog-group-count">{{ g.items.length }}</span></div>
+                <div
+                  v-for="s in g.items"
+                  :key="s.id"
+                  class="wizard-catalog-row"
+                  :title="'Click to append to your pipeline'"
+                  @click="addStageToPipeline(s.stage_name)"
+                >
+                  <div class="wizard-catalog-row-top">
+                    <strong>{{ s.stage_name }}</strong>
+                    <span class="wizard-catalog-row-tag">{{ s.plugin_id || '' }} · {{ s.plugin_type || '' }}</span>
+                  </div>
+                  <div class="wizard-catalog-row-desc">{{ (s.description || '').slice(0, 120) }}</div>
                 </div>
-                <div class="wizard-catalog-row-desc">{{ (s.description || '').slice(0, 120) }}</div>
-              </div>
+              </template>
             </div>
           </div>
 
@@ -4647,6 +4654,60 @@ const wizFilteredCatalog = computed(() => {
     return hay.includes(q)
   })
 })
+
+// Group the filtered catalog by `category` for a categorised browser
+// view. Returns [{ category, label, items }] in a stable order roughly
+// matching pipeline flow (source → crawl → extract → transform → sink).
+// Categories not in CATEGORY_ORDER fall back to alphabetical at the end.
+// "Uncategorized" always last.
+const CATEGORY_ORDER = [
+  'source', 'connector', 'external-api',
+  'crawling', 'browsing',
+  'extraction',
+  'transformation', 'python',
+  'analytics', 'ml',
+  'sink', 'output',
+]
+const CATEGORY_LABELS = {
+  'source':         '📥 Sources',
+  'connector':      '🔌 Connectors',
+  'external-api':   '🌐 External APIs',
+  'crawling':       '🕷 Crawling',
+  'browsing':       '🌍 Browsing',
+  'extraction':     '🎯 Extraction',
+  'transformation': '🔧 Transformation',
+  'python':         '🐍 Python',
+  'analytics':      '📊 Analytics',
+  'ml':             '🧠 ML',
+  'sink':           '💾 Sinks',
+  'output':         '📤 Output',
+  'Uncategorized':  '📦 Other',
+}
+const wizCatalogByCategory = computed(() => {
+  const map = new Map()
+  for (const s of wizFilteredCatalog.value) {
+    const cat = (s.category || 'Uncategorized').trim() || 'Uncategorized'
+    if (!map.has(cat)) map.set(cat, [])
+    map.get(cat).push(s)
+  }
+  // Sort items inside each group by stage_name.
+  for (const items of map.values()) items.sort((a, b) => a.stage_name.localeCompare(b.stage_name))
+  // Order groups: known categories first per CATEGORY_ORDER, then
+  // alphabetical for any leftover, "Uncategorized" last.
+  const groups = []
+  for (const known of CATEGORY_ORDER) {
+    if (map.has(known)) { groups.push({ category: known, items: map.get(known) }); map.delete(known) }
+  }
+  const rest = Array.from(map.entries())
+    .filter(([c]) => c !== 'Uncategorized')
+    .sort((a, b) => a[0].localeCompare(b[0]))
+  for (const [cat, items] of rest) groups.push({ category: cat, items })
+  if (map.has('Uncategorized')) groups.push({ category: 'Uncategorized', items: map.get('Uncategorized') })
+  return groups.map(g => ({
+    ...g,
+    label: CATEGORY_LABELS[g.category] || ('· ' + g.category),
+  }))
+})
 const wizYamlPreview = computed(() => buildYamlFromPipeline(wizPipeline.value, wizCatalog.value))
 
 function findStageSpec(name) {
@@ -7844,6 +7905,33 @@ if (typeof window !== 'undefined') {
   border-radius: 6px;
   cursor: pointer;
   transition: border-color 0.15s ease;
+}
+/* Category group heading inside the stage catalog list. Sticky-ish
+ * separator: stays compact, doesn't grab clicks, slight typographic
+ * lift so the user can scan by category. */
+.wizard-catalog-group-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin: 14px 0 6px 0;
+  padding: 6px 10px;
+  font-size: 0.78em;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #4b5563;
+  background: linear-gradient(90deg, #f3f4f6, transparent);
+  border-left: 3px solid #9ca3af;
+  user-select: none;
+}
+.wizard-catalog-group-head:first-child { margin-top: 4px; }
+.wizard-catalog-group-count {
+  background: #e5e7eb;
+  color: #374151;
+  padding: 2px 7px;
+  border-radius: 10px;
+  font-size: 0.85em;
+  font-weight: 600;
 }
 .wizard-catalog-row:hover {
   border-color: #2196f3;
