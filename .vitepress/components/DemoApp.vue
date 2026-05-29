@@ -1063,15 +1063,15 @@ go</pre>
                  "🎯 One element" was removed from the toolbar; it lives
                  on as the internal selector-single mode when opened
                  from a per-arg 🎯 icon next to a single arg input. -->
-            <button v-if="pickerOriginIsFlatSelect || pickerOriginIsExplore || pickerOriginIsJoin"
+            <button v-if="(pickerOriginIsFlatSelect || pickerOriginIsExplore || pickerOriginIsJoin) && !pickerIsFieldSelection"
                     :class="['picker-tab', pickerMode === 'selector-list' && 'active']"
                     title="Click ONE row / item / link. The picker writes a selector matching all similar elements via the class/tag pattern they share. Quick (1 click) — fall back to Pick samples if too narrow / too broad."
                     @click="setPickerMode('selector-list')">📋 List like this</button>
-            <button v-if="pickerOriginIsFlatSelect || pickerOriginIsExplore || pickerOriginIsJoin"
+            <button v-if="(pickerOriginIsFlatSelect || pickerOriginIsExplore || pickerOriginIsJoin) && !pickerIsFieldSelection"
                     :class="['picker-tab', pickerMode === 'multi-sample' && 'active']"
                     title="Click 2+ examples of the repeating thing you want (rows, links, items). The picker computes the broadest CSS selector that matches ALL of them via path-piece intersection. Best when 1-click List is too narrow / too broad / irregular markup."
                     @click="setPickerMode('multi-sample')">📍 Pick samples</button>
-            <button v-if="pickerOriginIsFetch || pickerOriginIsExplore || pickerOriginIsJoin"
+            <button v-if="(pickerOriginIsFetch || pickerOriginIsExplore || pickerOriginIsJoin) && !pickerIsFieldSelection"
                     :class="['picker-tab', pickerMode === 'action-record' && 'active']"
                     title="Browse the site as a user would. Every click, form input and navigation is recorded as a replayable trace — useful when the page needs filtering / pagination / login before extraction. Camoufox strategy required."
                     @click="setPickerMode('action-record')">⏺ Record actions</button>
@@ -5030,7 +5030,11 @@ function openFieldPicker(stageIdx, fieldIdx) {
   pickerTargetStageIdx.value = stageIdx
   pickerTargetArgName.value  = '__field_selector__:' + fieldIdx
   pickerIntendedMode.value = 'selector-single'
-  pickerMode.value = 'action-record'   // navigate first
+  // Go straight to selector-single — the page is already loaded (the
+  // row selector was picked on it), so the navigate-first action-record
+  // step just left the user on a toolbar with no active tab now that
+  // List / Pick samples / Record are hidden during field selection.
+  pickerMode.value = 'selector-single'
   pickerSelected.value = null
   pickerOpen.value = true
   tryResumePausedSession()
@@ -5233,6 +5237,19 @@ const TOOLBAR_ONLY_RECORD_STAGES = new Set([
 // fetch-only: pure navigation stage. Record actions is the only useful
 // mode in the picker; selector tabs would be dead UI.
 const pickerOriginIsFetch = computed(() => pickerOriginStage.value === 'fetch')
+// True while the picker is being used to select FIELDS (not the row
+// selector): either the bulk "🎯 Pick fields" (__fields_multi__) or
+// the per-field 🎯 (__field_selector__:N). In this phase the row /
+// segment selector is ALREADY fixed, so the row-selecting tabs
+// (📋 List · 📍 Pick samples) make no sense — they'd re-pick the row
+// and switch the picker out of the field-relative mode. Only field-
+// relevant tools belong here (the in-page multi-field clicking + Ask
+// AI to describe fields).
+const pickerIsFieldSelection = computed(() => {
+  const t = pickerTargetArgName.value
+  return typeof t === 'string' &&
+    (t === '__fields_multi__' || t.indexOf('__field_selector__:') === 0)
+})
 const pickerOriginIsTraceCapable = computed(() => {
   const idx = pickerTargetStageIdx.value
   if (idx == null || !wizPipeline.value[idx]) return false
