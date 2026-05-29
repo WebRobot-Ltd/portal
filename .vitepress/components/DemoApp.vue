@@ -5185,11 +5185,30 @@ function applyCommittedTrace() {
   }
   const spec = findStageSpec(row.stage)
   const firstArg = (spec && spec.arg_schema || [])[0]
-  if (firstArg && pickerOpenedUrl.value) {
+  if (firstArg) {
     if (!row.args) row.args = {}
-    const current = row.args[firstArg.name]
-    if (current == null || String(current).trim() === '') {
-      row.args[firstArg.name] = pickerOpenedUrl.value
+    // URL to seed the stage's first arg depends on what the user did:
+    //
+    //   - Trace recorded (Click/Type/Scroll): the trace MUST replay
+    //     from the ORIGINAL URL the picker opened on, because each
+    //     action references DOM state of that seed page. So:
+    //       args[url] = pickerOpenedUrl   (immutable opened URL)
+    //
+    //   - No trace recorded (URL-only apply): the user navigated the
+    //     mirror to whatever final page they care about, then pressed
+    //     "✅ Use this URL". Save the FINAL URL — they want that page
+    //     fetched directly, no actions needed:
+    //       args[url] = pickerLoadedUrl   (current URL after nav)
+    //
+    // Always overwrite — the user pressing Apply is an explicit
+    // intent to set this URL, regardless of any previous value. The
+    // earlier "only if empty" guard caused the field to stay stale
+    // after recording a trace on a stage with a pre-seeded URL.
+    const targetUrl = committedActions.value.length
+      ? pickerOpenedUrl.value
+      : (pickerLoadedUrl.value || pickerOpenedUrl.value)
+    if (targetUrl) {
+      row.args[firstArg.name] = targetUrl
     }
   }
   wizPipeline.value = [...wizPipeline.value]
