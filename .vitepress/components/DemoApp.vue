@@ -897,23 +897,45 @@ go</pre>
         <h4>📄 YAML preview</h4>
         <pre class="wizard-yaml">{{ wizYamlPreview }}</pre>
 
-        <!-- Required-arg / shape validation. The banner + per-field
-             red highlight only appear after the user has tried to
-             save once — until then we trust them to fill the form. -->
+        <!-- Required-arg / shape validation.
+             Two render layers:
+             • If the user has tried to save → loud red banner with the
+               full error list (drives the eye to what's missing).
+             • Otherwise, when errors exist but the user hasn't tried
+               to save yet → soft yellow hint panel listing the same
+               errors so they can see WHY the action buttons are
+               disabled without clicking and getting an "errors!" toast.
+               (Previously the only signal was a greyed-out button —
+               confusing if you're staring at a clearly-filled form
+               but one alias slipped through.) -->
         <div v-if="wizShowFieldErrors && wizValidationErrors.length" class="wizard-validation">
           <strong>Fix before saving:</strong>
           <ul>
             <li v-for="(err, i) in wizValidationErrors" :key="i">{{ err }}</li>
           </ul>
         </div>
+        <div v-else-if="!wizValid && wizValidationErrors.length" class="wizard-validation-hint">
+          <strong>⚠️ Save / Validate disabled — pending:</strong>
+          <ul>
+            <li v-for="(err, i) in wizValidationErrors" :key="i">{{ err }}</li>
+          </ul>
+        </div>
 
         <div class="wizard-actions">
-          <button class="btn btn-primary" :disabled="!wizValid" @click="wizardSaveAndRun">Save &amp; Run</button>
-          <button class="btn btn-secondary" :disabled="!wizValid" @click="wizardSaveAsDraft" title="Save without running — appears in the selector above">Save (draft)</button>
+          <button class="btn btn-primary"
+                  :disabled="!wizValid"
+                  :title="wizValid ? '' : wizValidationErrors[0]"
+                  @click="wizardSaveAndRun">Save &amp; Run</button>
+          <button class="btn btn-secondary"
+                  :disabled="!wizValid"
+                  :title="wizValid ? 'Save without running — appears in the selector above' : wizValidationErrors[0]"
+                  @click="wizardSaveAsDraft">Save (draft)</button>
           <button class="btn btn-secondary"
                   :disabled="!wizValid || validateOpen"
-                  @click="openValidate"
-                  title="Run the pipeline on a real Camoufox session and preview up to 5 records before launching the Spark job">🔬 Validate selectors</button>
+                  :title="wizValid
+                    ? 'Run the pipeline on a real Camoufox session and preview up to 5 records before launching the Spark job'
+                    : wizValidationErrors[0]"
+                  @click="openValidate">🔬 Validate selectors</button>
           <!--
             Standalone "Record actions" button removed: action-record
             is reachable via the 🎯 button on any fetch/visit/wget
@@ -8277,6 +8299,22 @@ if (typeof window !== 'undefined') {
   padding: 0;
 }
 .wizard-validation li {
+  margin: 2px 0;
+}
+.wizard-validation-hint {
+  background: #fffbe6;
+  border: 1px solid #ffe58f;
+  border-radius: 6px;
+  padding: 10px 14px;
+  color: #614700;
+  font-size: 0.85em;
+  margin: 12px 0;
+}
+.wizard-validation-hint ul {
+  margin: 6px 0 0 18px;
+  padding: 0;
+}
+.wizard-validation-hint li {
   margin: 2px 0;
 }
 .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
