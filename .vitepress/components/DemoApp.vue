@@ -4128,7 +4128,13 @@ function onPickerMessage(ev) {
       const stageIdx = pickerTargetStageIdx.value
       const fields = ensureFieldsArray(stageIdx) || []
       const incomingSel = (d.selector || '').trim()
+      // Diagnostic: print exact selector chars + existing list so we can
+      // see WHY dedup misses (whitespace? case? trailing char?).
+      console.debug('[demo-wizard] pick-multi-field IN:',
+        'incoming=', JSON.stringify(incomingSel),
+        'existing=', fields.map(f => JSON.stringify((f.selector || '').trim())))
       if (incomingSel && fields.some(f => (f.selector || '').trim() === incomingSel)) {
+        console.debug('[demo-wizard] DEDUP HIT — skipping append')
         wizStatus.value = {
           kind: 'info',
           text: 'Selector already in the fields list — duplicate skipped.',
@@ -4160,6 +4166,17 @@ function onPickerMessage(ev) {
   } else if (d.type === 'webrobot-picker-multi-warn') {
     // Surface the warning briefly (e.g. clicked outside flatSelect container).
     wizStatus.value = { kind: 'error', text: d.warn || 'click was outside the segment container' }
+  } else if (d.type === 'webrobot-picker-multi-rows') {
+    // Picker reports how many rows the configured container selector
+    // currently matches. Surface as a status info chip so the user can
+    // sanity-check the row selector before picking fields.
+    const n = typeof d.count === 'number' ? d.count : 0
+    wizStatus.value = {
+      kind: n > 0 ? 'info' : 'error',
+      text: n > 0
+        ? `Picker tracking ${n} row${n === 1 ? '' : 's'} via container selector.`
+        : 'Picker tracking 0 rows — the container selector matches nothing on this page.',
+    }
   } else if (d.type === 'webrobot-pick-multi-sample') {
     // Repeating-link sampler progress ping. d.selector may be null if
     // the seeds don't yet share a usable suffix (rare — usually means
