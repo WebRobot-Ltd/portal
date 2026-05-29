@@ -168,7 +168,7 @@ The portal integrates with WebRobot's production backends:
 - **Jersey API** - Main REST API (`/api/webrobot/api/...`)
 - **Demo Plugin** - Public demo endpoints (`/api/webrobot/api/demo/...`)
 - **EAN Plugin** - EAN Image Sourcing endpoints (`/api/webrobot/api/ean-image-sourcing/...`)
-- **CrewAI Backend** - AI agentic layer for pipeline generation
+- **Ray Agentic Runtime** - Distributed AI agent runtime on Ray (multi-tenant, elastic worker VMs). Hosts pipeline-generation profiles (CrewAI-based today) plus generic Ray jobs (real-time monitors, watcher actors, trading agents). Not a CrewAI wrapper — Ray is the underlying distributed paradigm, agentic frameworks are pluggable on top.
 
 All API calls are made to production endpoints, ensuring real-world demonstrations.
 
