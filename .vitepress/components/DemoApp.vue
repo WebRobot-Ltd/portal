@@ -936,6 +936,15 @@ go</pre>
                     ? 'Run the pipeline on a real Camoufox session and preview up to 5 records before launching the Spark job'
                     : wizValidationErrors[0]"
                   @click="openValidate">🔬 Validate selectors</button>
+          <button class="btn btn-secondary"
+                  :disabled="!wizValid || varDetectLoading"
+                  :title="wizValid
+                    ? 'Detect values (search keywords, urls) you can turn into pipeline variables bound to an input-dataset column — run the pipeline once per row (parameter sweep)'
+                    : wizValidationErrors[0]"
+                  @click="openVariableDetect">
+            <span v-if="varDetectLoading" class="loading-spinner"></span>
+            🔗 Variabili
+          </button>
           <!--
             Standalone "Record actions" button removed: action-record
             is reachable via the 🎯 button on any fetch/visit/wget
@@ -947,6 +956,74 @@ go</pre>
           <div v-if="wizStatus.kind" :class="['wizard-status', 'wizard-status-' + wizStatus.kind]">
             {{ wizStatus.text }}
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ───────── Variabili modal (parameterize → bind to dataset column) ─── -->
+    <div v-if="varDetectOpen" class="picker-modal-backdrop" @click.self="closeVariableDetect">
+      <div class="picker-modal vardetect-modal">
+        <div class="picker-modal-header">
+          <strong>🔗 Variabili della pipeline</strong>
+          <button class="btn btn-secondary btn-sm" @click="closeVariableDetect">✕ Chiudi</button>
+        </div>
+        <div class="vardetect-body">
+          <p class="vardetect-intro">
+            Trasforma valori fissi (keyword di ricerca, url) in <strong>variabili</strong> legate
+            a una colonna del dataset di input: la pipeline gira <strong>una volta per riga</strong>,
+            con il valore di quella riga sostituito (parameter sweep, via <code>$colonna</code>).
+          </p>
+
+          <div class="vardetect-cols">
+            <label>Colonne del dataset di input (separate da virgola, opzionale):</label>
+            <input type="text" class="text-input" v-model="varDetectColumns"
+                   placeholder="es. search_term, city, brand"
+                   @keyup.enter="runVariableDetect" />
+            <button class="btn btn-primary btn-sm"
+                    :disabled="varDetectLoading"
+                    @click="runVariableDetect">
+              <span v-if="varDetectLoading" class="loading-spinner"></span>
+              🔍 Rileva variabili (AI)
+            </button>
+          </div>
+
+          <div v-if="varDetectError" class="wizard-validation">{{ varDetectError }}</div>
+
+          <div v-if="varDetectRan && !varDetectResults.length && !varDetectLoading" class="vardetect-empty">
+            Nessun valore parametrizzabile rilevato (keyword di ricerca / url). Niente da fare qui.
+          </div>
+
+          <div v-for="(v, vi) in varDetectResults" :key="vi" class="vardetect-card">
+            <div class="vardetect-q">{{ v.question || ('Rendere variabile «' + v.current + '»?') }}</div>
+            <div class="vardetect-meta">
+              <code>{{ v.stage }}</code> · <code>{{ v.path }}</code> · valore attuale:
+              <strong>{{ v.current }}</strong>
+            </div>
+            <div class="vardetect-choice">
+              <label><input type="radio" :name="'var'+vi" value="column"
+                            v-model="varBindings[vi].mode"> Lega a colonna</label>
+              <select v-if="varBindings[vi].mode === 'column'" v-model="varBindings[vi].column" class="text-input">
+                <option v-for="c in varColumnList" :key="c" :value="c">{{ c }}</option>
+              </select>
+              <input v-if="varBindings[vi].mode === 'column' && !varColumnList.length"
+                     type="text" class="text-input" v-model="varBindings[vi].column"
+                     :placeholder="v.suggested_column || v.suggested_name || 'nome_colonna'" />
+              <label><input type="radio" :name="'var'+vi" value="literal"
+                            v-model="varBindings[vi].mode"> Lascia fisso</label>
+            </div>
+          </div>
+
+          <div v-if="varDetectResults.length" class="vardetect-actions">
+            <button class="btn btn-primary" @click="applyVariableBindings">
+              ✅ Applica ({{ varBoundCount }} → variabile)
+            </button>
+            <button class="btn btn-ghost" @click="closeVariableDetect">Annulla</button>
+          </div>
+          <p class="vardetect-note">
+            Le variabili "lega a colonna" diventano <code>$colonna</code> nello YAML e vengono
+            risolte per-riga a runtime. Salva (o Save &amp; Run con un dataset associato) per
+            applicare lo sweep.
+          </p>
         </div>
       </div>
     </div>
@@ -5984,6 +6061,139 @@ function openValidate() {
 function closeValidate() {
   validateOpen.value = false
 }
+
+// ───────── Variabili: parameterize pipeline values → $col binding ─────────
+// Launch-time "🔗 Variables" flow. The LLM (DemoService.inferVariables) scans
+// the YAML for parameterizable literals (search keyword in a fetch url or in a
+// trace Type/input action's text). The user binds each to an input-dataset
+// column → the literal is rewritten to `$column`, resolved per-row at runtime
+// (parameter sweep). See project_pipeline_variables_wizard memory + the ETL
+// $col interpolation in TextInput/InputFactory + NativeFetchStage.toExtractor.
+const varDetectOpen    = ref(false)
+const varDetectLoading = ref(false)
+const varDetectError   = ref(null)
+const varDetectRan     = ref(false)
+const varDetectResults = ref([])      // [{ stage, path, current, suggested_name, kind, suggested_column, question }]
+const varDetectColumns = ref('')      // comma-separated dataset columns (optional)
+const varBindings      = ref([])      // parallel to results: [{ mode:'column'|'literal', column }]
+
+const varColumnList = computed(() =>
+  varDetectColumns.value.split(',').map(s => s.trim()).filter(Boolean))
+const varBoundCount = computed(() =>
+  varBindings.value.filter(b => b && b.mode === 'column' && (b.column || '').trim()).length)
+
+function openVariableDetect() {
+  if (!wizValid.value) {
+    wizStatus.value = { kind: 'error', text: 'Fix the validation errors above first.' }
+    return
+  }
+  varDetectOpen.value = true
+  varDetectError.value = null
+  varDetectRan.value = false
+  varDetectResults.value = []
+  varBindings.value = []
+  // Pre-fill dataset columns from a previously uploaded demo dataset if present.
+  if (!varDetectColumns.value && demoUploadResult.value && Array.isArray(demoUploadResult.value.columns)) {
+    varDetectColumns.value = demoUploadResult.value.columns.join(', ')
+  }
+}
+function closeVariableDetect() {
+  varDetectOpen.value = false
+}
+
+async function runVariableDetect() {
+  varDetectLoading.value = true
+  varDetectError.value = null
+  varDetectRan.value = false
+  try {
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-variables`, {
+      method: 'POST',
+      body: JSON.stringify({
+        pipeline_yaml: wizYamlPreview.value,
+        dataset_columns: varColumnList.value,
+      }),
+    })
+    const j = await r.json()
+    if (!r.ok) throw new Error(j.error || 'infer-variables failed')
+    const vars = Array.isArray(j.variables) ? j.variables : []
+    varDetectResults.value = vars
+    // Default binding: column-bind when we have a suggested/known column, else literal.
+    varBindings.value = vars.map(v => {
+      const sugg = (v.suggested_column && varColumnList.value.includes(v.suggested_column))
+        ? v.suggested_column
+        : (varColumnList.value[0] || v.suggested_column || v.suggested_name || '')
+      return { mode: sugg ? 'column' : 'literal', column: sugg }
+    })
+    varDetectRan.value = true
+  } catch (e) {
+    varDetectError.value = 'Errore: ' + (e.message || String(e))
+  } finally {
+    varDetectLoading.value = false
+  }
+}
+
+// Apply one detected variable's column binding to the in-memory pipeline by
+// rewriting the matched literal to `$column`. Uses the LLM's `path`
+// (pipeline[i].url | pipeline[i].trace[j].text) as a hint, falling back to a
+// value match so index drift (python/sql shim stages) can't misfire.
+function applyOneVariable(v, token) {
+  const pipe = wizPipeline.value
+  const cur = v.current
+  // trace text: pipeline[i].trace[j].text
+  const mTrace = /pipeline\[(\d+)\]\.trace\[(\d+)\]\.text/.exec(v.path || '')
+  if (mTrace) {
+    const i = +mTrace[1], j = +mTrace[2]
+    const row = pipe[i]
+    if (row && Array.isArray(row._trace) && row._trace[j] && row._trace[j].text === cur) {
+      row._trace[j].text = token; return true
+    }
+  }
+  if (/\.trace\[/.test(v.path || '') || v.kind === 'text') {
+    for (const row of pipe) {
+      if (!Array.isArray(row._trace)) continue
+      const hit = row._trace.find(a => a && a.type === 'Type' && a.text === cur)
+      if (hit) { hit.text = token; return true }
+    }
+  }
+  // stage arg (url or other): pipeline[i].<arg>
+  const mArg = /pipeline\[(\d+)\]\.([A-Za-z_][\w]*)/.exec(v.path || '')
+  if (mArg) {
+    const i = +mArg[1], arg = mArg[2]
+    const row = pipe[i]
+    if (row && row.args && row.args[arg] === cur) { row.args[arg] = token; return true }
+  }
+  // value-match fallback across all rows' args
+  for (const row of pipe) {
+    if (!row.args) continue
+    for (const k of Object.keys(row.args)) {
+      if (row.args[k] === cur) { row.args[k] = token; return true }
+    }
+  }
+  return false
+}
+
+function applyVariableBindings() {
+  let applied = 0
+  const names = []
+  varDetectResults.value.forEach((v, vi) => {
+    const b = varBindings.value[vi]
+    if (!b || b.mode !== 'column') return
+    const col = (b.column || '').trim().replace(/^\$+/, '')
+    if (!col) return
+    if (applyOneVariable(v, '$' + col)) { applied++; names.push('$' + col) }
+  })
+  if (applied > 0) {
+    wizPipeline.value = [...wizPipeline.value]
+    wizStatus.value = {
+      kind: 'success',
+      text: `🔗 ${applied} variabile/i applicate (${names.join(', ')}). Salva o Save & Run con un dataset per lo sweep per-riga.`,
+    }
+  } else {
+    wizStatus.value = { kind: 'info', text: 'Nessuna variabile applicata.' }
+  }
+  closeVariableDetect()
+}
+
 async function runValidation() {
   validateState.value = { kind: 'running', text: 'Opening Camoufox session and replaying trace…' }
   validateResult.value = null
@@ -9228,6 +9438,22 @@ if (typeof window !== 'undefined') {
 }
 
 /* ── Validate-selectors modal ─────────────────────────────────── */
+/* 🔗 Variabili modal */
+.vardetect-modal { width: min(92vw, 720px); max-height: 88vh; }
+.vardetect-body { padding: 16px 18px; overflow-y: auto; }
+.vardetect-intro { font-size: 0.9em; color: #374151; margin: 0 0 14px; line-height: 1.5; }
+.vardetect-cols { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+.vardetect-cols label { width: 100%; font-size: 0.85em; color: #4b5563; font-weight: 600; }
+.vardetect-cols .text-input { flex: 1; min-width: 220px; }
+.vardetect-empty { font-size: 0.9em; color: #6b7280; padding: 10px 0; }
+.vardetect-card { border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; background: #fafafa; }
+.vardetect-q { font-weight: 600; color: #111827; margin-bottom: 6px; }
+.vardetect-meta { font-size: 0.8em; color: #6b7280; margin-bottom: 8px; }
+.vardetect-meta code { background: #eef2ff; padding: 1px 5px; border-radius: 4px; }
+.vardetect-choice { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; font-size: 0.9em; }
+.vardetect-choice .text-input { min-width: 180px; padding: 4px 8px; }
+.vardetect-actions { display: flex; gap: 10px; margin-top: 8px; }
+.vardetect-note { font-size: 0.78em; color: #9ca3af; margin-top: 12px; line-height: 1.5; }
 .validate-modal { width: min(95vw, 1500px); height: min(92vh, 880px); }
 .validate-modal-header strong { flex: 1; color: #111827; font-size: 1.02em; }
 .validate-close-btn { white-space: nowrap; }
