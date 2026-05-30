@@ -951,7 +951,7 @@ go</pre>
                     : wizValidationErrors[0]"
                   @click="openVariableDetect">
             <span v-if="varDetectLoading" class="loading-spinner"></span>
-            🔗 Variabili
+            🔗 Variables
           </button>
           <!--
             Standalone "Record actions" button removed: action-record
@@ -968,74 +968,73 @@ go</pre>
       </div>
     </div>
 
-    <!-- ───────── Variabili modal (parameterize → bind to dataset column) ─── -->
+    <!-- ───────── Variables modal (parameterize → bind to dataset column) ─── -->
     <div v-if="varDetectOpen" class="picker-modal-backdrop" @click.self="closeVariableDetect">
       <div class="picker-modal vardetect-modal">
         <div class="picker-modal-header">
-          <strong>🔗 Variabili della pipeline</strong>
-          <button class="btn btn-secondary btn-sm" @click="closeVariableDetect">✕ Chiudi</button>
+          <strong>🔗 Pipeline variables</strong>
+          <button class="btn btn-secondary btn-sm" @click="closeVariableDetect">✕ Close</button>
         </div>
         <div class="vardetect-body">
           <p class="vardetect-intro">
-            Trasforma valori fissi (keyword di ricerca, url) in <strong>variabili</strong> legate
-            a una colonna del dataset di input: la pipeline gira <strong>una volta per riga</strong>,
-            con il valore di quella riga sostituito (parameter sweep, via <code>$colonna</code>).
+            Turn fixed values (search keywords, urls) into <strong>variables</strong> bound to a
+            column of the input dataset: the pipeline runs <strong>once per row</strong>, with that
+            row's value substituted in (parameter sweep, via <code>$column</code>).
           </p>
 
           <div class="vardetect-cols">
-            <label>Colonne del dataset di input (separate da virgola, opzionale):</label>
+            <label>Input dataset columns (comma-separated, optional):</label>
             <input type="text" class="text-input" v-model="varDetectColumns"
-                   placeholder="es. search_term, city, brand"
+                   placeholder="e.g. search_term, city, brand"
                    @keyup.enter="runVariableDetect" />
             <button class="btn btn-primary btn-sm"
                     :disabled="varDetectLoading"
                     @click="runVariableDetect">
               <span v-if="varDetectLoading" class="loading-spinner"></span>
-              🔍 Rileva variabili (AI)
+              🔍 Detect variables (AI)
             </button>
           </div>
 
           <div v-if="varDetectError" class="wizard-validation">{{ varDetectError }}</div>
 
           <div v-if="varDetectRan && !varDetectResults.length && !varDetectLoading" class="vardetect-empty">
-            Nessun valore parametrizzabile rilevato (keyword di ricerca / url). Niente da fare qui.
+            No parameterizable value detected (search keyword / url). Nothing to do here.
           </div>
 
           <div v-for="(v, vi) in varDetectResults" :key="vi" class="vardetect-card">
             <div class="vardetect-q">{{ varQuestion(v) }}</div>
             <div class="vardetect-meta">
-              <code>{{ v.stage }}</code> · <code>{{ v.path }}</code> · valore attuale:
+              <code>{{ v.stage }}</code> · <code>{{ v.path }}</code> · current value:
               <strong>{{ v.current }}</strong>
             </div>
             <div class="vardetect-choice">
               <label><input type="radio" :name="'var'+vi" value="column"
-                            v-model="varBindings[vi].mode"> Lega a colonna</label>
+                            v-model="varBindings[vi].mode"> Bind to column</label>
               <select v-if="varBindings[vi].mode === 'column'" v-model="varBindings[vi].column" class="text-input">
                 <option v-for="c in varColumnList" :key="c" :value="c">{{ c }}</option>
               </select>
               <input v-if="varBindings[vi].mode === 'column' && !varColumnList.length"
                      type="text" class="text-input" v-model="varBindings[vi].column"
-                     :placeholder="v.suggested_column || 'nome_colonna'" />
+                     :placeholder="v.suggested_column || 'column_name'" />
               <label><input type="radio" :name="'var'+vi" value="literal"
-                            v-model="varBindings[vi].mode"> Lascia fisso</label>
+                            v-model="varBindings[vi].mode"> Keep fixed</label>
             </div>
           </div>
 
           <div v-if="varDetectResults.length" class="vardetect-actions">
             <button class="btn btn-primary" @click="applyVariableBindings">
-              {{ varGateActive ? '✅ Applica e lancia' : '✅ Applica' }} ({{ varBoundCount }} → variabile)
+              {{ varGateActive ? '✅ Apply &amp; launch' : '✅ Apply' }} ({{ varBoundCount }} → variable)
             </button>
             <button v-if="varGateActive" class="btn btn-secondary" @click="skipVariableGate">
-              Salta e lancia
+              Skip &amp; launch
             </button>
             <button class="btn btn-ghost" @click="closeVariableDetect">
-              {{ varGateActive ? 'Annulla lancio' : 'Annulla' }}
+              {{ varGateActive ? 'Cancel launch' : 'Cancel' }}
             </button>
           </div>
           <p class="vardetect-note">
-            Le variabili "lega a colonna" diventano <code>$colonna</code> nello YAML e vengono
-            risolte per-riga a runtime. Salva (o Save &amp; Run con un dataset associato) per
-            applicare lo sweep.
+            "Bind to column" variables become <code>$column</code> in the YAML and are resolved
+            per-row at runtime. Save (or Save &amp; Run with an associated dataset) to apply the sweep.
           </p>
         </div>
       </div>
@@ -2742,7 +2741,7 @@ async function applyVariableBindingsSaved() {
       if (!r.ok) throw new Error(j.error || 'apply-variables failed')
       if (selectedPipelineInfo.value) selectedPipelineInfo.value.pipelineYaml = newYaml
     } catch (e) {
-      demoUploadError.value = 'Errore applicazione variabili: ' + (e.message || String(e))
+      demoUploadError.value = 'Error applying variables: ' + (e.message || String(e))
       return  // don't run a half-rewritten pipeline; leave the upload modal open
     }
   }
@@ -4359,7 +4358,7 @@ async function handleGeneralizeRequest(d, source) {
     + '. Deve matchare TUTTE le righe simili: ignora classi auto-generate/hashate e '
     + ':nth-of-type, preferisci tag/attributi stabili (data-testid, custom element, classi semantiche).'
   try {
-    wizStatus.value = { kind: 'info', text: '🧬 Generalizzo il selettore di riga (AI)…' }
+    wizStatus.value = { kind: 'info', text: '🧬 Generalizing row selector (AI)…' }
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-segment`, {
       method: 'POST',
       body: JSON.stringify({ html, segmentation_prompt: prompt }),
@@ -4368,9 +4367,9 @@ async function handleGeneralizeRequest(d, source) {
     const sel = r.ok ? (j.segment_selector || '') : ''
     if (sel) {
       try { source.postMessage({ type: 'webrobot-generalize-result', selector: sel }, '*') } catch (_) {}
-      wizStatus.value = { kind: 'info', text: '🧬 Selettore di riga generalizzato applicato.' }
+      wizStatus.value = { kind: 'info', text: '🧬 Generalized row selector applied.' }
     } else {
-      wizStatus.value = { kind: 'info', text: 'Generalizzazione AI non disponibile — uso il selettore euristico.' }
+      wizStatus.value = { kind: 'info', text: 'AI generalization unavailable — using the heuristic selector.' }
     }
   } catch (e) {
     // silent fallback to heuristic
@@ -6299,14 +6298,14 @@ const varGateSaved     = ref(null)
 // Either gate active → the modal shows "…e lancia" actions instead of Apply.
 const varGateActive    = computed(() => varGateExecute.value || !!varGateSaved.value)
 
-// Italian question shown on each candidate card. Generated CLIENT-SIDE from
-// the structured fields (not the LLM) so the wizard text is always Italian
-// and never drifts to English regardless of what the model returns.
+// Question shown on each candidate card. Generated CLIENT-SIDE from the
+// structured fields (not the LLM) so the wizard text is stable and matches
+// the rest of the (English) demo UI regardless of what the model returns.
 function varQuestion(v) {
   const cur = v && v.current ? `«${v.current}»` : 'questo valore'
-  if (v && v.kind === 'search_term') return `Rendere variabile il testo di ricerca ${cur}?`
-  if (v && v.kind === 'url')         return `Rendere variabile l'URL ${cur}?`
-  return `Rendere variabile ${cur}?`
+  if (v && v.kind === 'search_term') return `Make the search term ${cur} a variable?`
+  if (v && v.kind === 'url')         return `Make the URL ${cur} a variable?`
+  return `Make ${cur} a variable?`
 }
 
 // Default binding for a detected variable: column-bind when we have a
@@ -6349,7 +6348,7 @@ function closeVariableDetect() {
   // Cancelling the modal while it was gating a launch = abort the launch.
   if (varGateExecute.value) {
     varGateExecute.value = false
-    wizStatus.value = { kind: 'info', text: 'Lancio annullato. Nessuna variabile applicata.' }
+    wizStatus.value = { kind: 'info', text: 'Launch cancelled. No variables applied.' }
   }
   // Saved-pipeline gate cancel: abort the run, leave the upload modal open so
   // the user can retry or close it themselves.
@@ -6366,7 +6365,7 @@ function closeVariableDetect() {
 // run on a detection hiccup).
 async function maybeOpenVariableGate() {
   try {
-    wizStatus.value = { kind: 'info', text: 'Controllo variabili…' }
+    wizStatus.value = { kind: 'info', text: 'Checking variables…' }
     const cols = (demoUploadResult.value && Array.isArray(demoUploadResult.value.columns))
       ? demoUploadResult.value.columns : []
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-variables`, {
@@ -6385,7 +6384,7 @@ async function maybeOpenVariableGate() {
     varDetectError.value = null
     varGateExecute.value = true
     varDetectOpen.value = true
-    wizStatus.value = { kind: 'info', text: 'Variabili rilevate — scegli come trattarle prima del lancio.' }
+    wizStatus.value = { kind: 'info', text: 'Variables detected — choose how to handle them before launch.' }
     return true
   } catch (e) {
     return false
@@ -6498,11 +6497,11 @@ function applyVariableBindings() {
     wizPipeline.value = [...wizPipeline.value]
     wizStatus.value = {
       kind: 'success',
-      text: `🔗 ${applied} variabile/i applicate (${names.join(', ')})`
-        + (addedLoader ? ' + load_csv di input aggiunto in testa.' : '.'),
+      text: `🔗 ${applied} variable(s) applied (${names.join(', ')})`
+        + (addedLoader ? ' + input load_csv prepended.' : '.'),
     }
   } else {
-    wizStatus.value = { kind: 'info', text: 'Nessuna variabile applicata.' }
+    wizStatus.value = { kind: 'info', text: 'No variables applied.' }
   }
   // If the modal was gating a Save & Run, resume the launch now (with the
   // rewritten $col YAML). _skipVarGate=true so we don't re-detect/loop.
