@@ -4345,9 +4345,49 @@ function pickModeFor(stage) {
 }
 
 // postMessage listener for the proxied iframe.
+// AI-generalize a too-specific row/segment selector. Calls the existing
+// PTA-backed segment inferencer with the element+parent HTML the picker sent
+// (it holds the repeating siblings) and replies to the iframe with a
+// generalized selector. Best-effort: on error / PTA-not-configured (503) we
+// stay silent and the picker keeps its heuristic selector.
+async function handleGeneralizeRequest(d, source) {
+  const html = (d && d.html) ? String(d.html) : ''
+  if (!html || !source) return
+  const sample = (d && d.sampleText) ? String(d.sampleText).slice(0, 120) : ''
+  const prompt = 'Trova il selettore CSS della RIGA/elemento ripetuto della lista'
+    + (sample ? ` che contiene il testo «${sample}»` : '')
+    + '. Deve matchare TUTTE le righe simili: ignora classi auto-generate/hashate e '
+    + ':nth-of-type, preferisci tag/attributi stabili (data-testid, custom element, classi semantiche).'
+  try {
+    wizStatus.value = { kind: 'info', text: '🧬 Generalizzo il selettore di riga (AI)…' }
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-segment`, {
+      method: 'POST',
+      body: JSON.stringify({ html, segmentation_prompt: prompt }),
+    })
+    const j = await r.json().catch(() => ({}))
+    const sel = r.ok ? (j.segment_selector || '') : ''
+    if (sel) {
+      try { source.postMessage({ type: 'webrobot-generalize-result', selector: sel }, '*') } catch (_) {}
+      wizStatus.value = { kind: 'info', text: '🧬 Selettore di riga generalizzato applicato.' }
+    } else {
+      wizStatus.value = { kind: 'info', text: 'Generalizzazione AI non disponibile — uso il selettore euristico.' }
+    }
+  } catch (e) {
+    // silent fallback to heuristic
+  }
+}
+
 function onPickerMessage(ev) {
   const d = ev.data
   if (!d || typeof d !== 'object') return
+  if (d.type === 'webrobot-generalize-request') {
+    // picker.js picked a row/segment box but the heuristic selector matched
+    // ≤1 (too specific — e.g. Reddit web-components + hashed classes). Run
+    // LLM segment inference on the element+parent HTML and reply with a
+    // generalized selector; picker.js validates + applies it.
+    handleGeneralizeRequest(d, ev.source)
+    return
+  }
   if (d.type === 'webrobot-pick-selector') {
     pickerSelected.value = {
       selector: d.selector,
