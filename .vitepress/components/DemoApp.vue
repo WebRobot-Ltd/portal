@@ -994,7 +994,7 @@ go</pre>
           </div>
 
           <div v-for="(v, vi) in varDetectResults" :key="vi" class="vardetect-card">
-            <div class="vardetect-q">{{ v.question || ('Rendere variabile «' + v.current + '»?') }}</div>
+            <div class="vardetect-q">{{ varQuestion(v) }}</div>
             <div class="vardetect-meta">
               <code>{{ v.stage }}</code> · <code>{{ v.path }}</code> · valore attuale:
               <strong>{{ v.current }}</strong>
@@ -1007,7 +1007,7 @@ go</pre>
               </select>
               <input v-if="varBindings[vi].mode === 'column' && !varColumnList.length"
                      type="text" class="text-input" v-model="varBindings[vi].column"
-                     :placeholder="v.suggested_column || v.suggested_name || 'nome_colonna'" />
+                     :placeholder="v.suggested_column || 'nome_colonna'" />
               <label><input type="radio" :name="'var'+vi" value="literal"
                             v-model="varBindings[vi].mode"> Lascia fisso</label>
             </div>
@@ -6197,13 +6197,27 @@ const varGateSaved     = ref(null)
 // Either gate active → the modal shows "…e lancia" actions instead of Apply.
 const varGateActive    = computed(() => varGateExecute.value || !!varGateSaved.value)
 
+// Italian question shown on each candidate card. Generated CLIENT-SIDE from
+// the structured fields (not the LLM) so the wizard text is always Italian
+// and never drifts to English regardless of what the model returns.
+function varQuestion(v) {
+  const cur = v && v.current ? `«${v.current}»` : 'questo valore'
+  if (v && v.kind === 'search_term') return `Rendere variabile il testo di ricerca ${cur}?`
+  if (v && v.kind === 'url')         return `Rendere variabile l'URL ${cur}?`
+  return `Rendere variabile ${cur}?`
+}
+
 // Default binding for a detected variable: column-bind when we have a
 // suggested/known column, else literal. Shared by the manual flow + the
 // launch gate so both pre-fill the same way.
 function defaultBindingFor(v) {
+  // The variable name = a dataset column the user picks. The LLM may suggest
+  // WHICH column (suggested_column, chosen from the real column list); we
+  // never use an invented name. Pre-select the suggested column if it's in
+  // the list, else the first available column, else leave literal.
   const sugg = (v.suggested_column && varColumnList.value.includes(v.suggested_column))
     ? v.suggested_column
-    : (varColumnList.value[0] || v.suggested_column || v.suggested_name || '')
+    : (varColumnList.value[0] || '')
   return { mode: sugg ? 'column' : 'literal', column: sugg }
 }
 
