@@ -623,9 +623,17 @@ go</pre>
           </template>
         </div>
 
+        <!-- Mobile-only tab bar: on phones the two panes stack and get
+             cramped + double-scroll. Show one full-width pane at a time. -->
+        <div class="wizard-mobile-tabs">
+          <button :class="['wizard-mtab', wizMobilePane === 'catalog' && 'active']"
+                  @click="wizMobilePane = 'catalog'">📚 Catalogo</button>
+          <button :class="['wizard-mtab', wizMobilePane === 'editor' && 'active']"
+                  @click="wizMobilePane = 'editor'">🧩 Pipeline ({{ wizPipeline.length }})</button>
+        </div>
         <div class="wizard-cols">
           <!-- Catalog browser -->
-          <div class="wizard-pane">
+          <div class="wizard-pane" :class="{ 'wiz-pane-hidden-mobile': wizMobilePane !== 'catalog' }">
             <h4>📚 Stage catalog</h4>
             <div class="wizard-filters">
               <select v-model="wizPluginFilter" class="text-input">
@@ -660,7 +668,7 @@ go</pre>
           </div>
 
           <!-- Pipeline editor -->
-          <div class="wizard-pane">
+          <div class="wizard-pane" :class="{ 'wiz-pane-hidden-mobile': wizMobilePane !== 'editor' }">
             <h4>🧩 Pipeline</h4>
             <div class="wizard-editor">
               <div v-if="wizPipeline.length === 0" class="wizard-empty-state">
@@ -3301,6 +3309,9 @@ const wizPipelineName  = ref('')
 const wizIntent        = ref('')
 const wizPluginFilter  = ref('')
 const wizSearch        = ref('')
+// Mobile-only: which designer pane is shown (the tab bar is hidden ≥721px,
+// where both panes render side-by-side regardless of this value).
+const wizMobilePane    = ref('catalog')  // 'catalog' | 'editor'
 const wizStatus        = ref({ kind: null, text: '' })
 
 // AI suggester (server-side LLM call) — given the intent, returns up to
@@ -8541,6 +8552,30 @@ if (typeof window !== 'undefined') {
   margin-bottom: 20px;
 }
 @media (max-width: 720px) { .wizard-cols { grid-template-columns: 1fr; } }
+/* Mobile designer tab bar — hidden on desktop (panes show side-by-side). */
+.wizard-mobile-tabs { display: none; }
+.wizard-mtab {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--vp-c-divider);
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-2);
+  border-radius: 8px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.wizard-mtab.active {
+  background: var(--vp-c-brand-1);
+  border-color: var(--vp-c-brand-1);
+  color: #fff;
+}
+@media (max-width: 720px) {
+  .wizard-mobile-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+  .wiz-pane-hidden-mobile { display: none; }
+  /* Single pane visible → no inter-pane grid gap needed. */
+  .wizard-cols { gap: 0; }
+}
 .wizard-pane {
   border: 1px solid var(--vp-c-divider);
   border-radius: 8px;
@@ -9785,9 +9820,24 @@ if (typeof window !== 'undefined') {
  * ──────────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
   /* Section spacing — give back horizontal room */
+  .demo-app { padding: 0 0.75rem; }           /* was 0 2rem — 64px stolen on a phone */
   .demo-section { padding: 1rem; margin: 1rem 0; }
   .demo-section h2 { font-size: 1.2rem; }
   .demo-section > p { font-size: 0.9rem; }
+
+  /* ── Pipeline designer: stop it rendering "too wide" on phones ──
+     The two-pane catalog|editor grid already collapses to 1 column at
+     720px, but the panes kept desktop padding + an inner 380px scroll
+     box, and long YAML / arg tokens could push the page wider than the
+     viewport. Tighten padding, let grid children shrink (min-width:0),
+     drop the nested scroll so the page scrolls naturally, and force
+     long unbreakable strings to wrap instead of overflowing. */
+  .wizard-card { padding: 14px; max-width: 100%; overflow-x: hidden; }
+  .wizard-cols, .wizard-meta { min-width: 0; }
+  .wizard-pane { padding: 12px; min-width: 0; }
+  .wizard-catalog-list, .wizard-editor { max-height: none; }
+  .wizard-yaml { overflow-x: auto; overflow-wrap: anywhere; word-break: break-word; }
+  .wizard-catalog-row-desc, .wizard-arg-desc, .wizard-chip { overflow-wrap: anywhere; }
 
   /* All multi-column auto-fill grids → single column */
   .demo-grid,
