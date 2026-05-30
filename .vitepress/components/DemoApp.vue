@@ -2595,6 +2595,12 @@ async function uploadAndExecute() {
   if (demoUploadResult.value && demoUploadResult.value.datasetId) {
     // Save datasetId before closing modal (which resets demoUploadResult)
     const datasetId = demoUploadResult.value.datasetId
+    // Safeguard BEFORE launch: if the saved pipeline references a $col but
+    // has no load_* loader, the uploaded dataset would be ignored (fetch
+    // self-seeds, $col → null). Prepend load_csv ${INPUT_CSV_PATH} + persist
+    // so the dataset drives the run. Covers pipelines templatized before the
+    // prepend fix (e.g. $keyword without load_csv).
+    await ensureSavedPipelineLoader()
     // Variable gate: the dataset (and its columns) is now known — detect
     // parameterizable values in the SAVED pipeline's YAML and let the user
     // bind them to a column before the Spark job submits. If gated, the
@@ -2605,6 +2611,32 @@ async function uploadAndExecute() {
     closeUploadModal()
     // Execute with the saved datasetId
     executePipeline(datasetId)
+  }
+}
+
+// Pre-launch safeguard: if the selected saved pipeline contains a $col
+// reference (e.g. `$keyword` in a trace/url) but no load_* loader stage,
+// prepend load_csv ${INPUT_CSV_PATH} and persist it, so the uploaded dataset
+// actually drives the pipeline. A $-token followed by a letter is a column
+// reference; `${ENV}` placeholders (e.g. ${INPUT_CSV_PATH}) are NOT matched
+// because `$` is followed by `{`.
+async function ensureSavedPipelineLoader() {
+  const yaml = (selectedPipelineInfo.value && selectedPipelineInfo.value.pipelineYaml) || ''
+  if (!yaml) return
+  const hasColRef = /\$[A-Za-z_]\w*/.test(yaml)
+  if (!hasColRef || yamlHasInputLoader(yaml)) return
+  const newYaml = ensureInputLoaderInYaml(yaml)
+  if (newYaml === yaml) return
+  try {
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/apply-variables`, {
+      method: 'POST',
+      body: JSON.stringify({ pipeline_name: selectedPipeline.value, pipeline_yaml: newYaml }),
+    })
+    const j = await r.json()
+    if (r.ok && selectedPipelineInfo.value) selectedPipelineInfo.value.pipelineYaml = newYaml
+    else if (!r.ok) console.warn('[demo] ensureSavedPipelineLoader persist failed:', j && j.error)
+  } catch (e) {
+    console.warn('[demo] ensureSavedPipelineLoader error:', e)
   }
 }
 
@@ -2677,8 +2709,14 @@ function rewriteYamlVariables(yamlStr, results, bindings) {
 // the load_* loaders is present — so the uploaded dataset's rows drive the
 // pipeline and the freshly-inserted $col references resolve per row. Mirrors
 // ensureInputLoader() for the in-memory path.
+// True if the YAML already pulls the input dataset in: ANY load* loader
+// stage (load_csv, load_parquet, load_json, load_postgres, load_union,
+// loadCsv, …) or an explicit ${INPUT_CSV_PATH} reference.
+function yamlHasInputLoader(yamlStr) {
+  return /stage:\s*["']?load/i.test(yamlStr) || /\$\{INPUT_CSV_PATH\}/.test(yamlStr)
+}
 function ensureInputLoaderInYaml(yamlStr) {
-  if (/\bload_[a-z_]+\b/.test(yamlStr) || /\$\{INPUT_CSV_PATH\}/.test(yamlStr)) return yamlStr
+  if (yamlHasInputLoader(yamlStr)) return yamlStr
   return yamlStr.replace(/(^|\n)(pipeline:[ \t]*\n)/,
     `$1$2  - stage: load_csv\n    args:\n      - "\${INPUT_CSV_PATH}"\n`)
 }
@@ -6439,8 +6477,10 @@ function applyVariableBindings() {
 // load_* stage is present. Returns true if it added one.
 function ensureInputLoader() {
   const pipe = wizPipeline.value
+  // Recognise ANY load* loader (load_csv/parquet/json/postgres/union/…,
+  // also camelCase loadCsv) — don't double-add if data already enters.
   const hasLoader = pipe.some(r => r && typeof r.stage === 'string'
-    && (r.stage === 'load_csv' || r.stage.startsWith('load_')))
+    && /^load/i.test(r.stage))
   if (hasLoader) return false
   const loader = { stage: 'load_csv', args: { path_or_spec: '${INPUT_CSV_PATH}' } }
   wizPipeline.value = [loader, ...pipe]
