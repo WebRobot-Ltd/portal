@@ -1015,9 +1015,14 @@ go</pre>
 
           <div v-if="varDetectResults.length" class="vardetect-actions">
             <button class="btn btn-primary" @click="applyVariableBindings">
-              ✅ Applica ({{ varBoundCount }} → variabile)
+              {{ varGateExecute ? '✅ Applica e lancia' : '✅ Applica' }} ({{ varBoundCount }} → variabile)
             </button>
-            <button class="btn btn-ghost" @click="closeVariableDetect">Annulla</button>
+            <button v-if="varGateExecute" class="btn btn-secondary" @click="skipVariableGate">
+              Salta e lancia
+            </button>
+            <button class="btn btn-ghost" @click="closeVariableDetect">
+              {{ varGateExecute ? 'Annulla lancio' : 'Annulla' }}
+            </button>
           </div>
           <p class="vardetect-note">
             Le variabili "lega a colonna" diventano <code>$colonna</code> nello YAML e vengono
@@ -5896,7 +5901,7 @@ function pipelineNeedsInputCsv(yamlText) {
   return /\b(load_csv|loadCsv|load_dataset)\b/.test(yamlText || '')
 }
 
-async function wizardSubmit(execute) {
+async function wizardSubmit(execute, _skipVarGate = false) {
   if (!wizValid.value) {
     // First failed save attempt: unlock the per-field red highlight
     // + the "Fix before saving" banner so the user sees what's
@@ -5909,6 +5914,15 @@ async function wizardSubmit(execute) {
   // Validation passed at submit time — clear the highlight state so a
   // subsequent edit doesn't keep the residual red.
   wizShowFieldErrors.value = false
+  // Launch-time variable gate: on Save & Run, detect parameterizable values
+  // (search keyword / url) the user hasn't yet turned into a $variable. If
+  // any, open the 🔗 Variabili modal and HALT — the launch resumes from
+  // applyVariableBindings (apply) or skipVariableGate (skip). Only on
+  // execute, and only when not already resuming (_skipVarGate).
+  if (execute && !_skipVarGate) {
+    const gated = await maybeOpenVariableGate()
+    if (gated) return
+  }
   const name = wizPipelineName.value.trim()
   const yamlText = wizYamlPreview.value
 
@@ -6076,6 +6090,19 @@ const varDetectRan     = ref(false)
 const varDetectResults = ref([])      // [{ stage, path, current, suggested_name, kind, suggested_column, question }]
 const varDetectColumns = ref('')      // comma-separated dataset columns (optional)
 const varBindings      = ref([])      // parallel to results: [{ mode:'column'|'literal', column }]
+// When true the modal is gating a Save & Run launch: apply/skip resume the
+// launch; cancel aborts it. Null/false = opened manually via the toolbar button.
+const varGateExecute   = ref(false)
+
+// Default binding for a detected variable: column-bind when we have a
+// suggested/known column, else literal. Shared by the manual flow + the
+// launch gate so both pre-fill the same way.
+function defaultBindingFor(v) {
+  const sugg = (v.suggested_column && varColumnList.value.includes(v.suggested_column))
+    ? v.suggested_column
+    : (varColumnList.value[0] || v.suggested_column || v.suggested_name || '')
+  return { mode: sugg ? 'column' : 'literal', column: sugg }
+}
 
 const varColumnList = computed(() =>
   varDetectColumns.value.split(',').map(s => s.trim()).filter(Boolean))
@@ -6087,6 +6114,7 @@ function openVariableDetect() {
     wizStatus.value = { kind: 'error', text: 'Fix the validation errors above first.' }
     return
   }
+  varGateExecute.value = false   // manual open — never auto-launches
   varDetectOpen.value = true
   varDetectError.value = null
   varDetectRan.value = false
@@ -6099,6 +6127,52 @@ function openVariableDetect() {
 }
 function closeVariableDetect() {
   varDetectOpen.value = false
+  // Cancelling the modal while it was gating a launch = abort the launch.
+  if (varGateExecute.value) {
+    varGateExecute.value = false
+    wizStatus.value = { kind: 'info', text: 'Lancio annullato. Nessuna variabile applicata.' }
+  }
+}
+
+// Launch gate: called from Save & Run before submitting. Detects
+// parameterizable values; if any are not already a $variable, opens the
+// modal and returns true (caller must halt — the launch resumes from
+// applyVariableBindings / skipVariableGate). Returns false to proceed
+// straight to launch (no candidates, or detection failed — never block a
+// run on a detection hiccup).
+async function maybeOpenVariableGate() {
+  try {
+    wizStatus.value = { kind: 'info', text: 'Controllo variabili…' }
+    const cols = (demoUploadResult.value && Array.isArray(demoUploadResult.value.columns))
+      ? demoUploadResult.value.columns : []
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-variables`, {
+      method: 'POST',
+      body: JSON.stringify({ pipeline_yaml: wizYamlPreview.value, dataset_columns: cols }),
+    })
+    const j = await r.json()
+    if (!r.ok) return false
+    const vars = (Array.isArray(j.variables) ? j.variables : [])
+      .filter(v => v && typeof v.current === 'string' && !v.current.trim().startsWith('$'))
+    if (!vars.length) return false
+    varDetectColumns.value = cols.join(', ')
+    varDetectResults.value = vars
+    varBindings.value = vars.map(defaultBindingFor)
+    varDetectRan.value = true
+    varDetectError.value = null
+    varGateExecute.value = true
+    varDetectOpen.value = true
+    wizStatus.value = { kind: 'info', text: 'Variabili rilevate — scegli come trattarle prima del lancio.' }
+    return true
+  } catch (e) {
+    return false
+  }
+}
+
+// Skip the gate: launch without converting anything to a variable.
+function skipVariableGate() {
+  varDetectOpen.value = false
+  varGateExecute.value = false
+  wizardSubmit(true, true)
 }
 
 async function runVariableDetect() {
@@ -6117,13 +6191,7 @@ async function runVariableDetect() {
     if (!r.ok) throw new Error(j.error || 'infer-variables failed')
     const vars = Array.isArray(j.variables) ? j.variables : []
     varDetectResults.value = vars
-    // Default binding: column-bind when we have a suggested/known column, else literal.
-    varBindings.value = vars.map(v => {
-      const sugg = (v.suggested_column && varColumnList.value.includes(v.suggested_column))
-        ? v.suggested_column
-        : (varColumnList.value[0] || v.suggested_column || v.suggested_name || '')
-      return { mode: sugg ? 'column' : 'literal', column: sugg }
-    })
+    varBindings.value = vars.map(defaultBindingFor)
     varDetectRan.value = true
   } catch (e) {
     varDetectError.value = 'Errore: ' + (e.message || String(e))
@@ -6186,12 +6254,17 @@ function applyVariableBindings() {
     wizPipeline.value = [...wizPipeline.value]
     wizStatus.value = {
       kind: 'success',
-      text: `🔗 ${applied} variabile/i applicate (${names.join(', ')}). Salva o Save & Run con un dataset per lo sweep per-riga.`,
+      text: `🔗 ${applied} variabile/i applicate (${names.join(', ')}).`,
     }
   } else {
     wizStatus.value = { kind: 'info', text: 'Nessuna variabile applicata.' }
   }
-  closeVariableDetect()
+  // If the modal was gating a Save & Run, resume the launch now (with the
+  // rewritten $col YAML). _skipVarGate=true so we don't re-detect/loop.
+  const wasGating = varGateExecute.value
+  varDetectOpen.value = false
+  varGateExecute.value = false
+  if (wasGating) wizardSubmit(true, true)
 }
 
 async function runValidation() {
@@ -8092,7 +8165,7 @@ if (typeof window !== 'undefined') {
   flex-wrap: wrap;
 }
 .exec-summary {
-  color: #444;
+  color: var(--vp-c-text-2);
   line-height: 1.7;
   margin-bottom: 12px;
 }
@@ -8313,8 +8386,9 @@ if (typeof window !== 'undefined') {
 
 /* ─── Pipeline wizard ──────────────────────────────────────── */
 .wizard-card {
-  background: white;
-  border: 1px solid #e0e0e0;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  border: 1px solid var(--vp-c-divider);
   border-radius: 12px;
   padding: 20px;
 }
@@ -8333,14 +8407,15 @@ if (typeof window !== 'undefined') {
 }
 @media (max-width: 720px) { .wizard-cols { grid-template-columns: 1fr; } }
 .wizard-pane {
-  border: 1px solid #e0e0e0;
+  border: 1px solid var(--vp-c-divider);
   border-radius: 8px;
   padding: 15px;
-  background: #fafbfc;
+  background: var(--vp-c-bg-alt);
+  color: var(--vp-c-text-1);
 }
 .wizard-pane h4 {
   margin: 0 0 10px 0;
-  color: #333;
+  color: var(--vp-c-text-1);
 }
 .wizard-filters {
   display: flex;
@@ -8364,8 +8439,9 @@ if (typeof window !== 'undefined') {
 .wizard-catalog-row {
   padding: 8px 10px;
   margin-bottom: 6px;
-  background: white;
-  border: 1px solid #e0e0e0;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  border: 1px solid var(--vp-c-divider);
   border-radius: 6px;
   cursor: pointer;
   transition: border-color 0.15s ease;
@@ -8416,8 +8492,9 @@ if (typeof window !== 'undefined') {
   margin-top: 4px;
 }
 .wizard-editor-row {
-  background: white;
-  border: 1px solid #e0e0e0;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  border: 1px solid var(--vp-c-divider);
   border-radius: 6px;
   padding: 10px;
   margin-bottom: 8px;
@@ -8437,12 +8514,12 @@ if (typeof window !== 'undefined') {
 }
 .wizard-editor-arg label {
   font-size: 0.85em;
-  color: #555;
+  color: var(--vp-c-text-2);
   display: block;
   margin-bottom: 3px;
 }
 .wizard-arg-type {
-  color: #999;
+  color: var(--vp-c-text-3);
   font-weight: normal;
 }
 .wizard-arg-desc {
@@ -8454,7 +8531,9 @@ if (typeof window !== 'undefined') {
 .wizard-arg-input {
   width: 100%;
   padding: 6px 8px;
-  border: 1px solid #d0d0d0;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
+  border: 1px solid var(--vp-c-divider);
   border-radius: 4px;
   font-family: inherit;
   font-size: 0.9em;
@@ -8481,9 +8560,9 @@ if (typeof window !== 'undefined') {
   margin-left: 8px;
   font-size: 0.9em;
 }
-.wizard-status-error   { color: #b00020; }
-.wizard-status-success { color: #43a047; }
-.wizard-status-info    { color: #444; }
+.wizard-status-error   { color: #ef4444; }
+.wizard-status-success { color: #22c55e; }
+.wizard-status-info    { color: var(--vp-c-text-2); }
 
 /* ─── Small / ghost / danger button variants ──────────────── */
 .btn-sm  { padding: 6px 12px; font-size: 0.85rem; }
@@ -8506,14 +8585,17 @@ if (typeof window !== 'undefined') {
 .text-input {
   width: 100%;
   padding: 8px 12px;
-  border: 2px solid #e0e0e0;
+  border: 2px solid var(--vp-c-divider);
   border-radius: 6px;
   font-family: inherit;
   font-size: 0.95rem;
-  background: white;
+  /* Theme-aware: was a fixed `background:white` with no color, which left
+     VitePress's light text on white = invisible in dark mode. */
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
 }
 .text-input:focus {
-  border-color: #2196f3;
+  border-color: var(--vp-c-brand-1);
   outline: none;
 }
 
@@ -8662,7 +8744,8 @@ if (typeof window !== 'undefined') {
   padding: 24px;
 }
 .picker-modal {
-  background: white;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
   border-radius: 12px;
   /* Use most of the screen — sites like ebay/amazon don't fit in 1100px
      and force their own horizontal scroll that the picker can't see. */
@@ -8954,9 +9037,10 @@ if (typeof window !== 'undefined') {
   font-size: 0.85em;
 }
 .picker-result {
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid var(--vp-c-divider);
   padding: 10px 14px;
-  background: white;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
   max-height: 200px;
   overflow-y: auto;
 }
@@ -9170,8 +9254,9 @@ if (typeof window !== 'undefined') {
 .picker-ai-tag.llm    { background: #d1fae5; color: #065f46; }
 .picker-ai-tag.refine { background: #dbeafe; color: #1e40af; }
 .picker-ai-card {
-  background: white;
-  border: 1px solid #e0e0e0;
+  background: var(--vp-c-bg-soft);
+  color: var(--vp-c-text-1);
+  border: 1px solid var(--vp-c-divider);
   border-radius: 4px;
   padding: 6px 8px;
   margin: 4px 0;
@@ -9258,7 +9343,8 @@ if (typeof window !== 'undefined') {
 .wizard-python-entry {
   margin-top: 10px;
   padding: 8px 10px;
-  background: white;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-1);
   border: 1px solid #fcd34d;
   border-radius: 6px;
 }
@@ -9716,6 +9802,15 @@ if (typeof window !== 'undefined') {
  * AI Magic flatSelect preview and picker tabs overflow on phones.
  * ──────────────────────────────────────────────────────────────── */
 @media (max-width: 768px) {
+  /* Validate-selectors modal: the two-pane body is a fixed
+     minmax(420px,420px) grid (~840px) that overflows a 100vw phone/
+     tablet modal. Collapse to a single column and let it scroll
+     vertically; swap the left pane's right-border to a bottom-border. */
+  .validate-body { grid-template-columns: 1fr; overflow-y: auto; }
+  .validate-left { border-right: 0; border-bottom: 1px solid var(--vp-c-divider); }
+  /* Intent row: stack the input above its suggest button. */
+  .wizard-intent-row { flex-direction: column; align-items: stretch; }
+  .wizard-intent-row .btn { width: 100%; }
   /* HITL notification bell — pinned bottom-right on mobile so it
      doesn't overlap the VitePress sticky topbar / nav drawer that
      occupies the top edge on touch. */
@@ -9820,6 +9915,12 @@ if (typeof window !== 'undefined') {
   .picker-mode-tabs   { gap: 3px; }
   .picker-tab         { padding: 3px 6px; font-size: 0.72em; }
   .picker-iframe      { min-height: 320px; height: 45vh; }
+  /* Variabili modal: let the column + per-field inputs go full-width
+     instead of forcing their 220/180px min-width (which overflows
+     two-up on a ~375px phone). */
+  .vardetect-cols .text-input,
+  .vardetect-choice .text-input { min-width: 0; width: 100%; }
+  .vardetect-choice { flex-direction: column; align-items: stretch; }
 }
 </style>
 
