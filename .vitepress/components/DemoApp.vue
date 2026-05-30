@@ -2673,12 +2673,25 @@ function rewriteYamlVariables(yamlStr, results, bindings) {
   return { yaml: out, count }
 }
 
+// Prepend a `load_csv ${INPUT_CSV_PATH}` stage to a YAML STRING when none of
+// the load_* loaders is present — so the uploaded dataset's rows drive the
+// pipeline and the freshly-inserted $col references resolve per row. Mirrors
+// ensureInputLoader() for the in-memory path.
+function ensureInputLoaderInYaml(yamlStr) {
+  if (/\bload_[a-z_]+\b/.test(yamlStr) || /\$\{INPUT_CSV_PATH\}/.test(yamlStr)) return yamlStr
+  return yamlStr.replace(/(^|\n)(pipeline:[ \t]*\n)/,
+    `$1$2  - stage: load_csv\n    args:\n      - "\${INPUT_CSV_PATH}"\n`)
+}
+
 // Apply path for the saved-pipeline gate: rewrite + persist the YAML on the
 // backend, then execute the (now-updated) pipeline with the dataset.
 async function applyVariableBindingsSaved() {
   const dsId = varGateSaved.value ? varGateSaved.value.datasetId : null
   const srcYaml = (selectedPipelineInfo.value && selectedPipelineInfo.value.pipelineYaml) || ''
-  const { yaml: newYaml, count } = rewriteYamlVariables(srcYaml, varDetectResults.value, varBindings.value)
+  let { yaml: newYaml, count } = rewriteYamlVariables(srcYaml, varDetectResults.value, varBindings.value)
+  // If we turned anything into a $col, make sure the input dataset is loaded
+  // so those columns exist at runtime.
+  if (count > 0) newYaml = ensureInputLoaderInYaml(newYaml)
   varDetectOpen.value = false
   varGateSaved.value = null
   if (count > 0 && newYaml !== srcYaml) {
@@ -6397,10 +6410,18 @@ function applyVariableBindings() {
     if (applyOneVariable(v, '$' + col)) { applied++; names.push('$' + col) }
   })
   if (applied > 0) {
+    // A $col only resolves if the input-dataset rows DRIVE the pipeline.
+    // A fetch-first pipeline self-seeds from its literal URL (PipelineEngine
+    // build basePlan=None → blank row, no $col column), so the dataset is
+    // ignored. Prepend a load_csv reading ${INPUT_CSV_PATH} so the uploaded
+    // dataset's rows feed the fetch and $col resolves per row. No-op if a
+    // loader already exists.
+    const addedLoader = ensureInputLoader()
     wizPipeline.value = [...wizPipeline.value]
     wizStatus.value = {
       kind: 'success',
-      text: `🔗 ${applied} variabile/i applicate (${names.join(', ')}).`,
+      text: `🔗 ${applied} variabile/i applicate (${names.join(', ')})`
+        + (addedLoader ? ' + load_csv di input aggiunto in testa.' : '.'),
     }
   } else {
     wizStatus.value = { kind: 'info', text: 'Nessuna variabile applicata.' }
@@ -6411,6 +6432,19 @@ function applyVariableBindings() {
   varDetectOpen.value = false
   varGateExecute.value = false
   if (wasGating) wizardSubmit(true, true)
+}
+
+// Ensure the pipeline has an input loader so $col references resolve from
+// the uploaded dataset's rows. Prepends `load_csv ${INPUT_CSV_PATH}` when no
+// load_* stage is present. Returns true if it added one.
+function ensureInputLoader() {
+  const pipe = wizPipeline.value
+  const hasLoader = pipe.some(r => r && typeof r.stage === 'string'
+    && (r.stage === 'load_csv' || r.stage.startsWith('load_')))
+  if (hasLoader) return false
+  const loader = { stage: 'load_csv', args: { path_or_spec: '${INPUT_CSV_PATH}' } }
+  wizPipeline.value = [loader, ...pipe]
+  return true
 }
 
 async function runValidation() {
