@@ -1015,13 +1015,13 @@ go</pre>
 
           <div v-if="varDetectResults.length" class="vardetect-actions">
             <button class="btn btn-primary" @click="applyVariableBindings">
-              {{ varGateExecute ? '✅ Applica e lancia' : '✅ Applica' }} ({{ varBoundCount }} → variabile)
+              {{ varGateActive ? '✅ Applica e lancia' : '✅ Applica' }} ({{ varBoundCount }} → variabile)
             </button>
-            <button v-if="varGateExecute" class="btn btn-secondary" @click="skipVariableGate">
+            <button v-if="varGateActive" class="btn btn-secondary" @click="skipVariableGate">
               Salta e lancia
             </button>
             <button class="btn btn-ghost" @click="closeVariableDetect">
-              {{ varGateExecute ? 'Annulla lancio' : 'Annulla' }}
+              {{ varGateActive ? 'Annulla lancio' : 'Annulla' }}
             </button>
           </div>
           <p class="vardetect-note">
@@ -2579,18 +2579,116 @@ async function uploadAndExecute() {
   // Validate input based on mode
   if (csvInputMode.value === 'file' && !demoUploadFile.value) return
   if (csvInputMode.value === 'manual' && (!demoCsvText.value || !demoCsvText.value.trim())) return
-  
+
   // First upload the dataset
   await uploadDemoDataset()
-  
+
   // If upload successful, execute pipeline
   if (demoUploadResult.value && demoUploadResult.value.datasetId) {
     // Save datasetId before closing modal (which resets demoUploadResult)
     const datasetId = demoUploadResult.value.datasetId
+    // Variable gate: the dataset (and its columns) is now known — detect
+    // parameterizable values in the SAVED pipeline's YAML and let the user
+    // bind them to a column before the Spark job submits. If gated, the
+    // launch resumes from applyVariableBindings / skipVariableGate. If no
+    // candidates (or detection fails) → proceed to execute as before.
+    const gated = await maybeGateSavedExecute(datasetId)
+    if (gated) return
     closeUploadModal()
     // Execute with the saved datasetId
     executePipeline(datasetId)
   }
+}
+
+// Columns for the variable gate, derived from the just-uploaded CSV: prefer
+// the upload response's columns, else parse the header row of the manual CSV
+// text. Empty → the modal lets the user type a column name.
+function csvColumnsFromUpload() {
+  const res = demoUploadResult.value
+  if (res && Array.isArray(res.columns) && res.columns.length) return res.columns
+  if (csvInputMode.value === 'manual' && demoCsvText.value) {
+    const firstLine = demoCsvText.value.split(/\r?\n/)[0] || ''
+    return firstLine.split(',').map(s => s.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
+  }
+  return []
+}
+
+// Launch gate for the Upload & Execute (saved-pipeline) path. Returns true
+// if the modal was opened (caller must halt); false to proceed to execute.
+async function maybeGateSavedExecute(datasetId) {
+  try {
+    const srcYaml = (selectedPipelineInfo.value && selectedPipelineInfo.value.pipelineYaml) || ''
+    if (!srcYaml) return false
+    const cols = csvColumnsFromUpload()
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-variables`, {
+      method: 'POST',
+      body: JSON.stringify({ pipeline_yaml: srcYaml, dataset_columns: cols }),
+    })
+    const j = await r.json()
+    if (!r.ok) return false
+    const vars = (Array.isArray(j.variables) ? j.variables : [])
+      .filter(v => v && typeof v.current === 'string' && !v.current.trim().startsWith('$'))
+    if (!vars.length) return false
+    varDetectColumns.value = cols.join(', ')
+    varDetectResults.value = vars
+    varBindings.value = vars.map(defaultBindingFor)
+    varDetectRan.value = true
+    varDetectError.value = null
+    varGateExecute.value = false
+    varGateSaved.value = { datasetId }
+    varDetectOpen.value = true
+    return true
+  } catch (e) {
+    return false
+  }
+}
+
+// Rewrite a saved pipeline's YAML STRING: replace each column-bound
+// variable's current literal with `$column`. Quoted forms first to avoid
+// partial hits. Returns the new YAML + how many substitutions landed.
+function rewriteYamlVariables(yamlStr, results, bindings) {
+  let out = yamlStr
+  let count = 0
+  results.forEach((v, vi) => {
+    const b = bindings[vi]
+    if (!b || b.mode !== 'column') return
+    const col = (b.column || '').trim().replace(/^\$+/, '')
+    if (!col || !v.current) return
+    const token = '$' + col
+    const cur = String(v.current)
+    const before = out
+    out = out.split(`"${cur}"`).join(`"${token}"`)
+    if (out === before) out = out.split(`'${cur}'`).join(`'${token}'`)
+    if (out === before) out = out.split(cur).join(token)
+    if (out !== before) count++
+  })
+  return { yaml: out, count }
+}
+
+// Apply path for the saved-pipeline gate: rewrite + persist the YAML on the
+// backend, then execute the (now-updated) pipeline with the dataset.
+async function applyVariableBindingsSaved() {
+  const dsId = varGateSaved.value ? varGateSaved.value.datasetId : null
+  const srcYaml = (selectedPipelineInfo.value && selectedPipelineInfo.value.pipelineYaml) || ''
+  const { yaml: newYaml, count } = rewriteYamlVariables(srcYaml, varDetectResults.value, varBindings.value)
+  varDetectOpen.value = false
+  varGateSaved.value = null
+  if (count > 0 && newYaml !== srcYaml) {
+    try {
+      const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/apply-variables`, {
+        method: 'POST',
+        body: JSON.stringify({ pipeline_name: selectedPipeline.value, pipeline_yaml: newYaml }),
+      })
+      const j = await r.json()
+      if (!r.ok) throw new Error(j.error || 'apply-variables failed')
+      if (selectedPipelineInfo.value) selectedPipelineInfo.value.pipelineYaml = newYaml
+    } catch (e) {
+      demoUploadError.value = 'Errore applicazione variabili: ' + (e.message || String(e))
+      return  // don't run a half-rewritten pipeline; leave the upload modal open
+    }
+  }
+  closeUploadModal()
+  if (dsId != null) executePipeline(dsId)
 }
 
 async function executePipeline(datasetIdParam = null) {
@@ -6090,9 +6188,14 @@ const varDetectRan     = ref(false)
 const varDetectResults = ref([])      // [{ stage, path, current, suggested_name, kind, suggested_column, question }]
 const varDetectColumns = ref('')      // comma-separated dataset columns (optional)
 const varBindings      = ref([])      // parallel to results: [{ mode:'column'|'literal', column }]
-// When true the modal is gating a Save & Run launch: apply/skip resume the
-// launch; cancel aborts it. Null/false = opened manually via the toolbar button.
+// When true the modal is gating a Save & Run launch (wizard in-memory path):
+// apply/skip resume the launch; cancel aborts it. Null/false = opened manually.
 const varGateExecute   = ref(false)
+// Non-null when gating the Upload & Execute path on a SAVED pipeline. Holds
+// { datasetId } so apply/skip can resume the run after rewriting+persisting.
+const varGateSaved     = ref(null)
+// Either gate active → the modal shows "…e lancia" actions instead of Apply.
+const varGateActive    = computed(() => varGateExecute.value || !!varGateSaved.value)
 
 // Default binding for a detected variable: column-bind when we have a
 // suggested/known column, else literal. Shared by the manual flow + the
@@ -6131,6 +6234,11 @@ function closeVariableDetect() {
   if (varGateExecute.value) {
     varGateExecute.value = false
     wizStatus.value = { kind: 'info', text: 'Lancio annullato. Nessuna variabile applicata.' }
+  }
+  // Saved-pipeline gate cancel: abort the run, leave the upload modal open so
+  // the user can retry or close it themselves.
+  if (varGateSaved.value) {
+    varGateSaved.value = null
   }
 }
 
@@ -6171,6 +6279,15 @@ async function maybeOpenVariableGate() {
 // Skip the gate: launch without converting anything to a variable.
 function skipVariableGate() {
   varDetectOpen.value = false
+  // Saved-pipeline gate: execute the saved pipeline as-is with the dataset.
+  if (varGateSaved.value) {
+    const dsId = varGateSaved.value.datasetId
+    varGateSaved.value = null
+    closeUploadModal()
+    if (dsId != null) executePipeline(dsId)
+    return
+  }
+  // Wizard in-memory gate: resume Save & Run.
   varGateExecute.value = false
   wizardSubmit(true, true)
 }
@@ -6241,6 +6358,10 @@ function applyOneVariable(v, token) {
 }
 
 function applyVariableBindings() {
+  // Saved-pipeline gate (Upload & Execute): rewrite the YAML string +
+  // persist on the backend, then run. Different from the wizard in-memory
+  // path below which mutates wizPipeline.
+  if (varGateSaved.value) { return applyVariableBindingsSaved() }
   let applied = 0
   const names = []
   varDetectResults.value.forEach((v, vi) => {
