@@ -4353,10 +4353,18 @@ async function handleGeneralizeRequest(d, source) {
   const html = (d && d.html) ? String(d.html) : ''
   if (!html || !source) return
   const sample = (d && d.sampleText) ? String(d.sampleText).slice(0, 120) : ''
-  const prompt = 'Trova il selettore CSS della RIGA/elemento ripetuto della lista'
-    + (sample ? ` che contiene il testo «${sample}»` : '')
-    + '. Deve matchare TUTTE le righe simili: ignora classi auto-generate/hashate e '
-    + ':nth-of-type, preferisci tag/attributi stabili (data-testid, custom element, classi semantiche).'
+  const nested = !!(d && d.nested)
+  const prompt = nested
+    ? ('This is a NESTED / threaded structure (e.g. comments) where the same item '
+        + 'repeats at MULTIPLE nesting depths' + (sample ? ` (one contains the text «${sample}»)` : '')
+        + '. Return ONE depth-agnostic CSS selector that matches EVERY node at EVERY depth '
+        + '(top-level and all replies), e.g. the custom element tag or a stable class/attribute. '
+        + 'Do NOT constrain by depth or position; ignore auto-generated/hashed classes and '
+        + ':nth-of-type; prefer stable tags/attributes (custom element, data-testid, semantic class).')
+    : ('Find the CSS selector of the repeating ROW/item of the list'
+        + (sample ? ` that contains the text «${sample}»` : '')
+        + '. It must match ALL similar rows: ignore auto-generated/hashed classes and '
+        + ':nth-of-type, prefer stable tags/attributes (data-testid, custom element, semantic classes).')
   try {
     wizStatus.value = { kind: 'info', text: '🧬 Generalizing row selector (AI)…' }
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-segment`, {
