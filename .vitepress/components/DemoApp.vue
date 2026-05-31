@@ -812,9 +812,20 @@ go</pre>
                       type="text"
                       :value="row.args[a.name] != null ? row.args[a.name] : ''"
                       :placeholder="argPlaceholder(a)"
+                      :list="isFieldNameArg(a) && upstreamFieldNames(idx).length ? ('wizfielddl-' + idx + '-' + a.name) : null"
                       :class="['text-input', 'wizard-arg-input', wizShowFieldErrors && a.required && (row.args[a.name] == null || String(row.args[a.name]).trim() === '') ? 'wizard-arg-missing' : '']"
                       @input="updateStageArg(idx, a.name, $event.target.value)"
                     />
+                    <!-- Suggest the columns produced by upstream extract/
+                         flatSelect so the user can pick an existing field
+                         (e.g. sentiment.textField) instead of retyping it.
+                         datalist keeps free-text for defaults like "message". -->
+                    <datalist
+                      v-if="isFieldNameArg(a) && upstreamFieldNames(idx).length"
+                      :id="'wizfielddl-' + idx + '-' + a.name"
+                    >
+                      <option v-for="fn in upstreamFieldNames(idx)" :key="fn" :value="fn"></option>
+                    </datalist>
                     <button
                       v-if="isSelectorArg(a)"
                       class="btn btn-secondary btn-xs wizard-pick-btn"
@@ -823,6 +834,21 @@ go</pre>
                         : 'Open the page in the picker and click an element to get a CSS selector'"
                       @click="openPicker(idx, a.name, pickModeFor(row.stage))"
                     >🎯 {{ pickModeFor(row.stage) === 'multi-sample' ? 'Pick (multi)' : 'Pick' }}</button>
+                  </div>
+                  <!-- One-click selection of a column already produced by an
+                       upstream extract/flatSelect. Facilitates field-name args
+                       (sentiment.textField, aggregatesentiment.groupField) so
+                       the user doesn't retype a field they already defined. -->
+                  <div v-if="isFieldNameArg(a) && upstreamFieldNames(idx).length" class="wizard-field-chips">
+                    <span class="wizard-field-chips-label">fields:</span>
+                    <button
+                      v-for="fn in upstreamFieldNames(idx)"
+                      :key="fn"
+                      type="button"
+                      :class="['wizard-field-chip', String(row.args[a.name] || '') === fn ? 'active' : '']"
+                      :title="'Use the upstream field &quot;' + fn + '&quot;'"
+                      @click="updateStageArg(idx, a.name, fn)"
+                    >{{ fn }}</button>
                   </div>
                 </div>
                 <!-- Recorded trace inline preview. Shows every action the
@@ -5381,6 +5407,38 @@ function updateFieldProp(idx, fieldIdx, prop, value) {
   row._fields[fieldIdx] = { ...row._fields[fieldIdx], [prop]: value }
   wizPipeline.value = [...wizPipeline.value]
 }
+// Distinct field names (`as`) produced by upstream extract / flatSelect /
+// iextract stages ABOVE this one. Lets downstream stages that take a column
+// name (sentiment.textField, aggregatesentiment.groupField, …) offer the
+// already-defined fields instead of forcing the user to retype them.
+function upstreamFieldNames(idx) {
+  const out = []
+  const seen = new Set()
+  const pipe = wizPipeline.value || []
+  const upTo = Math.min(idx, pipe.length)
+  for (let i = 0; i < upTo; i++) {
+    const row = pipe[i]
+    if (!row) continue
+    if (row.stage === 'extract' || row.stage === 'flatSelect' || row.stage === 'iextract') {
+      for (const f of (row._fields || [])) {
+        const nm = f && f.as ? String(f.as).trim() : ''
+        if (nm && !seen.has(nm)) { seen.add(nm); out.push(nm) }
+      }
+    }
+  }
+  return out
+}
+// Does this stage arg reference a column/field name (vs a selector / literal)?
+// Drives the field-name dropdown. Matches the catalog's field-name args
+// (textField / groupField / *Field / *column) and descriptions that say so.
+function isFieldNameArg(a) {
+  if (!a || !a.name) return false
+  const n = String(a.name).toLowerCase()
+  if (n === 'textfield' || n === 'groupfield' || n === 'field' || n === 'column') return true
+  if (n.endsWith('field') || n.endsWith('column')) return true
+  const d = String(a.description || '').toLowerCase()
+  return d.includes('field name') || d.includes('column name')
+}
 // Custom AttributeResolvers shipped by plugins. Dispatched by the runtime's
 // ScalaDynamicExtractor on the registered NAME (AttributeResolverRegistry
 // normalizes class names: `LLMResolver` → `llm`, `PriceResolver` → `price`).
@@ -9050,6 +9108,36 @@ if (typeof window !== 'undefined') {
 }
 .wizard-chip:hover {
   background: rgba(102, 126, 234, 0.20);
+}
+.wizard-field-chips {
+  margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+.wizard-field-chips-label {
+  color: #888;
+  font-size: 0.76em;
+  margin-right: 2px;
+}
+.wizard-field-chip {
+  background: rgba(46, 160, 67, 0.10);
+  color: #1a7f37;
+  border: 1px solid rgba(46, 160, 67, 0.30);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 0.76em;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.wizard-field-chip:hover {
+  background: rgba(46, 160, 67, 0.20);
+}
+.wizard-field-chip.active {
+  background: #1a7f37;
+  color: #fff;
+  border-color: #1a7f37;
 }
 .wizard-arg-required {
   color: #b00020;
