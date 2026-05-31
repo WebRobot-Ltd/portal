@@ -4466,7 +4466,22 @@ async function handleGeneralizeRequest(d, source) {
   if (!html || !source) return
   const sample = (d && d.sampleText) ? String(d.sampleText).slice(0, 120) : ''
   const nested = !!(d && d.nested)
-  const prompt = nested
+  // Link-following origin (explore/join/visitExplore): the stage navigates to
+  // each link's href, so the selector MUST terminate on the <a> anchor — not
+  // an inner <span>/text node (which has no href → Visit('A.href)=N/A → no
+  // navigation → null rows). The deterministic picker climb to closest('a[href]')
+  // is the primary fix; this LLM prompt rectifies/generalizes when it fires.
+  const linkFollow = (typeof d.linkMode === 'boolean')
+    ? d.linkMode
+    : (pickerOriginIsExplore.value || pickerOriginIsJoin.value)
+  const prompt = linkFollow
+    ? ('Find the CSS selector of the repeating LINK in this list'
+        + (sample ? ` whose text is «${sample}»` : '')
+        + '. The selector MUST target the <a> anchor element itself and END at that '
+        + '`a` (so it carries an href to follow) — do NOT end on an inner span/heading/'
+        + 'text node. It must match ALL such links: ignore auto-generated/hashed classes '
+        + 'and :nth-of-type; prefer stable tags/attributes, ending in `a` or `a[href]`.')
+    : nested
     ? ('This is a NESTED / threaded structure (e.g. comments) where the same item '
         + 'repeats at MULTIPLE nesting depths' + (sample ? ` (one contains the text «${sample}»)` : '')
         + '. Return ONE depth-agnostic CSS selector that matches EVERY node at EVERY depth '
