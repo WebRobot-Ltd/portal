@@ -4276,7 +4276,10 @@ function setPickerMode(m) {
   // AI Magic uses selector-single under the hood (so click → LCA-refine works).
   const ifrMode = m === 'ai-magic' ? 'selector-single' : m
   const ifr = document.getElementById('wr-picker-iframe')
-  try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-mode', mode: ifrMode }, '*') } catch (_) {}
+  // linkMode: explore/join/visitExplore FOLLOW a link, so the picker must
+  // climb to the <a href>. flatSelect/extract pick rows/fields, not links.
+  const linkMode = pickerOriginIsExplore.value || pickerOriginIsJoin.value
+  try { ifr && ifr.contentWindow && ifr.contentWindow.postMessage({ type: 'webrobot-picker-mode', mode: ifrMode, linkMode }, '*') } catch (_) {}
   if (m === 'action-record') pickerSelected.value = null
   if (m !== 'action-record')  pickerActions.value = []
   if (m !== 'multi-sample') {
@@ -4666,7 +4669,8 @@ function onPickerMessage(ev) {
     const ifrMode = pickerMode.value === 'ai-magic'
       ? 'selector-single'
       : (pickerMode.value || 'selector-single')
-    try { ev.source && ev.source.postMessage({ type: 'webrobot-picker-mode', mode: ifrMode }, '*') } catch (_) {}
+    const linkMode = pickerOriginIsExplore.value || pickerOriginIsJoin.value
+    try { ev.source && ev.source.postMessage({ type: 'webrobot-picker-mode', mode: ifrMode, linkMode }, '*') } catch (_) {}
     // CRITICAL: re-send the container (segment) selector on EVERY iframe
     // (re)load. The one-shot setTimeout in openMultiFieldPicker /
     // openFieldPicker fires once; if the iframe reloads afterwards (e.g.
@@ -5692,7 +5696,7 @@ function openMultiFieldPicker(stageIdx, opts) {
       if (ifr && ifr.contentWindow) {
         // Push the mode FIRST so picker.js knows we're in multi-field
         // when it processes the container config + the first clicks.
-        ifr.contentWindow.postMessage({ type: 'webrobot-picker-mode', mode: 'multi-field' }, '*')
+        ifr.contentWindow.postMessage({ type: 'webrobot-picker-mode', mode: 'multi-field', linkMode: false }, '*')
         if (segSel) {
           // flatSelect-only: confine clicks to descendants of one
           // segment match and produce RELATIVE field selectors.
