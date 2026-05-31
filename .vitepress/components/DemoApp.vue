@@ -1601,9 +1601,13 @@ go</pre>
           <!-- Pre-Send draft view: just lets the user see WHAT is queued
                and clear it. No "Apply to trace" here — that would
                freeze a draft that hasn't been replayed yet and could
-               easily mismatch the live Camoufox tab. -->
-          <pre v-if="pickerActionsYaml" class="picker-actions-yaml picker-actions-draft">{{ pickerActionsYaml }}</pre>
-          <div v-if="pickerActionsYaml" class="picker-actions">
+               easily mismatch the live Camoufox tab. Hidden during the
+               navigate-first phase (pickerIntendedMode): pure navigation
+               must not surface a trace list — you're only positioning the
+               mirror, the actions are sent (to advance the page) but not
+               recorded. -->
+          <pre v-if="pickerActionsYaml && !pickerIntendedMode" class="picker-actions-yaml picker-actions-draft">{{ pickerActionsYaml }}</pre>
+          <div v-if="pickerActionsYaml && !pickerIntendedMode" class="picker-actions">
             <button class="btn btn-ghost btn-sm" @click="clearStagedActions">Clear staged</button>
           </div>
 
@@ -1613,7 +1617,7 @@ go</pre>
                stage even when they didn't record any picker action —
                useful when the wizard is opened only to pick the target
                URL for a fetch/visit stage. -->
-          <div v-if="committedActions.length || pickerOpenedUrl" class="picker-committed-panel">
+          <div v-if="(committedActions.length || pickerOpenedUrl) && !pickerIntendedMode" class="picker-committed-panel">
             <div class="picker-committed-head">
               <strong v-if="committedActions.length">🎬 Committed on Camoufox: {{ committedActions.length }}</strong>
               <strong v-else>🔗 URL loaded</strong>
