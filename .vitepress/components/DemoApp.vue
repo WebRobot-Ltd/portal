@@ -3574,7 +3574,14 @@ function promoteToIntendedMode() {
   if (!pickerIntendedMode.value) return
   const m = pickerIntendedMode.value
   pickerIntendedMode.value = null
-  setPickerMode(m)
+  // multi-field needs its container-selector config re-pushed to the
+  // iframe — route through openMultiFieldPicker (direct) instead of a
+  // bare mode switch so flatSelect stays segment-relative.
+  if (m === 'multi-field' && pickerTargetStageIdx.value != null) {
+    openMultiFieldPicker(pickerTargetStageIdx.value, { direct: true })
+  } else {
+    setPickerMode(m)
+  }
 }
 
 // Shared helper — every picker entry point should call this AFTER
@@ -3592,19 +3599,29 @@ function tryResumePausedSession() {
 function openPicker(stageIdx, argName, mode) {
   pickerTargetStageIdx.value = stageIdx != null ? stageIdx : null
   pickerTargetArgName.value  = argName || null
-  // Land DIRECTLY in the requested mode. The previous 2-phase
-  // "navigate-first then promote via CTA" pattern was confusing —
-  // when the user clicks the 🎯 icon on an arg, they intend to pick
-  // a selector NOW, not navigate first. If they need to drive the
-  // page they can use the URL bar at the top of the picker modal.
-  // openMultiFieldPicker (the "🎯 Pick fields" button) follows the
-  // same convention.
+  // NAVIGATE-FIRST. Every selection mode (pick a selector / sample links)
+  // opens in action-record (pure navigation — send actions to drive the
+  // mirror to the right page; NOT a recorded stage trace) and surfaces the
+  // "📌 Start <X>" CTA to arm selection when the user is on the target
+  // page. The mirror often opens on a landing/search page where the target
+  // elements don't exist yet (needs a search / pagination / a tab click)
+  // — picking must come AFTER navigation. Navigation needs a real browser
+  // → force Camoufox. (Was previously land-directly; restored per product
+  // requirement that nav precedes selector selection on every stage.)
   const requested = mode || 'selector-single'
-  pickerIntendedMode.value = null
-  pickerMode.value = requested
+  const isSelectionMode = requested === 'multi-sample'
+    || requested === 'selector-list' || requested === 'selector-single'
   pickerSelected.value = null
   pickerActions.value  = []
   pickerOpen.value = true
+  if (isSelectionMode) {
+    pickerIntendedMode.value = requested
+    pickerMode.value = 'action-record'
+    pickerStrategy.value = 'cmf'
+  } else {
+    pickerIntendedMode.value = null
+    pickerMode.value = requested
+  }
   tryResumePausedSession()
 }
 async function closePicker() {
@@ -4157,7 +4174,16 @@ async function forwardStepToCamoufox(actionOrBatch) {
     // sequence the user can "Apply to a fetch/visit trace". Skip
     // pure-back-navigation entries (no useful trace value) to keep
     // the YAML tidy.
-    const committable = batch.filter(a => a && a.type && a.type !== 'Back')
+    //
+    // NAVIGATE-FIRST exception: while pickerIntendedMode is set we are in
+    // pure-navigation (driving the mirror to the right page BEFORE picking)
+    // — those actions are positioning only and must NOT enter the trace.
+    // Once the user clicks "📌 Start <X>" (or the 🎯 Select fields tab)
+    // pickerIntendedMode clears; only an explicit ⏺ Record actions session
+    // after that commits a replayable trace.
+    const committable = pickerIntendedMode.value
+      ? []
+      : batch.filter(a => a && a.type && a.type !== 'Back')
     if (committable.length) {
       committedActions.value = [...committedActions.value, ...committable]
       // Default the apply-dropdown to the first trace-capable stage so
@@ -5499,11 +5525,10 @@ function replaceFields(idx, newFields) {
 function openFieldPicker(stageIdx, fieldIdx) {
   pickerTargetStageIdx.value = stageIdx
   pickerTargetArgName.value  = '__field_selector__:' + fieldIdx
-  pickerIntendedMode.value = 'selector-single'
-  // Go straight to selector-single — the page is already loaded (the
-  // row selector was picked on it), so the navigate-first action-record
-  // step just left the user on a toolbar with no active tab now that
-  // List / Pick samples / Record are hidden during field selection.
+  // Re-picking a SINGLE field on the already-loaded page → go straight to
+  // selector-single (no navigate-first CTA; the page is already the right
+  // one because the row/segment was just picked on it).
+  pickerIntendedMode.value = null
   pickerMode.value = 'selector-single'
   pickerSelected.value = null
   pickerOpen.value = true
@@ -5600,10 +5625,25 @@ async function openAiSuggestFields(stageIdx) {
 // Open picker in multi-field mode for batch field picking. When the
 // stage is flatSelect with a segment selector already set, configure
 // the picker to constrain clicks to descendants of that container.
-function openMultiFieldPicker(stageIdx) {
+function openMultiFieldPicker(stageIdx, opts) {
+  const direct = !!(opts && opts.direct)
   pickerTargetStageIdx.value = stageIdx
   pickerTargetArgName.value  = '__fields_multi__'
   const row = wizPipeline.value[stageIdx]
+  // NAVIGATE-FIRST (initial open from "🎯 Pick fields"): the detail/list
+  // page may not be loaded yet. Land in pure-navigation (action-record, no
+  // trace) so the user drives the mirror there, then the "📌 Start field
+  // selection" CTA (or the 🎯 Select fields tab) arms field clicking.
+  // enterFieldSelection() passes {direct:true} to skip this — the user has
+  // already navigated and explicitly asked to start selecting.
+  if (!direct) {
+    pickerIntendedMode.value = 'multi-field'
+    pickerMode.value = 'action-record'
+    pickerStrategy.value = 'cmf'
+    pickerOpen.value = true
+    tryResumePausedSession()
+    return
+  }
   // Multi-field is the primary mode for "Pick fields" on BOTH:
   //   - flatSelect (list page): user picks N field selectors RELATIVE to
   //     the segment container, applied per-row at runtime.
@@ -5653,7 +5693,7 @@ function openMultiFieldPicker(stageIdx) {
 function enterFieldSelection() {
   const idx = pickerTargetStageIdx.value
   if (idx == null || !wizPipeline.value[idx]) return
-  openMultiFieldPicker(idx)
+  openMultiFieldPicker(idx, { direct: true })
 }
 
 // Open picker in action-record mode tied to a specific stage row.
