@@ -1248,6 +1248,10 @@ go</pre>
             @keyup.enter="loadPickerUrl"
           />
           <button class="btn btn-primary btn-sm" @click="loadPickerUrl">Load page</button>
+          <button v-if="pickerLoadedUrl"
+                  class="btn btn-secondary btn-sm"
+                  title="Re-fetch the current page from the live session — picks up server-side changes (e.g. a cookie banner that was just auto-dismissed) without re-navigating."
+                  @click="refreshPickerMirror">↻ Refresh</button>
         </div>
 
         <!-- Resume banner — safety net for when auto-resume in
@@ -3554,10 +3558,24 @@ const aiAlgoResults  = ref([])           // [{selector|type, confidence, why}]
 const aiLlmResults   = ref([])           // same shape, second tier
 const aiPickedRefined = ref(null)        // LCA refinement from picker click
 const aiRawLlm       = ref(null)
+const pickerReloadNonce    = ref(0)       // bumped by the ↻ Refresh button (wget-mode cache-buster)
 const pickerProxySrc       = computed(() => {
   if (!pickerLoadedUrl.value) return ''
-  return `${API_BASE_URL}/api/webrobot/api/demo/wizard/proxy?url=${encodeURIComponent(pickerLoadedUrl.value)}`
+  return `${API_BASE_URL}/api/webrobot/api/demo/wizard/proxy?url=${encodeURIComponent(pickerLoadedUrl.value)}&_r=${pickerReloadNonce.value}`
 })
+
+// ↻ Refresh — re-fetch the current mirror page without re-navigating.
+// Camoufox: bump cmfReloadKey so the iframe re-pulls the LIVE session DOM
+// (reflects server-side changes since the last snapshot, e.g. a cookie
+// banner that has since been auto-dismissed). wget: bump the nonce so the
+// proxied src changes and the iframe reloads.
+function refreshPickerMirror() {
+  if (pickerStrategy.value === 'cmf' && cmfSessionId.value) {
+    cmfReloadKey.value++
+  } else {
+    pickerReloadNonce.value++
+  }
+}
 
 // Friendly label for the "📌 Start <X>" button — keeps the noun in
 // the CTA aligned with what the wizard actually requested.
