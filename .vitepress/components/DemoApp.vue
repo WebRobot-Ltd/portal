@@ -763,14 +763,23 @@ go</pre>
                         <td><span class="wizard-field-dot" :style="{background: f._color || '#bbb'}"></span></td>
                         <td><input type="text" class="text-input" :value="f.as" @input="updateFieldProp(idx, fIdx, 'as', $event.target.value)" placeholder="column"></td>
                         <td>
-                          <select class="text-input" :value="f.method" @change="updateFieldProp(idx, fIdx, 'method', $event.target.value)">
-                            <option value="text">text</option>
-                            <option value="html">html</option>
-                            <option value="attr:href">attr:href</option>
-                            <option value="attr:src">attr:src</option>
-                            <option value="attr:title">attr:title</option>
-                            <option value="attr:alt">attr:alt</option>
+                          <select class="text-input" :value="f.method" @change="updateFieldProp(idx, fIdx, 'method', $event.target.value)"
+                                  :title="f._attrs && f._attrs.length ? 'Attributes available on the picked element' : 'Pick the field to load its real attributes'">
+                            <option v-for="m in fieldMethodOptions(f)" :key="m.value" :value="m.value">{{ m.label }}</option>
                           </select>
+                          <!-- Discoverable one-click chips for the picked element's
+                               attributes + key resolvers — so the user sees what's
+                               extractable without digging into the dropdown. -->
+                          <div v-if="f._attrs && f._attrs.length" class="wizard-attr-chips">
+                            <button :class="['wizard-attr-chip', f.method === 'text' && 'active']"
+                                    @click="updateFieldProp(idx, fIdx, 'method', 'text')" title="visible text">text</button>
+                            <button :class="['wizard-attr-chip', f.method === 'boilerPipe' && 'active']"
+                                    @click="updateFieldProp(idx, fIdx, 'method', 'boilerPipe')" title="main article text (boilerplate removed)">article</button>
+                            <button v-for="a in f._attrs" :key="a"
+                                    :class="['wizard-attr-chip', f.method === ('attr(' + a + ')') && 'active']"
+                                    @click="updateFieldProp(idx, fIdx, 'method', 'attr(' + a + ')')"
+                                    :title="'attr(' + a + ')'">{{ a }}</button>
+                          </div>
                         </td>
                         <td>
                           <div class="wizard-arg-input-row">
@@ -4412,6 +4421,10 @@ function onPickerMessage(ev) {
       const fIdx = parseInt(pickerTargetArgName.value.split(':')[1], 10)
       if (!isNaN(fIdx) && pickerTargetStageIdx.value != null) {
         updateFieldProp(pickerTargetStageIdx.value, fIdx, 'selector', d.selector)
+        // Refresh the field's available attributes (drives the method dropdown).
+        if (Array.isArray(d.attributes)) {
+          updateFieldProp(pickerTargetStageIdx.value, fIdx, '_attrs', d.attributes)
+        }
         closePicker()
       }
     }
@@ -4464,13 +4477,23 @@ function onPickerMessage(ev) {
           .slice(0, 24) || ('field_' + (fields.length + 1))
       })()
       const method = (() => {
-        if (/href/i.test(d.selector || '')) return 'attr:href'
-        if (/img/i.test(d.selector || '')) return 'attr:src'
+        // Smart default. Runtime extractor syntax is attr(name) —
+        // NativeFlatSelectStage parses `attr(...)`; anything else goes
+        // through ScalaDynamicExtractor. The inline chips let the user
+        // override in one click.
+        const txt = (d.sampleText || '').trim()
+        const attrs = Array.isArray(d.attributes) ? d.attributes : []
+        // No visible text but carries an image/link attr → use that attr.
+        if (!txt && attrs.includes('src')) return 'attr(src)'
+        if (!txt && attrs.includes('href')) return 'attr(href)'
+        if (/img/i.test(d.selector || '') && attrs.includes('src')) return 'attr(src)'
+        if (/href/i.test(d.selector || '') && attrs.includes('href')) return 'attr(href)'
         return 'text'
       })()
       wizPipeline.value[stageIdx]._fields = [
         ...fields,
-        { selector: d.selector, as: guess, method, _color: d.color, _sample: d.sampleText },
+        { selector: d.selector, as: guess, method, _color: d.color, _sample: d.sampleText,
+          _attrs: Array.isArray(d.attributes) ? d.attributes : [] },
       ]
       wizPipeline.value = [...wizPipeline.value]
     }
@@ -5325,6 +5348,39 @@ function updateFieldProp(idx, fieldIdx, prop, value) {
   if (!row || !row._fields || !row._fields[fieldIdx]) return
   row._fields[fieldIdx] = { ...row._fields[fieldIdx], [prop]: value }
   wizPipeline.value = [...wizPipeline.value]
+}
+// Method dropdown options for a field: text/html + an `attr(<name>)` for every
+// attribute actually present on the picked element (f._attrs, captured by the
+// picker). Syntax is `attr(name)` — what NativeFlatSelectStage parses; other
+// names fall through to the runtime's ScalaDynamicExtractor. Falls back to
+// common attrs when the element's attrs are unknown (field added manually /
+// not yet picked). Always includes the current method so a custom value stays
+// selectable.
+function fieldMethodOptions(f) {
+  // Built-in extractor resolvers (Unstructured methods, dispatched by the
+  // runtime's ScalaDynamicExtractor) + a `attr(<name>)` per real attribute on
+  // the picked element. Values are the exact method strings the ETL expects;
+  // labels are friendlier. No DB catalog — curated list.
+  const opts = [
+    { value: 'text',         label: 'text' },
+    { value: 'ownText',      label: 'ownText (no children)' },
+    { value: 'html',         label: 'html' },
+    { value: 'boilerPipe',   label: 'boilerPipe (article text)' },
+    { value: 'href',         label: 'href (link)' },
+    { value: 'src',          label: 'src' },
+    { value: 'code',         label: 'code (outerHTML)' },
+    { value: 'breadcrumb',   label: 'breadcrumb' },
+  ]
+  const seen = new Set(opts.map(o => o.value))
+  const attrs = Array.isArray(f && f._attrs) ? f._attrs : []
+  const attrNames = attrs.length ? attrs : ['href', 'src', 'title', 'alt']
+  for (const a of attrNames) {
+    const v = 'attr(' + a + ')'
+    if (!seen.has(v)) { opts.push({ value: v, label: v }); seen.add(v) }
+  }
+  // Keep a custom/typed method selectable.
+  if (f && f.method && !seen.has(f.method)) opts.push({ value: f.method, label: f.method })
+  return opts
 }
 function replaceFields(idx, newFields) {
   const row = wizPipeline.value[idx]
@@ -9708,6 +9764,30 @@ if (typeof window !== 'undefined') {
   width: 10px;
   height: 10px;
   border-radius: 50%;
+}
+/* One-click resolver/attribute chips under the method dropdown. */
+.wizard-attr-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 4px;
+}
+.wizard-attr-chip {
+  font-size: 0.72em;
+  line-height: 1;
+  padding: 3px 6px;
+  border: 1px solid var(--vp-c-divider);
+  border-radius: 10px;
+  background: var(--vp-c-bg);
+  color: var(--vp-c-text-2);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.wizard-attr-chip:hover { border-color: var(--vp-c-brand-1); color: var(--vp-c-text-1); }
+.wizard-attr-chip.active {
+  background: var(--vp-c-brand-1);
+  border-color: var(--vp-c-brand-1);
+  color: #fff;
 }
 .wizard-field-sample {
   color: #888;
