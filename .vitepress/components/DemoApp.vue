@@ -2469,13 +2469,7 @@ async function loadPipelines() {
     
     const data = await response.json()
     const demos = data.demos || []
-    
-    // Debug: log pipeline data to check requires_input_dataset
-    console.log('Loaded demos:', demos)
-    demos.forEach(demo => {
-      console.log(`Pipeline: ${demo.pipeline_name}, requires_input_dataset: ${demo.requires_input_dataset}, csv_format: ${demo.csv_format_description}`)
-    })
-    
+
     // Map backend demo format to frontend format
     availablePipelines.value = demos.map((demo) => ({
       id: demo.pipeline_name || demo.name,
