@@ -999,6 +999,33 @@ go</pre>
           <div v-if="wizStatus.kind" :class="['wizard-status', 'wizard-status-' + wizStatus.kind]">
             {{ wizStatus.text }}
           </div>
+
+          <!-- ✨ Auto body-selector suggestion (after picking a long-text field).
+               Human-in-the-loop: suggests a cleaner article-body selector +
+               method, and warns if the picked block is actually a paywall. -->
+          <div v-if="bodySuggestion" class="body-suggestion">
+            <div class="body-suggestion-head">
+              ✨ Suggerimento per il body articolo
+              <span v-if="bodySuggestion.confidence != null" class="body-suggestion-conf">
+                ({{ Math.round(bodySuggestion.confidence * 100) }}%)
+              </span>
+            </div>
+            <div v-if="bodySuggestion.paywalled" class="body-suggestion-paywall">
+              ⚠️ Questo blocco sembra un <strong>paywall</strong>, non l'articolo.
+              {{ bodySuggestion.paywallReason }}
+              Su questa fonte il corpo articolo potrebbe non essere estraibile.
+            </div>
+            <div v-if="bodySuggestion.selector" class="body-suggestion-sel">
+              Selettore più pulito:
+              <code>{{ bodySuggestion.selector }}</code>
+              <span class="body-suggestion-method">method: {{ bodySuggestion.method }}</span>
+            </div>
+            <div v-if="bodySuggestion.why" class="body-suggestion-why">{{ bodySuggestion.why }}</div>
+            <div class="body-suggestion-actions">
+              <button v-if="bodySuggestion.selector" class="btn btn-sm" @click="applyBodySuggestion">Applica</button>
+              <button class="btn btn-ghost btn-sm" @click="dismissBodySuggestion">Ignora</button>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -3558,6 +3585,10 @@ const aiAlgoResults  = ref([])           // [{selector|type, confidence, why}]
 const aiLlmResults   = ref([])           // same shape, second tier
 const aiPickedRefined = ref(null)        // LCA refinement from picker click
 const aiRawLlm       = ref(null)
+// Auto body-selector suggestion banner (set after picking a long-text field).
+// { stageIdx, fIdx, pickedSelector, selector, method, why, confidence,
+//   paywalled, paywallReason } — or null when no suggestion is pending.
+const bodySuggestion = ref(null)
 const pickerReloadNonce    = ref(0)       // bumped by the ↻ Refresh button (wget-mode cache-buster)
 const pickerProxySrc       = computed(() => {
   if (!pickerLoadedUrl.value) return ''
@@ -4511,6 +4542,51 @@ async function handleGeneralizeRequest(d, source) {
   }
 }
 
+// Ask the backend (LLM) for a cleaner ARTICLE-BODY selector after the user
+// picked a long-text field. The user usually clicks a broad column whose
+// extraction then includes related-articles / CTAs / the paywall instead of
+// the article. Surfaces a suggestion banner (selector + method + paywall flag)
+// that the user applies or ignores — never auto-overwrites the pick.
+async function suggestBodySelector(stageIdx, fIdx, pickedSelector, pickedHtml) {
+  try {
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-body-selector`, {
+      method: 'POST',
+      body: JSON.stringify({
+        url: pickerLoadedUrl.value || '',
+        picked_selector: pickedSelector,
+        picked_html: pickedHtml || '',
+      }),
+    })
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok || j.error) return
+    const sel = (j.selector || '').trim()
+    const paywalled = j.paywalled === true
+    // Worth showing if we got a cleaner selector OR a paywall warning.
+    if (!sel && !paywalled) return
+    bodySuggestion.value = {
+      stageIdx, fIdx,
+      pickedSelector,
+      selector: sel,
+      method: (j.method === 'text') ? 'text' : 'boilerPipe',
+      why: j.why || '',
+      confidence: (typeof j.confidence === 'number') ? j.confidence : null,
+      paywalled,
+      paywallReason: j.paywall_reason || '',
+    }
+  } catch (_) { /* silent — suggestion is best-effort */ }
+}
+
+function applyBodySuggestion() {
+  const s = bodySuggestion.value
+  if (!s) return
+  if (s.selector) updateFieldProp(s.stageIdx, s.fIdx, 'selector', s.selector)
+  if (s.method)   updateFieldProp(s.stageIdx, s.fIdx, 'method', s.method)
+  wizStatus.value = { kind: 'info', text: `✨ Selettore body applicato (${s.method}).` }
+  bodySuggestion.value = null
+}
+
+function dismissBodySuggestion() { bodySuggestion.value = null }
+
 function onPickerMessage(ev) {
   const d = ev.data
   if (!d || typeof d !== 'object') return
@@ -4538,10 +4614,20 @@ function onPickerMessage(ev) {
         pickerTargetArgName.value.indexOf('__field_selector__:') === 0) {
       const fIdx = parseInt(pickerTargetArgName.value.split(':')[1], 10)
       if (!isNaN(fIdx) && pickerTargetStageIdx.value != null) {
-        updateFieldProp(pickerTargetStageIdx.value, fIdx, 'selector', d.selector)
+        const stageIdx = pickerTargetStageIdx.value
+        updateFieldProp(stageIdx, fIdx, 'selector', d.selector)
         // Refresh the field's available attributes (drives the method dropdown).
         if (Array.isArray(d.attributes)) {
-          updateFieldProp(pickerTargetStageIdx.value, fIdx, '_attrs', d.attributes)
+          updateFieldProp(stageIdx, fIdx, '_attrs', d.attributes)
+        }
+        // Auto body-selector suggestion: if the picked element is a long text
+        // block (article body), ask the backend (LLM) for a cleaner body
+        // selector + recommended method + paywall flag. Human-in-the-loop:
+        // we surface a suggestion banner; the user applies or ignores it.
+        const textLen = (typeof d.fullTextLen === 'number')
+          ? d.fullTextLen : (d.sampleText || '').length
+        if (textLen >= 250) {
+          suggestBodySelector(stageIdx, fIdx, d.selector, d.sampleHtmlFull || d.sampleHtml || '')
         }
         closePicker()
       }
@@ -9117,6 +9203,28 @@ if (typeof window !== 'undefined') {
 .wizard-status-error   { color: #ef4444; }
 .wizard-status-success { color: #22c55e; }
 .wizard-status-info    { color: var(--vp-c-text-2); }
+
+/* ─── ✨ Auto body-selector suggestion banner ─────────────── */
+.body-suggestion {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--vp-c-divider);
+  border-left: 3px solid var(--vp-c-brand-1, #3b82f6);
+  border-radius: 8px;
+  background: var(--vp-c-bg-soft);
+  font-size: 0.88em;
+}
+.body-suggestion-head   { font-weight: 600; margin-bottom: 4px; }
+.body-suggestion-conf   { color: var(--vp-c-text-2); font-weight: 400; }
+.body-suggestion-paywall{
+  margin: 4px 0; padding: 6px 8px; border-radius: 6px;
+  background: rgba(239, 68, 68, 0.1); color: #ef4444;
+}
+.body-suggestion-sel    { margin: 4px 0; }
+.body-suggestion-sel code { font-size: 0.95em; }
+.body-suggestion-method { margin-left: 8px; color: var(--vp-c-text-2); }
+.body-suggestion-why    { color: var(--vp-c-text-2); margin: 4px 0; font-style: italic; }
+.body-suggestion-actions{ margin-top: 8px; display: flex; gap: 8px; }
 
 /* ─── Small / ghost / danger button variants ──────────────── */
 .btn-sm  { padding: 6px 12px; font-size: 0.85rem; }
