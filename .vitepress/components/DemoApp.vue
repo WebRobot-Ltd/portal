@@ -1193,11 +1193,11 @@ go</pre>
                  "🎯 One element" was removed from the toolbar; it lives
                  on as the internal selector-single mode when opened
                  from a per-arg 🎯 icon next to a single arg input. -->
-            <button v-if="(pickerOriginIsFlatSelect || pickerOriginIsExplore || pickerOriginIsJoin) && !pickerIsFieldSelection"
+            <button v-if="(pickerOriginIsFlatSelect || pickerOriginIsExplore || pickerOriginIsJoin) && !pickerIsFieldSelection && !pickerIntendedMode"
                     :class="['picker-tab', pickerMode === 'selector-list' && 'active']"
                     title="Click ONE row / item / link. The picker writes a selector matching all similar elements via the class/tag pattern they share. Quick (1 click) — fall back to Pick samples if too narrow / too broad."
                     @click="setPickerMode('selector-list')">📋 List like this</button>
-            <button v-if="(pickerOriginIsFlatSelect || pickerOriginIsExplore || pickerOriginIsJoin) && !pickerIsFieldSelection"
+            <button v-if="(pickerOriginIsFlatSelect || pickerOriginIsExplore || pickerOriginIsJoin) && !pickerIsFieldSelection && !pickerIntendedMode"
                     :class="['picker-tab', pickerMode === 'multi-sample' && 'active']"
                     title="Click 2+ examples of the repeating thing you want (rows, links, items). The picker computes the broadest CSS selector that matches ALL of them via path-piece intersection. Best when 1-click List is too narrow / too broad / irregular markup."
                     @click="setPickerMode('multi-sample')">📍 Pick samples</button>
@@ -1207,9 +1207,9 @@ go</pre>
                  (needs search / pagination / a tab click first). Kept
                  reachable even mid field-selection so the user can
                  paginate and keep picking. Camoufox strategy required. -->
-            <button v-if="pickerOriginIsFetch || pickerOriginIsExplore || pickerOriginIsJoin || pickerOriginIsFlatSelect || pickerOriginIsExtract"
+            <button v-if="(pickerOriginIsFetch || pickerOriginIsExplore || pickerOriginIsJoin || pickerOriginIsFlatSelect || pickerOriginIsExtract) && !pickerIntendedMode"
                     :class="['picker-tab', pickerMode === 'action-record' && 'active']"
-                    title="Browse the site as a user would. Every click, form input and navigation is recorded as a replayable trace — useful when the page needs filtering / pagination / login before extraction. Camoufox strategy required."
+                    title="Record a REPLAYABLE trace into this stage — every click / form input / navigation is saved. Use when the stage itself needs to drive the page at run time (login, filters). Distinct from the navigate-first phase (which only positions the mirror and is NOT recorded). Camoufox strategy required."
                     @click="setPickerMode('action-record')">⏺ Record actions</button>
             <!-- Select fields: explicit gate into field clicking for
                  flatSelect (relative to the segment) and extract (page-
@@ -1217,14 +1217,14 @@ go</pre>
                  right page, THEN arms field selection — instead of the
                  picker jumping straight into clicking on a possibly-wrong
                  page. -->
-            <button v-if="(pickerOriginIsFlatSelect || pickerOriginIsExtract) && pickerMode !== 'multi-field'"
+            <button v-if="(pickerOriginIsFlatSelect || pickerOriginIsExtract) && pickerMode !== 'multi-field' && !pickerIntendedMode"
                     :class="['picker-tab', pickerMode === 'multi-field' && 'active']"
                     :disabled="!fieldSelectionReady"
                     :title="fieldSelectionReady
                       ? 'Arm field selection on the CURRENT page. Click the fields you want — for flatSelect they\'re captured relative to the row/segment selector, for extract they\'re page-rooted. Navigate with ⏺ Record actions first if the page isn\'t the one you want yet.'
                       : 'flatSelect: set the row selector (📍 Pick samples) first — field selectors are relative to it.'"
                     @click="enterFieldSelection()">🎯 Select fields</button>
-            <button v-if="!pickerOriginIsFetch"
+            <button v-if="!pickerOriginIsFetch && !pickerIntendedMode"
                     :class="['picker-tab', pickerMode === 'ai-magic' && 'active']"
                     title="Describe what you want in plain language — the LLM finds the right selector or builds the field set for you. Works for extract, iextract, flatSelect, explore, and join families."
                     @click="setPickerMode('ai-magic')">🪄 Ask AI</button>
