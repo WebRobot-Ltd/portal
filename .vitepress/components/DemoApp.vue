@@ -1147,12 +1147,18 @@ go</pre>
           <div class="picker-mode-tabs">
             <!-- Tabs filtered per-stage so the toolbar shows only the
                  modes that make sense for the origin stage:
-                   extract           → 🪄 Ask AI (+ "🎯 Pick fields"
-                                       button on row → multi-field)
+                   extract           → ⏺ Record · 🎯 Select fields · 🪄 Ask AI
+                                       (Record lets you navigate to the
+                                        right page first; Select fields
+                                        explicitly arms field clicking —
+                                        the current mirror page may not be
+                                        the one you want yet)
                    iextract          → 🪄 Ask AI (prompt-only stage —
                                        no CSS selectors to click)
-                   flatSelect        → 📋 List · 📍 Pick samples · 🪄 Ask AI
-                                       (+ "🎯 Pick fields" on row)
+                   flatSelect        → 📋 List · 📍 Pick samples · ⏺ Record ·
+                                       🎯 Select fields · 🪄 Ask AI
+                                       (Record to navigate/paginate first,
+                                        then pick the row + Select fields)
                    explore family    → 📋 List · 📍 Pick samples · ⏺ Record · 🪄 Ask AI
                    join family       → 📋 List · 📍 Pick samples · ⏺ Record · 🪄 Ask AI
                                        (same as explore — link selector
@@ -1169,10 +1175,29 @@ go</pre>
                     :class="['picker-tab', pickerMode === 'multi-sample' && 'active']"
                     title="Click 2+ examples of the repeating thing you want (rows, links, items). The picker computes the broadest CSS selector that matches ALL of them via path-piece intersection. Best when 1-click List is too narrow / too broad / irregular markup."
                     @click="setPickerMode('multi-sample')">📍 Pick samples</button>
-            <button v-if="(pickerOriginIsFetch || pickerOriginIsExplore || pickerOriginIsJoin) && !pickerIsFieldSelection"
+            <!-- Record actions: navigation. Available for the trace
+                 stages AND for flatSelect/extract — the mirror page the
+                 picker opened on may not be the one to extract from
+                 (needs search / pagination / a tab click first). Kept
+                 reachable even mid field-selection so the user can
+                 paginate and keep picking. Camoufox strategy required. -->
+            <button v-if="pickerOriginIsFetch || pickerOriginIsExplore || pickerOriginIsJoin || pickerOriginIsFlatSelect || pickerOriginIsExtract"
                     :class="['picker-tab', pickerMode === 'action-record' && 'active']"
                     title="Browse the site as a user would. Every click, form input and navigation is recorded as a replayable trace — useful when the page needs filtering / pagination / login before extraction. Camoufox strategy required."
                     @click="setPickerMode('action-record')">⏺ Record actions</button>
+            <!-- Select fields: explicit gate into field clicking for
+                 flatSelect (relative to the segment) and extract (page-
+                 rooted). The user navigates first (Record), lands on the
+                 right page, THEN arms field selection — instead of the
+                 picker jumping straight into clicking on a possibly-wrong
+                 page. -->
+            <button v-if="(pickerOriginIsFlatSelect || pickerOriginIsExtract) && pickerMode !== 'multi-field'"
+                    :class="['picker-tab', pickerMode === 'multi-field' && 'active']"
+                    :disabled="!fieldSelectionReady"
+                    :title="fieldSelectionReady
+                      ? 'Arm field selection on the CURRENT page. Click the fields you want — for flatSelect they\'re captured relative to the row/segment selector, for extract they\'re page-rooted. Navigate with ⏺ Record actions first if the page isn\'t the one you want yet.'
+                      : 'flatSelect: set the row selector (📍 Pick samples) first — field selectors are relative to it.'"
+                    @click="enterFieldSelection()">🎯 Select fields</button>
             <button v-if="!pickerOriginIsFetch"
                     :class="['picker-tab', pickerMode === 'ai-magic' && 'active']"
                     title="Describe what you want in plain language — the LLM finds the right selector or builds the field set for you. Works for extract, iextract, flatSelect, explore, and join families."
@@ -2803,18 +2828,17 @@ async function executePipeline(datasetIdParam = null) {
     // row. The timeout sets how long Spark waits before giving up
     // and marking the row failed.
     //
-    // Force-on if ANY stage in the pipeline carries _requires_hitl
-    // (set by onAntiBotDetected when picker.js spotted a bot
-    // challenge during recording). The trace is unreplayable headless
-    // → opt-out at submit time would mean every row immediately fails.
-    const stageRequiresHitl = (wizPipeline.value || []).some(r => r && r._requires_hitl)
-    if (hitlAwait.value || stageRequiresHitl) {
+    // The HITL checkbox is the single source of truth. Anti-bot
+    // detection during recording auto-CHECKS the box (onAntiBotDetected
+    // flips hitlAwait + surfaces a warning), so the operator is informed
+    // — but unchecking it must win. We no longer force HITL from a stale
+    // _requires_hitl row tag: a false-positive anti-bot trip (e.g. a
+    // plain forum) would otherwise lock the pipeline into pause-on-captcha
+    // forever, against the operator's explicit choice.
+    if (hitlAwait.value) {
       requestBody.hitlAwait = true
       const tMinutes = Math.max(1, Math.min(30, parseInt(hitlTimeoutMin.value || '5', 10)))
       requestBody.hitlTimeoutMs = tMinutes * 60_000
-      if (stageRequiresHitl) {
-        console.log('[submit] hitlAwait forced ON: pipeline has stages tagged requires_hitl (anti-bot recording)')
-      }
     }
 
     // Log a redacted copy so we don't dump the BYOC token to the
@@ -4158,6 +4182,14 @@ async function setPickerStrategy(s) {
 }
 function setPickerMode(m) {
   pickerMode.value = m
+  // Action recording needs a real browser — silently promote wget →
+  // Camoufox when the user enters Record actions on a loaded page.
+  // Without this the wget tab just disables and recording is a no-op
+  // (the proxied static HTML can't replay clicks). Re-opens the same
+  // URL under Camoufox; harmless if already on cmf.
+  if (m === 'action-record' && pickerStrategy.value === 'wget' && pickerLoadedUrl.value) {
+    setPickerStrategy('cmf')
+  }
   // If the user manually flipped tabs to leave action-record, they've
   // told us "I'm done navigating" — drop the deferred-intent flag so
   // the navigate-first CTA doesn't keep reappearing.
@@ -5349,6 +5381,18 @@ function updateFieldProp(idx, fieldIdx, prop, value) {
   row._fields[fieldIdx] = { ...row._fields[fieldIdx], [prop]: value }
   wizPipeline.value = [...wizPipeline.value]
 }
+// Custom AttributeResolvers shipped by plugins. Dispatched by the runtime's
+// ScalaDynamicExtractor on the registered NAME (AttributeResolverRegistry
+// normalizes class names: `LLMResolver` → `llm`, `PriceResolver` → `price`).
+// These are NOT Unstructured built-ins — they run plugin Scala/Python code
+// per element. The registry lives in the Spark/ETL JVM, so the wizard (Jersey
+// JVM) can't introspect it live; this is a curated mirror of what example-
+// plugin always registers. When the resolver catalog moves to DB (mirroring
+// etl_stage_specs — see project memory), swap this const for a fetched list.
+const CUSTOM_ATTR_RESOLVERS = [
+  { value: 'llm',   label: 'llm — LLM features (word/char count + summary)' },
+  { value: 'price', label: 'price — parse numeric price from text' },
+]
 // Method dropdown options for a field: text/html + an `attr(<name>)` for every
 // attribute actually present on the picked element (f._attrs, captured by the
 // picker). Syntax is `attr(name)` — what NativeFlatSelectStage parses; other
@@ -5377,6 +5421,11 @@ function fieldMethodOptions(f) {
   for (const a of attrNames) {
     const v = 'attr(' + a + ')'
     if (!seen.has(v)) { opts.push({ value: v, label: v }); seen.add(v) }
+  }
+  // Plugin-provided custom resolvers (llm, price, …) — surfaced so the
+  // operator can pick them, not just the Unstructured built-ins.
+  for (const r of CUSTOM_ATTR_RESOLVERS) {
+    if (!seen.has(r.value)) { opts.push({ value: r.value, label: '⚙ ' + r.label }); seen.add(r.value) }
   }
   // Keep a custom/typed method selectable.
   if (f && f.method && !seen.has(f.method)) opts.push({ value: f.method, label: f.method })
@@ -5543,6 +5592,18 @@ function openMultiFieldPicker(stageIdx) {
   }, 600)
 }
 
+// Explicit "🎯 Select fields" tab (flatSelect / extract). The picker may
+// have opened on the wrong page, or the user just navigated/paginated via
+// ⏺ Record actions; this arms field selection on the CURRENT mirror page
+// without tearing down the live Camoufox session. Reuses
+// openMultiFieldPicker so flatSelect keeps its segment-relative container
+// config and extract stays page-rooted. No-op if we lost the target row.
+function enterFieldSelection() {
+  const idx = pickerTargetStageIdx.value
+  if (idx == null || !wizPipeline.value[idx]) return
+  openMultiFieldPicker(idx)
+}
+
 // Open picker in action-record mode tied to a specific stage row.
 // When the recording is collected we route the action list to
 // row._trace (instead of letting the user copy YAML manually).
@@ -5642,6 +5703,17 @@ const pickerOriginIsFlatSelect = computed(() => pickerOriginStage.value === 'fla
 // per-arg fine-tuning is reachable via the small 🎯 icon next to a
 // single arg input, programmatically — not as a tab choice).
 const pickerOriginIsExtract = computed(() => pickerOriginStage.value === 'extract')
+// Gate for the in-picker "🎯 Select fields" tab. extract can arm field
+// selection on any page; flatSelect needs its row/segment selector set
+// FIRST (field selectors are captured relative to it — picking before
+// produces selectors that don't resolve at runtime).
+const fieldSelectionReady = computed(() => {
+  const idx = pickerTargetStageIdx.value
+  if (idx == null || !wizPipeline.value[idx]) return false
+  const row = wizPipeline.value[idx]
+  if (row.stage === 'flatSelect') return flatSelectSegmentReady(row)
+  return true
+})
 // iextract: natural-language prompt only — the stage takes a `prefix`
 // + a free-text intent. No CSS selectors are clicked here, the picker
 // only exposes "🪄 Ask AI" so the LLM can help draft / refine the
@@ -6023,12 +6095,14 @@ function buildYamlFromPipeline(pipeline, catalog) {
   lines.push('  format: parquet')
   lines.push('  mode: overwrite')
   // Pipeline-level metadata. requires_hitl marks the trace as needing
-  // human-in-the-loop captcha resolution at replay — set when picker.js
-  // tripped its anti-bot heuristic during recording. Backend
-  // ProjectServiceImpl reads this and force-enables hitlAwait at submit
-  // (defense in depth: even if the user unchecks the UI box, the trace
-  // metadata wins).
-  if (pipeline.some(r => r && r._requires_hitl)) {
+  // human-in-the-loop captcha resolution at replay. We emit it ONLY when
+  // the HITL checkbox is actually on — the flag is the single source of
+  // truth. Anti-bot detection during recording auto-checks the box, so a
+  // genuine challenge still gets the metadata; but if the operator
+  // unchecks it (e.g. a false-positive trip on a plain forum), we must
+  // NOT leak requires_hitl/anti_bot_kinds into the YAML and silently
+  // force pause-on-captcha at submit.
+  if (hitlAwait.value && pipeline.some(r => r && r._requires_hitl)) {
     lines.push('metadata:')
     lines.push('  requires_hitl: true')
     const kinds = pipeline
