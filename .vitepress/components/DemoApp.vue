@@ -1658,6 +1658,16 @@ go</pre>
             <button class="btn btn-primary btn-sm" @click="promoteToIntendedMode">
               📌 Start {{ intendedModeLabel }} →
             </button>
+            <!-- Preliminary content box for explore/join: scope the list/results
+                 region NOW (during navigation) so the AI link inference (in Ask
+                 AI) is focused on it. Optional but recommended. -->
+            <template v-if="(pickerOriginIsExplore || pickerOriginIsJoin) && pickerLoadedUrl">
+              <button class="btn btn-secondary btn-sm" @click="selectMacroBox"
+                      title="Preliminary: click the list/results region so the AI looks for links THERE. Then Start selector picking → Ask AI uses this box.">
+                {{ macroBox ? '📦 Content box ✓ (re-pick)' : '📦 Select content box' }}
+              </button>
+              <button v-if="macroBox" class="btn btn-ghost btn-sm" @click="clearMacroBox" title="Clear content box">✕</button>
+            </template>
             <!-- AI auto-suggest fields straight from the navigate phase (field
                  intent only): describe the fields and let the LLM seed + highlight
                  them from THIS page, without first switching to manual selection.
