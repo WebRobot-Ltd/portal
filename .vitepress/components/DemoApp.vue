@@ -4786,6 +4786,22 @@ function onPickerMessage(ev) {
       ]
       wizPipeline.value = [...wizPipeline.value]
     }
+  } else if (d.type === 'webrobot-picker-field-samples') {
+    // Values resolved on the page for the LLM-suggested selectors — fill the
+    // list's sample column (index-aligned with the request). This is what makes
+    // the suggested rows "valorize"; the LLM only returns selectors.
+    const sIdx = pendingSampleStageIdx.value
+    if (sIdx != null && wizPipeline.value[sIdx] && Array.isArray(wizPipeline.value[sIdx]._fields)) {
+      const flds = wizPipeline.value[sIdx]._fields
+      ;(Array.isArray(d.samples) ? d.samples : []).forEach((s, i) => {
+        if (flds[i] && s) {
+          if (s.text) flds[i]._sample = s.text
+          if (s.html) flds[i]._sampleHtml = s.html
+        }
+      })
+      wizPipeline.value = [...wizPipeline.value]
+    }
+    pendingSampleStageIdx.value = null
   } else if (d.type === 'webrobot-picker-multi-warn') {
     // Surface the warning briefly (e.g. clicked outside flatSelect container).
     wizStatus.value = { kind: 'error', text: d.warn || 'click was outside the segment container' }
@@ -5016,6 +5032,18 @@ async function runAutoSuggestFields() {
     } else {
       sendHighlightToIframe(layers)
     }
+    // Populate the list's sample column: the LLM returns selectors, NOT values,
+    // so resolve each selector ON THE PAGE and fill _sample — otherwise the
+    // suggested rows show no value ("non valorizza"). Index-aligned response.
+    pendingSampleStageIdx.value = pickerTargetStageIdx.value
+    const sampleSels = body.container_selector
+      ? fields.map(f => `${body.container_selector} ${f.selector}`)
+      : fields.map(f => f.selector)
+    try {
+      const ifr2 = document.getElementById('wr-picker-iframe')
+      ifr2 && ifr2.contentWindow && ifr2.contentWindow.postMessage(
+        { type: 'webrobot-picker-sample-fields', selectors: sampleSels }, '*')
+    } catch (_) {}
   } catch (e) {
     aiError.value = 'Error: ' + (e.message || String(e))
   } finally {
@@ -5572,6 +5600,9 @@ const relaxingFields = ref(false)
 // whole-page truncation, no nav/footer noise). AI auto-suggest is gated on it.
 const macroBox = ref(null)          // { selector, html }
 const pickingMacroBox = ref(false)  // true while waiting for the box click
+// Stage awaiting a field-sample response (LLM auto-suggest → resolve values to
+// fill the list's sample column; also used for multi-page consolidation).
+const pendingSampleStageIdx = ref(null)
 // Live mirror of the target stage's _fields so the inline editor in
 // the multi-field modal can iterate them without re-resolving
 // wizPipeline.value[stageIdx] on every render.
