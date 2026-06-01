@@ -1645,6 +1645,20 @@ go</pre>
             <button class="btn btn-primary btn-sm" @click="promoteToIntendedMode">
               📌 Start {{ intendedModeLabel }} →
             </button>
+            <!-- AI auto-suggest fields straight from the navigate phase (field
+                 intent only): describe the fields and let the LLM seed + highlight
+                 them from THIS page, without first switching to manual selection.
+                 (Previously the intent box lived only in the multi-field panel, so
+                 it looked like the feature wasn't there while browsing.) -->
+            <div v-if="pickerIntendedMode === 'multi-field' && pickerLoadedUrl" class="picker-phase-ai">
+              <input v-model="aiIntent" type="text" class="text-input"
+                     placeholder="…or describe the fields (e.g. title, author, date, body) — AI picks them"
+                     @keyup.enter="runAutoSuggestFields" />
+              <button class="btn btn-secondary btn-sm" :disabled="aiLoading || !aiIntent.trim()" @click="runAutoSuggestFields">
+                <span v-if="aiLoading" class="loading-spinner"></span>
+                {{ aiLoading ? 'Thinking…' : '🪄 Auto-suggest fields' }}
+              </button>
+            </div>
           </div>
           <!-- Pre-Send draft view: just lets the user see WHAT is queued
                and clear it. No "Apply to trace" here — that would
@@ -9351,6 +9365,9 @@ if (typeof window !== 'undefined') {
 .demo-gate-msg { color: var(--vp-c-text-2, #666); font-size: 14px; margin-bottom: 18px; }
 .demo-gate-input { width: 100%; box-sizing: border-box; margin-bottom: 12px; }
 .demo-gate-error { color: #e53935; font-size: 13px; margin-top: 12px; }
+
+.picker-phase-ai { display: flex; gap: 8px; margin-top: 10px; width: 100%; flex-wrap: wrap; }
+.picker-phase-ai .text-input { flex: 1; min-width: 220px; }
 
 /* ─── Small / ghost / danger button variants ──────────────── */
 .btn-sm  { padding: 6px 12px; font-size: 0.85rem; }
