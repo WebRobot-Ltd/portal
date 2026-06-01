@@ -5843,6 +5843,24 @@ function openMultiFieldPicker(stageIdx, opts) {
           // extract: clear any stale container so selectors are absolute.
           ifr.contentWindow.postMessage({ type: 'webrobot-picker-multi-config', containerSelector: null }, '*')
         }
+        // Re-paint the fields ALREADY saved on this stage. Without this,
+        // re-entering "Select fields" (enterFieldSelection / re-edit) shows
+        // the field LIST in the sidebar but no on-page highlight, because the
+        // picker-ready restore only fires on a fresh iframe load — not when the
+        // user re-arms field selection on an already-loaded mirror.
+        const seeds = (row && Array.isArray(row._fields))
+          ? row._fields.filter(f => (f.selector || '').trim()) : []
+        if (seeds.length) {
+          ifr.contentWindow.postMessage({
+            type: 'webrobot-picker-multi-restore',
+            fields: seeds.map(f => ({
+              selector:   f.selector,
+              color:      f._color || null,
+              label:      f.as || null,
+              sampleText: f._sample || null,
+            })),
+          }, '*')
+        }
       }
     } catch (_) {}
   }, 600)
