@@ -6,12 +6,12 @@
          not real security.) -->
     <div v-if="!demoUnlocked" class="demo-gate">
       <div class="demo-gate-box">
-        <div class="demo-gate-title">🔒 Fase finale di collaudo</div>
-        <p class="demo-gate-msg">Questa demo è in fase finale di collaudo. Inserisci la password per accedere.</p>
+        <div class="demo-gate-title">🔒 Final testing phase</div>
+        <p class="demo-gate-msg">This demo is in its final testing phase. Enter the password to continue.</p>
         <input v-model="demoGatePwd" type="password" class="text-input demo-gate-input"
                placeholder="Password" @keyup.enter="unlockDemo" />
-        <button class="btn btn-primary" @click="unlockDemo">Entra</button>
-        <p v-if="demoGateError" class="demo-gate-error">Password errata.</p>
+        <button class="btn btn-primary" @click="unlockDemo">Enter</button>
+        <p v-if="demoGateError" class="demo-gate-error">Wrong password.</p>
       </div>
     </div>
 
