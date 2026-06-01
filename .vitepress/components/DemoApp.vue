@@ -4710,6 +4710,27 @@ function onPickerMessage(ev) {
       mode: d.mode,
     }
     aiPickedRefined.value = d.refinedFromHighlight || null
+    // 🧩 Row (2 clicks): the LCA wrapper is an EXPLICIT row-container
+    // definition — auto-apply it to the target segment arg instead of
+    // making the user click "Use this selector" afterwards. The green
+    // highlight in the picker reads as "done", so users skipped the apply
+    // step → the flatSelect kept its old (per-column) segment → rows came
+    // out single/misaligned on Spark. Also warn when the wrapper matches
+    // ≤1: a non-repeating container means it's NOT a real row wrapper
+    // (likely parallel sibling columns → use parallelSelect instead).
+    if (d.mode === 'row-lca' && pickerTargetStageIdx.value != null &&
+        typeof pickerTargetArgName.value === 'string' &&
+        pickerTargetArgName.value.indexOf('__field_selector__:') !== 0) {
+      updateStageArg(pickerTargetStageIdx.value, pickerTargetArgName.value, d.selector)
+      const n = d.matches
+      if (n <= 1) {
+        wizStatus.value = { kind: 'error', text: `🧩 Row container matched only ${n} element — that's not a repeating wrapper. Click two parts of ONE row (closer together), or switch the stage to parallelSelect for split (avatar+body) rows.` }
+      } else {
+        wizStatus.value = { kind: 'info', text: `🧩 Row container set (${n} rows): ${d.selector}` }
+      }
+      closePicker()
+      return
+    }
     // Field-row picker (single click from a specific field's 🎯 Pick).
     // The target arg name is encoded as "__field_selector__:<idx>" so
     // we can route the pick back to the right row.
