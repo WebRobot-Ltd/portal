@@ -1360,6 +1360,7 @@ go</pre>
             :src="cmfIframeSrc"
             sandbox="allow-same-origin allow-scripts allow-forms allow-popups"
             class="picker-iframe"
+            @load="onPickerIframeLoad"
           ></iframe>
           <!-- wget path (legacy): direct GET on /wizard/proxy via src. -->
           <iframe
@@ -3804,12 +3805,21 @@ async function openWithCamoufox(url) {
         ? pickerTargetStageIdx.value
         : tracableStages.value[0].idx
     }
+    // Keep pickerLoading=true on success — onPickerIframeLoad() clears it once
+    // the mirror iframe has actually RENDERED, so the host overlay also covers
+    // the iframe's initial blank load (no white flash on first "Load page").
+    setTimeout(() => { pickerLoading.value = false }, 30000)  // safety net if 'load' never fires
   } catch (e) {
     pickerLoadError.value = e.message || String(e)
     pickerHtml.value = ''
-  } finally {
     pickerLoading.value = false
   }
+}
+
+// Cleared when the mirror iframe finishes loading its document — until then the
+// host loading overlay stays up so the user never sees the blank white iframe.
+function onPickerIframeLoad() {
+  pickerLoading.value = false
 }
 
 // Forward an action (or an ordered batch) to Camoufox and swap the
