@@ -1242,6 +1242,10 @@ go</pre>
                     :class="['picker-tab', pickerMode === 'multi-sample' && 'active']"
                     title="Click 2+ examples of the repeating thing you want (rows, links, items). The picker computes the broadest CSS selector that matches ALL of them via path-piece intersection. Best when 1-click List is too narrow / too broad / irregular markup."
                     @click="setPickerMode('multi-sample')">📍 Pick samples</button>
+            <button v-if="(pickerOriginIsFlatSelect || pickerOriginIsExplore || pickerOriginIsJoin) && !pickerIsFieldSelection && !pickerIntendedMode"
+                    :class="['picker-tab', pickerMode === 'row-lca' && 'active']"
+                    title="Row spans two separate parts with no single wrapping box (e.g. an avatar/author block on the left + the comment body)? Click ONE part, then the OTHER part of the SAME row — the picker uses their common container as the repeating row."
+                    @click="setPickerMode('row-lca')">🧩 Row (2 clicks)</button>
             <!-- Record actions: navigation. Available for the trace
                  stages AND for flatSelect/extract — the mirror page the
                  picker opened on may not be the one to extract from
