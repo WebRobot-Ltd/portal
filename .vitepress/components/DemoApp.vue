@@ -1460,6 +1460,13 @@ go</pre>
               <span v-if="suggestNamesLoading" class="loading-spinner"></span>
               🪄 Suggest names
             </button>
+            <button class="btn btn-secondary btn-sm"
+                    :disabled="relaxingFields || !((currentStageFields).length)"
+                    title="Ask the LLM to make the field selectors robust: drop :nth-of-type / hashed classes, prefer semantic tags + stable classes. The highlight re-paints so you can review."
+                    @click="relaxFieldSelectors">
+              <span v-if="relaxingFields" class="loading-spinner"></span>
+              ✨ Relax selectors
+            </button>
             <button class="btn btn-secondary btn-sm" @click="closePicker">✅ Done</button>
           </div>
           <div v-if="aiError" class="picker-ai-err">{{ aiError }}</div>
@@ -4734,6 +4741,7 @@ function onPickerMessage(ev) {
       wizPipeline.value[stageIdx]._fields = [
         ...fields,
         { selector: d.selector, as: guess, method, _color: d.color, _sample: d.sampleText,
+          _sampleHtml: d.sampleHtml || d.sampleHtmlFull || null,
           _attrs: Array.isArray(d.attributes) ? d.attributes : [] },
       ]
       wizPipeline.value = [...wizPipeline.value]
@@ -5495,6 +5503,7 @@ function addField(idx) {
 // a selector are skipped (LLM needs at least the selector to derive
 // context). On success we patch row._fields[*].as in-place.
 const suggestNamesLoading = ref(false)
+const relaxingFields = ref(false)
 // Live mirror of the target stage's _fields so the inline editor in
 // the multi-field modal can iterate them without re-resolving
 // wizPipeline.value[stageIdx] on every render.
@@ -5509,6 +5518,52 @@ const currentStageFields = computed(() => {
 function suggestFieldNamesFromModal() {
   if (pickerTargetStageIdx.value == null) return
   suggestFieldNames(pickerTargetStageIdx.value)
+}
+
+// "✨ Relax selectors": send the picked field selectors (+ element HTML) to the
+// LLM, which drops :nth-of-type / hashed classes and prefers semantic tags, so
+// an article/field selector survives across detail pages. Explicit button (not
+// auto on every pick). Re-paints the highlights so the user can review.
+async function relaxFieldSelectors() {
+  const idx = pickerTargetStageIdx.value
+  if (idx == null) return
+  const row = wizPipeline.value[idx]
+  const fields = (row && Array.isArray(row._fields)) ? row._fields.filter(f => (f.selector || '').trim()) : []
+  if (!fields.length) return
+  relaxingFields.value = true
+  try {
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/relax-selectors`, {
+      method: 'POST',
+      body: JSON.stringify({
+        fields: fields.map(f => ({
+          selector:   f.selector,
+          sampleHtml: f._sampleHtml || null,
+          label:      f.as || null,
+        })),
+      }),
+    })
+    const j = await r.json()
+    if (!r.ok || j.error) throw new Error(j.error || `relax failed: ${r.status}`)
+    let changed = 0
+    ;(Array.isArray(j.fields) ? j.fields : []).forEach(rf => {
+      const tgt = fields.find(f => f.selector === rf.original)
+      if (tgt && rf.selector && rf.selector !== rf.original) { tgt.selector = rf.selector; changed++ }
+    })
+    wizPipeline.value = [...wizPipeline.value]
+    // Re-paint with the relaxed selectors so the user sees what they now match.
+    const ifr = document.getElementById('wr-picker-iframe')
+    if (ifr && ifr.contentWindow) {
+      ifr.contentWindow.postMessage({
+        type: 'webrobot-picker-multi-restore',
+        fields: fields.map(f => ({ selector: f.selector, color: f._color || null, label: f.as || null, sampleText: f._sample || null })),
+      }, '*')
+    }
+    wizStatus.value = { kind: changed ? 'info' : 'info', text: changed ? `Relaxed ${changed} selector(s) — review the highlight.` : 'Selectors already robust — nothing to relax.' }
+  } catch (e) {
+    wizStatus.value = { kind: 'error', text: 'Relax failed: ' + (e.message || e) }
+  } finally {
+    relaxingFields.value = false
+  }
 }
 function removeFieldFromModal(fieldIdx) {
   if (pickerTargetStageIdx.value == null) return
