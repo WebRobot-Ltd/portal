@@ -1515,6 +1515,11 @@ go</pre>
               <option value="actions">Build action sequence</option>
               <option value="flatselect">flatSelect: segment + fields</option>
             </select>
+            <button class="btn btn-secondary btn-sm" @click="selectMacroBox"
+                    title="Optional: click the list/results region to FOCUS the AI inference on it (sharper link/segment selectors). Without it the AI uses the whole rendered page.">
+              {{ macroBox ? '📦 box ✓' : '📦 box' }}
+            </button>
+            <button v-if="macroBox" class="btn btn-ghost btn-sm" @click="clearMacroBox" title="Clear content box">✕</button>
             <input
               v-model="aiIntent"
               type="text"
@@ -4981,9 +4986,22 @@ async function runAutoSuggestFields() {
     wizStatus.value = { kind: 'error', text: 'Load a target URL in the picker first.' }
     return
   }
-  if (!macroBox.value || !(macroBox.value.html || '').trim()) {
-    wizStatus.value = { kind: 'error', text: 'Select a content box first (📦) so the AI infers from the right region.' }
-    return
+  // Gate depends on the stage: flatSelect per-row fields are RELATIVE to the
+  // row delimiter (segment) — that IS the container, so no macro box is needed
+  // (find the row delimiter first). Everything else (extract) needs the box.
+  {
+    const _row = wizPipeline.value[pickerTargetStageIdx.value]
+    const _isFlat = _row && _row.stage === 'flatSelect'
+    const _seg = _isFlat && _row.args && (_row.args.segmentSelector || _row.args.selector)
+    if (_isFlat) {
+      if (!_seg) {
+        wizStatus.value = { kind: 'error', text: 'Find the row delimiter first (segment) — then per-row fields are relative to it.' }
+        return
+      }
+    } else if (!macroBox.value || !(macroBox.value.html || '').trim()) {
+      wizStatus.value = { kind: 'error', text: 'Select a content box first (📦) so the AI infers from the right region.' }
+      return
+    }
   }
   const intent = aiIntent.value.trim()
   if (!intent) {
@@ -5099,7 +5117,9 @@ async function runAiMagic() {
       // it and skips its bare-wget fetch which 403s on anti-bot sites
       // (Bazaraki, eBay, Amazon). pickerHtml.value is the live snapshot
       // returned by /cmf/open or /cmf/step, exactly what the user sees.
-      const liveHtml = pickerHtml.value || null
+      // Prefer the macro box (the list region the user scoped) so segment
+      // inference is focused; else the full live snapshot.
+      const liveHtml = (macroBox.value && macroBox.value.html) || pickerHtml.value || null
       if (!segSel || !String(segSel).trim()) {
         const r1 = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-segment`, {
           method: 'POST',
@@ -5151,7 +5171,14 @@ async function runAiMagic() {
   try {
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/${path}`, {
       method: 'POST',
-      body: JSON.stringify({ url: pickerLoadedUrl.value, intent, ...ctx }),
+      // Send the rendered HTML (focused on the macro box if the user scoped one)
+      // — infer-selector's bare wget is blind on anti-bot / JS-rendered pages,
+      // so explore/join link inference was guessing. Box → focused list region.
+      body: JSON.stringify({
+        url: pickerLoadedUrl.value, intent,
+        html: (macroBox.value && macroBox.value.html) || pickerHtml.value || null,
+        ...ctx,
+      }),
     })
     const j = await r.json()
     if (!r.ok || j.error) throw new Error(j.error || `${path} failed`)
