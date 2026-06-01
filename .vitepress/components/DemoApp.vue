@@ -1448,9 +1448,17 @@ go</pre>
             </span>
           </div>
           <div class="picker-multi-row">
+            <button class="btn btn-secondary btn-sm" @click="selectMacroBox"
+                    title="Click the content region (e.g. the article) — AI infers fields from THAT box only.">
+              {{ macroBox ? '📦 Content box ✓ (re-pick)' : '📦 Select content box' }}
+            </button>
+            <button v-if="macroBox" class="btn btn-ghost btn-sm" @click="clearMacroBox" title="Clear content box">✕</button>
             <input v-model="aiIntent" type="text" class="text-input" placeholder="describe the fields (e.g. name, price, rating, link)"
-              @keyup.enter="runAutoSuggestFields">
-            <button class="btn btn-primary btn-sm" :disabled="aiLoading || !aiIntent.trim()" @click="runAutoSuggestFields">
+              @keyup.enter="macroBox && runAutoSuggestFields()">
+            <button class="btn btn-primary btn-sm"
+                    :disabled="aiLoading || !aiIntent.trim() || !macroBox"
+                    :title="!macroBox ? 'Select a content box first (📦)' : 'Infer fields from the selected box'"
+                    @click="runAutoSuggestFields">
               <span v-if="aiLoading" class="loading-spinner"></span>
               {{ aiLoading ? 'Thinking…' : '🪄 Auto-suggest fields' }}
             </button>
@@ -1651,10 +1659,18 @@ go</pre>
                  (Previously the intent box lived only in the multi-field panel, so
                  it looked like the feature wasn't there while browsing.) -->
             <div v-if="pickerIntendedMode === 'multi-field' && pickerLoadedUrl" class="picker-phase-ai">
+              <button class="btn btn-secondary btn-sm" @click="selectMacroBox"
+                      title="Click the content region (e.g. the article) — the AI infers fields from THAT box only (focused, no whole-page noise/truncation).">
+                {{ macroBox ? '📦 Content box ✓ (re-pick)' : '📦 Select content box' }}
+              </button>
+              <button v-if="macroBox" class="btn btn-ghost btn-sm" @click="clearMacroBox" title="Clear content box">✕</button>
               <input v-model="aiIntent" type="text" class="text-input"
-                     placeholder="…or describe the fields (e.g. title, author, date, body) — AI picks them"
-                     @keyup.enter="runAutoSuggestFields" />
-              <button class="btn btn-secondary btn-sm" :disabled="aiLoading || !aiIntent.trim()" @click="runAutoSuggestFields">
+                     placeholder="describe the fields (e.g. title, author, date, body) — AI picks them"
+                     @keyup.enter="macroBox && runAutoSuggestFields()" />
+              <button class="btn btn-secondary btn-sm"
+                      :disabled="aiLoading || !aiIntent.trim() || !macroBox"
+                      :title="!macroBox ? 'Select a content box first (📦)' : 'Infer fields from the selected box'"
+                      @click="runAutoSuggestFields">
                 <span v-if="aiLoading" class="loading-spinner"></span>
                 {{ aiLoading ? 'Thinking…' : '🪄 Auto-suggest fields' }}
               </button>
@@ -4657,6 +4673,16 @@ function onPickerMessage(ev) {
     return
   }
   if (d.type === 'webrobot-pick-selector') {
+    // Macro-box capture: the user is scoping the content region for AI field
+    // inference. Store the box (selector + its full HTML) + keep it highlighted,
+    // and stop — do NOT treat it as a normal field/selector pick.
+    if (pickingMacroBox.value) {
+      macroBox.value = { selector: d.selector, html: d.sampleHtmlFull || d.sampleHtml || '' }
+      pickingMacroBox.value = false
+      sendHighlightToIframe([{ selector: d.selector, color: '#6366f1', label: 'content box' }])
+      wizStatus.value = { kind: 'info', text: '📦 Content box set — describe the fields, then 🪄 Auto-suggest.' }
+      return
+    }
     pickerSelected.value = {
       selector: d.selector,
       matches: d.matches,
@@ -4917,10 +4943,30 @@ function clearHighlightInIframe() {
 // the target stage's _fields with the returned list. Uses the stage's
 // flatSelect segment selector as container_selector when present, so
 // the LLM returns RELATIVE selectors.
+// Enter "select content box" mode: reuse single-selector picking, but route the
+// next pick into macroBox instead of treating it as a field/selector.
+function selectMacroBox() {
+  pickingMacroBox.value = true
+  const ifr = document.getElementById('wr-picker-iframe')
+  try {
+    ifr && ifr.contentWindow && ifr.contentWindow.postMessage(
+      { type: 'webrobot-picker-mode', mode: 'selector-single', linkMode: false }, '*')
+  } catch (_) {}
+  wizStatus.value = { kind: 'info', text: '📦 Click the content region (e.g. the article body) to set the box.' }
+}
+function clearMacroBox() {
+  macroBox.value = null
+  clearHighlightInIframe()
+}
+
 async function runAutoSuggestFields() {
   if (pickerTargetStageIdx.value == null) return
   if (!pickerLoadedUrl.value) {
     wizStatus.value = { kind: 'error', text: 'Load a target URL in the picker first.' }
+    return
+  }
+  if (!macroBox.value || !(macroBox.value.html || '').trim()) {
+    wizStatus.value = { kind: 'error', text: 'Select a content box first (📦) so the AI infers from the right region.' }
     return
   }
   const intent = aiIntent.value.trim()
@@ -4934,9 +4980,12 @@ async function runAutoSuggestFields() {
     const row = wizPipeline.value[pickerTargetStageIdx.value]
     const body = {
       url: pickerLoadedUrl.value,
-      // Camoufox-rendered HTML — server prefers this over its bare wget
-      // which 403s on anti-bot sites (Bazaraki, eBay, Amazon).
-      html: pickerHtml.value || null,
+      // FOCUSED inference: send only the user-selected content box (the article
+      // region), not the whole page. Avoids the 12k whole-page truncation that
+      // dropped the article, and strips nav/footer/ad noise → far better
+      // selectors. Falls back to the full rendered HTML if no box (shouldn't
+      // happen — the button is gated on macroBox).
+      html: (macroBox.value && macroBox.value.html) || pickerHtml.value || null,
       intent,
       stage_name: row && row.stage,
     }
@@ -5518,6 +5567,11 @@ function addField(idx) {
 // context). On success we patch row._fields[*].as in-place.
 const suggestNamesLoading = ref(false)
 const relaxingFields = ref(false)
+// Macro content box: the user scopes the region (e.g. the article) the AI should
+// infer fields from. Its full HTML is sent for focused inference (no 12k
+// whole-page truncation, no nav/footer noise). AI auto-suggest is gated on it.
+const macroBox = ref(null)          // { selector, html }
+const pickingMacroBox = ref(false)  // true while waiting for the box click
 // Live mirror of the target stage's _fields so the inline editor in
 // the multi-field modal can iterate them without re-resolving
 // wizPipeline.value[stageIdx] on every render.
