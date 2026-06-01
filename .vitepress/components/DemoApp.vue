@@ -7136,7 +7136,11 @@ async function runValidation() {
     const yamlText = wizYamlPreview.value
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/validate`, {
       method: 'POST',
-      body: JSON.stringify({ yaml: yamlText })
+      // Reuse the designer's LIVE Camoufox session (page already loaded) so the
+      // validator skips the slow re-navigate (+ its 30s DCL timeout / SSL hiccups
+      // on heavy sites via the proxy). Backend falls back to opening fresh if the
+      // session is gone.
+      body: JSON.stringify({ yaml: yamlText, session_id: cmfSessionId.value || null })
     })
     const j = await r.json()
     if (!r.ok) throw new Error(j.error || 'Validation request failed')
