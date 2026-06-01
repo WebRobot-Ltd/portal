@@ -1,6 +1,20 @@
 <template>
   <div class="demo-app">
 
+    <!-- TEMP collaudo gate — soft password while the app is in final testing.
+         Removed once everything is resolved. (Client-side only: a casual gate,
+         not real security.) -->
+    <div v-if="!demoUnlocked" class="demo-gate">
+      <div class="demo-gate-box">
+        <div class="demo-gate-title">🔒 Fase finale di collaudo</div>
+        <p class="demo-gate-msg">Questa demo è in fase finale di collaudo. Inserisci la password per accedere.</p>
+        <input v-model="demoGatePwd" type="password" class="text-input demo-gate-input"
+               placeholder="Password" @keyup.enter="unlockDemo" />
+        <button class="btn btn-primary" @click="unlockDemo">Entra</button>
+        <p v-if="demoGateError" class="demo-gate-error">Password errata.</p>
+      </div>
+    </div>
+
     <!-- Captcha / HITL notification bell. Pinned top-right of the demo
          pane. Counts active captcha blocks across any open or parked
          Camoufox sessions; click opens a dropdown that lets the user
@@ -1256,13 +1270,8 @@ go</pre>
                     title="Describe what you want in plain language — the LLM finds the right selector or builds the field set for you. Works for extract, iextract, flatSelect, explore, and join families."
                     @click="setPickerMode('ai-magic')">🪄 Ask AI</button>
           </div>
-          <div class="picker-strategy-tabs" title="wget = fast HTTP (static sites). Camoufox = real browser (JS-heavy / Cloudflare-protected). Required for Record actions.">
-            <button :class="['picker-tab-small', pickerStrategy === 'wget' && 'active']"
-                    :disabled="pickerMode === 'action-record'"
-                    @click="setPickerStrategy('wget')">wget</button>
-            <button :class="['picker-tab-small', pickerStrategy === 'cmf' && 'active']"
-                    @click="setPickerStrategy('cmf')">Camoufox</button>
-          </div>
+          <!-- wget strategy removed from the designer (almost never worked:
+               plain HTTP, no JS/anti-bot). Camoufox is the only path now. -->
           <button class="btn btn-ghost btn-sm" @click="closePicker">✕ Close</button>
         </div>
 
@@ -3473,7 +3482,7 @@ const pickerUrl           = ref('https://books.toscrape.com/')
 const pickerLoadedUrl     = ref(null)
 const pickerHtml          = ref('')           // legacy: srcdoc body (only used as fallback now — cmf flow uses cmfIframeSrc)
 const cmfReloadKey        = ref(0)            // bumped on every /cmf/step success to refresh the iframe via ?_v=…
-const pickerStrategy      = ref('wget')       // 'wget' | 'cmf'
+const pickerStrategy      = ref('cmf')        // Camoufox only (wget removed from the designer — almost never worked: plain HTTP, no JS/anti-bot)
 const cmfSessionId        = ref(null)         // active Camoufox session id (cmf strategy)
 // Captcha / WAF block state — populated when /cmf/open or /cmf/step
 // returns a `block` field (or 409 status). While non-null, the wizard
@@ -3589,6 +3598,24 @@ const aiRawLlm       = ref(null)
 // { stageIdx, fIdx, pickedSelector, selector, method, why, confidence,
 //   paywalled, paywallReason } — or null when no suggestion is pending.
 const bodySuggestion = ref(null)
+
+// ── TEMP collaudo gate (soft password during final testing; remove when done) ──
+const DEMO_GATE_PWD = 'web201979'
+const demoUnlocked  = ref(false)
+const demoGatePwd   = ref('')
+const demoGateError = ref(false)
+onMounted(() => {
+  try { if (localStorage.getItem('wr_demo_gate') === DEMO_GATE_PWD) demoUnlocked.value = true } catch (_) {}
+})
+function unlockDemo() {
+  if (demoGatePwd.value === DEMO_GATE_PWD) {
+    demoUnlocked.value = true
+    demoGateError.value = false
+    try { localStorage.setItem('wr_demo_gate', DEMO_GATE_PWD) } catch (_) {}
+  } else {
+    demoGateError.value = true
+  }
+}
 const pickerReloadNonce    = ref(0)       // bumped by the ↻ Refresh button (wget-mode cache-buster)
 const pickerProxySrc       = computed(() => {
   if (!pickerLoadedUrl.value) return ''
@@ -9225,6 +9252,22 @@ if (typeof window !== 'undefined') {
 .body-suggestion-method { margin-left: 8px; color: var(--vp-c-text-2); }
 .body-suggestion-why    { color: var(--vp-c-text-2); margin: 4px 0; font-style: italic; }
 .body-suggestion-actions{ margin-top: 8px; display: flex; gap: 8px; }
+
+/* ─── TEMP collaudo gate (remove when done) ─── */
+.demo-gate {
+  position: fixed; inset: 0; z-index: 100000;
+  background: var(--vp-c-bg, #fff);
+  display: flex; align-items: center; justify-content: center;
+}
+.demo-gate-box {
+  max-width: 380px; width: 90%; text-align: center; padding: 30px;
+  border: 1px solid var(--vp-c-divider, #e2e2e2); border-radius: 14px;
+  background: var(--vp-c-bg-soft, #f6f6f6); box-shadow: 0 8px 30px rgba(0,0,0,.08);
+}
+.demo-gate-title { font-size: 18px; font-weight: 600; margin-bottom: 10px; }
+.demo-gate-msg { color: var(--vp-c-text-2, #666); font-size: 14px; margin-bottom: 18px; }
+.demo-gate-input { width: 100%; box-sizing: border-box; margin-bottom: 12px; }
+.demo-gate-error { color: #e53935; font-size: 13px; margin-top: 12px; }
 
 /* ─── Small / ghost / danger button variants ──────────────── */
 .btn-sm  { padding: 6px 12px; font-size: 0.85rem; }
