@@ -4801,6 +4801,9 @@ function onPickerMessage(ev) {
         ...fields,
         { selector: d.selector, as: guess, method, _color: d.color, _sample: d.sampleText,
           _sampleHtml: d.sampleHtml || d.sampleHtmlFull || null,
+          // Field picked OUTSIDE the segment → marks the row as SPLIT, so
+          // buildYamlFromPipeline emits parallelSelect (cardinality join).
+          _parallel: !!d.parallel,
           _attrs: Array.isArray(d.attributes) ? d.attributes : [] },
       ]
       wizPipeline.value = [...wizPipeline.value]
@@ -6491,12 +6494,35 @@ function buildYamlFromPipeline(pipeline, catalog) {
   }
   lines.push('pipeline:')
   for (const row of pipeline) {
-    lines.push(`  - stage: ${row.stage}`)
-
     // ── Structured stages: extract + flatSelect ────────────────
     // extract.args = list of {selector, as, method}
     // flatSelect.args = [segmentSelector, [{selector, as, method}, …]]
     const fields = Array.isArray(row._fields) ? row._fields.filter(f => (f.selector || '').trim() !== '') : []
+
+    // AUTO-DECISION (generator-side): the user builds a flatSelect, but if ANY
+    // field was picked OUTSIDE the segment (a parallel sibling list with no
+    // common per-row wrapper — e.g. avatar block + comment body), the rows are
+    // SPLIT, so flatSelect can't group them. Emit parallelSelect instead:
+    // page-rooted columns zipped BY INDEX (cardinality join). The user never
+    // had to choose the stage.
+    const flatSplit = row.stage === 'flatSelect' && fields.some(f => f._parallel)
+    lines.push(`  - stage: ${flatSplit ? 'parallelSelect' : row.stage}`)
+
+    if (flatSplit) {
+      const seg = (row.args && (row.args.segmentSelector || row.args.selector)) || ''
+      lines.push('    # auto: rows split across parallel sibling lists → parallelSelect (zipped by index)')
+      lines.push('    args:')
+      lines.push('      -')
+      for (const f of fields) {
+        // parallel fields carry a page-rooted selector already; in-segment
+        // fields are relative → compose with the segment so all columns are
+        // page-rooted repeating selectors of equal cardinality.
+        const sel = f._parallel ? f.selector : (seg ? `${seg} ${f.selector}` : f.selector)
+        lines.push(`        - { selector: ${yamlScalar(sel)}, method: ${yamlScalar(f.method || 'text')}, as: ${yamlScalar(f.as || '')} }`)
+      }
+      continue
+    }
+
     if (row.stage === 'extract') {
       if (fields.length === 0) {
         lines.push('    args: []')
