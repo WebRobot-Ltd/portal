@@ -1248,7 +1248,7 @@ go</pre>
                  (needs search / pagination / a tab click first). Kept
                  reachable even mid field-selection so the user can
                  paginate and keep picking. Camoufox strategy required. -->
-            <button v-if="(pickerOriginIsFetch || pickerOriginIsExplore || pickerOriginIsJoin || pickerOriginIsFlatSelect || pickerOriginIsExtract) && !pickerIntendedMode"
+            <button v-if="(pickerOriginIsFetch || pickerOriginIsExplore || pickerOriginIsJoin || pickerOriginIsFlatSelect || pickerOriginIsExtract) && !pickerOriginIsVisitDrill && !pickerIntendedMode"
                     :class="['picker-tab', pickerMode === 'action-record' && 'active']"
                     title="Record a REPLAYABLE trace into this stage — every click / form input / navigation is saved. Use when the stage itself needs to drive the page at run time (login, filters). Distinct from the navigate-first phase (which only positions the mirror and is NOT recorded). Camoufox strategy required."
                     @click="setPickerMode('action-record')">⏺ Record actions</button>
@@ -6211,6 +6211,12 @@ const pickerOriginIsJoin = computed(() => {
       || s === 'intelligentJoin'
       || s === 'intelligentWgetJoin'
 })
+// visitExplore / visitJoin: you pick the link-to-follow as a SELECTOR; the
+// browser-visit transport is fixed, so there is NO per-stage action trace to
+// record → hide "⏺ Record actions" for these. (Generic explore/join keep it —
+// they default to a visit/wget transport that the trace can drive.)
+const pickerOriginIsVisitDrill = computed(() =>
+  pickerOriginStage.value === 'visitExplore' || pickerOriginStage.value === 'visitJoin')
 const tracableStages = computed(() => {
   return wizPipeline.value
     .map((row, idx) => ({ idx, stage: row.stage }))
