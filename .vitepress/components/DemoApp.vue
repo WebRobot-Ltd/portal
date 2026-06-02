@@ -192,6 +192,31 @@
               <span class="hitl-opt-hint-small">After timeout the row fails and the pipeline continues.</span>
             </div>
           </div>
+          <!-- Pipeline-level execution runtime. Metadata only for now — the
+               executor reads metadata.runtime (Phase-4 elastic Ray); the flag
+               just declares Spark-job vs Ray-actor intent in the YAML. -->
+          <div class="hitl-opt-wrap">
+            <label class="hitl-opt-label" style="display:flex;align-items:center;gap:8px;">
+              ⚙️ <strong>Execution runtime</strong>
+              <select v-model="wizRuntime" :disabled="isExecuting" class="text-input" style="width:auto;">
+                <option value="spark">Spark job (default)</option>
+                <option value="ray_actor">Ray actor</option>
+              </select>
+              <span class="hitl-opt-hint">Choose how the pipeline runs. <em>Ray actor</em> is recorded as <code>metadata.runtime</code> (dispatch lands with Phase-4 elastic Ray); Spark job is the current default.</span>
+            </label>
+          </div>
+          <!-- Preferential geo zone: pins the residential proxy (DataImpulse)
+               to a country at browser-session allocation. Emitted as
+               metadata.geo → DATAIMPULSE_PROXY_COUNTRY on the runtime. -->
+          <div class="hitl-opt-wrap">
+            <label class="hitl-opt-label" style="display:flex;align-items:center;gap:8px;">
+              🌍 <strong>Geo zone (proxy)</strong>
+              <select v-model="wizGeo" :disabled="isExecuting" class="text-input" style="width:auto;">
+                <option v-for="z in GEO_ZONES" :key="z.code" :value="z.code">{{ z.label }}</option>
+              </select>
+              <span class="hitl-opt-hint">Exit through residential IPs in this country (DataImpulse). <em>Auto</em> uses the global rotating pool. Applied per browser session via <code>metadata.geo</code>.</span>
+            </label>
+          </div>
         </div>
 
         <button
@@ -714,7 +739,7 @@ go</pre>
                          through the structured fields editor below
                          (🎯 Pick fields / 🪄 AI suggest fields). Hide
                          it there to keep the row uncluttered. -->
-                    <button v-if="!isStructuredFieldsStage(row.stage)"
+                    <button v-if="!isStructuredFieldsStage(row.stage) && !(row.stage === 'oddsSelect' || row.stage === 'odds_select')"
                             class="btn btn-secondary btn-xs"
                             @click="openTraceRecorder(idx)"
                             title="Record a sequence of click/type/scroll actions to run as this stage's trace">⏺</button>
@@ -807,11 +832,79 @@ go</pre>
                     </tbody>
                   </table>
                 </div>
-                <div v-if="(findStageSpec(row.stage) && findStageSpec(row.stage).arg_schema || []).length === 0" class="wizard-empty">
+
+                <!-- oddsSelect: deterministic multi-market odds extractor.
+                     One box per market (lazy-loaded markets each have their
+                     own structure), AI magic infers selection/odds/line, the
+                     operator ticks the subset to extract. -->
+                <div v-if="row.stage === 'oddsSelect' || row.stage === 'odds_select'" class="wizard-fields-block">
+                  <div class="wizard-fields-head">
+                    <strong>🎰 Markets ({{ (row._markets || []).filter(m => m.enabled !== false).length }}/{{ (row._markets || []).length }} enabled)</strong>
+                    <div class="wizard-fields-actions">
+                      <button class="btn btn-secondary btn-xs"
+                              :disabled="!pickerLoadedUrl"
+                              :title="pickerLoadedUrl ? 'Click ONE market block on the page (scroll/expand first to lazy-load the markets you want)' : 'Load the bookmaker page in the picker first'"
+                              @click="addMarketBoxPick(idx)">📦 Add market (pick box)</button>
+                    </div>
+                  </div>
+                  <div v-if="!pickerLoadedUrl" class="wizard-fields-warn">
+                    ⚠️ Load the bookmaker page in the picker, scroll/expand to lazy-load the markets, then pick one box per market.
+                  </div>
+                  <div v-if="!(row._markets || []).length" class="wizard-empty">
+                    No markets yet — pick one box per market; AI infers the selection/odds structure for each, you confirm and tick the subset.
+                  </div>
+                  <div v-for="(m, mi) in (row._markets || [])" :key="mi"
+                       class="wizard-market-card" :class="{ 'wizard-market-off': m.enabled === false }">
+                    <div class="wizard-market-head">
+                      <label class="wizard-market-enable" title="Include this market in the extraction (the tick IS the subset selector)">
+                        <input type="checkbox" :checked="m.enabled !== false" @change="toggleMarketEnabled(idx, mi, $event.target.checked)"> include
+                      </label>
+                      <input type="text" class="text-input wizard-market-label" :value="m.label"
+                             placeholder="market label (→ market_type)"
+                             @input="updateMarketProp(idx, mi, 'label', $event.target.value)">
+                      <button class="btn btn-primary btn-xs"
+                              :disabled="oddsInferKey === (idx + ':' + mi)"
+                              title="Re-run AI structure inference for this market"
+                              @click="inferMarketStructure(idx, mi)">
+                        <span v-if="oddsInferKey === (idx + ':' + mi)" class="loading-spinner"></span> 🪄 Infer
+                      </button>
+                      <button class="btn btn-danger btn-xs" title="Remove market" @click="removeMarket(idx, mi)">✕</button>
+                    </div>
+                    <div class="wizard-arg-input-row" style="gap:8px;flex-wrap:wrap;margin:4px 0;">
+                      <input type="text" class="text-input" style="flex:1;min-width:160px;" :value="m.sectionSelector"
+                             placeholder="section selector (market block)"
+                             @input="updateMarketProp(idx, mi, 'sectionSelector', $event.target.value)">
+                      <input type="text" class="text-input" style="flex:1;min-width:160px;" :value="m.rowSelector"
+                             placeholder="row selector (outcome, relative to section)"
+                             @input="updateMarketProp(idx, mi, 'rowSelector', $event.target.value)">
+                    </div>
+                    <table v-if="(m.fields || []).length" class="wizard-fields-table">
+                      <thead><tr><th>role (as)</th><th>method</th><th>selector (relative to row)</th><th></th></tr></thead>
+                      <tbody>
+                        <tr v-for="(f, fi) in m.fields" :key="fi">
+                          <td><input type="text" class="text-input" :value="f.as" :list="'odds-roles-' + idx"
+                                     :title="f._why || ''"
+                                     @input="updateMarketField(idx, mi, fi, 'as', $event.target.value)"></td>
+                          <td><input type="text" class="text-input" :value="f.method" placeholder="text"
+                                     @input="updateMarketField(idx, mi, fi, 'method', $event.target.value)"></td>
+                          <td><input type="text" class="text-input" :value="f.selector" placeholder="relative selector"
+                                     @input="updateMarketField(idx, mi, fi, 'selector', $event.target.value)"></td>
+                          <td><button class="btn btn-danger btn-xs" @click="removeMarketField(idx, mi, fi)">✕</button></td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    <button class="btn btn-ghost btn-xs" @click="addMarketField(idx, mi)">+ Add field</button>
+                    <datalist :id="'odds-roles-' + idx">
+                      <option v-for="r in ODDS_FIELD_ROLES" :key="r" :value="r"></option>
+                    </datalist>
+                  </div>
+                </div>
+
+                <div v-if="!(row.stage === 'oddsSelect' || row.stage === 'odds_select') && (findStageSpec(row.stage) && findStageSpec(row.stage).arg_schema || []).length === 0" class="wizard-empty">
                   no args defined for this stage
                 </div>
                 <div
-                  v-for="a in (findStageSpec(row.stage) && findStageSpec(row.stage).arg_schema || [])"
+                  v-for="a in ((row.stage === 'oddsSelect' || row.stage === 'odds_select') ? [] : (findStageSpec(row.stage) && findStageSpec(row.stage).arg_schema || []))"
                   :key="a.name"
                   v-show="!isFieldsListArg(a)"
                   class="wizard-editor-arg"
@@ -3834,7 +3927,9 @@ async function openWithCamoufox(url) {
   try {
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/cmf/open`, {
       method: 'POST',
-      body: JSON.stringify({ url }),
+      // Pass the chosen geo zone so the LIVE designer session also exits
+      // through that country (same proxy the generated pipeline will use).
+      body: JSON.stringify(wizGeo.value ? { url, country: wizGeo.value } : { url }),
     })
     const j = await r.json()
     if (!r.ok || j.error) throw new Error(j.error || `cmf/open failed: ${r.status}`)
@@ -4692,6 +4787,15 @@ function onPickerMessage(ev) {
     return
   }
   if (d.type === 'webrobot-pick-selector') {
+    // oddsSelect market-box capture: the user picked ONE market block. Append
+    // it as a market + auto-run AI structure inference. Do NOT treat it as a
+    // normal field/macro pick.
+    if (pickingMarketBox.value != null) {
+      const stageIdx = pickingMarketBox.value
+      pickingMarketBox.value = null
+      appendMarket(stageIdx, d.selector, d.sampleHtmlFull || d.sampleHtml || '')
+      return
+    }
     // Macro-box capture: the user is scoping the content region for AI field
     // inference. Store the box (selector + its full HTML) + keep it highlighted,
     // and stop — do NOT treat it as a normal field/selector pick.
@@ -5017,6 +5121,131 @@ function clearMacroBox() {
   macroBox.value = null
   clearHighlightInIframe()
 }
+
+// ── oddsSelect: deterministic multi-market odds extractor ───────────────────
+// Each market on an oddsSelect stage lives in row._markets:
+//   { label, sectionSelector, rowSelector, fields:[{selector,as,method}],
+//     enabled, _sectionHtml }
+function ensureMarketsArray(stageIdx) {
+  const row = wizPipeline.value[stageIdx]
+  if (!row) return null
+  if (!Array.isArray(row._markets)) row._markets = []
+  return row._markets
+}
+
+// Start picking ONE market box. We reuse the single-selector picker mode; the
+// pick-selector handler routes the result to appendMarket when pickingMarketBox
+// is set (instead of treating it as a macro box / field).
+function addMarketBoxPick(stageIdx) {
+  if (!pickerLoadedUrl.value) {
+    wizStatus.value = { kind: 'error', text: 'Load the bookmaker page in the picker first (and scroll/expand to lazy-load the markets you want).' }
+    return
+  }
+  pickingMarketBox.value = stageIdx
+  pickerTargetStageIdx.value = stageIdx
+  const ifr = document.getElementById('wr-picker-iframe')
+  try {
+    ifr && ifr.contentWindow && ifr.contentWindow.postMessage(
+      { type: 'webrobot-picker-mode', mode: 'selector-single', linkMode: false }, '*')
+  } catch (_) {}
+  wizStatus.value = { kind: 'info', text: '📦 Click ONE market block (e.g. the whole "Match Result" table). Repeat for each market you want.' }
+}
+
+// Append a freshly-picked market box, then auto-run AI structure inference.
+function appendMarket(stageIdx, selector, html) {
+  const markets = ensureMarketsArray(stageIdx)
+  if (!markets) return
+  const mi = markets.length
+  markets.push({
+    label: '',
+    sectionSelector: selector,
+    rowSelector: '',
+    fields: [],
+    enabled: true,
+    _sectionHtml: html || '',
+  })
+  wizPipeline.value = [...wizPipeline.value]
+  sendHighlightToIframe([{ selector, color: '#f59e0b', label: 'market ' + (mi + 1) }])
+  wizStatus.value = { kind: 'info', text: `📦 Market ${mi + 1} captured — inferring structure…` }
+  inferMarketStructure(stageIdx, mi)
+}
+
+async function inferMarketStructure(stageIdx, marketIdx) {
+  const row = wizPipeline.value[stageIdx]
+  const mkt = row && Array.isArray(row._markets) ? row._markets[marketIdx] : null
+  if (!mkt) return
+  oddsInferKey.value = `${stageIdx}:${marketIdx}`
+  try {
+    const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/wizard/infer-odds-structure`, {
+      method: 'POST',
+      body: JSON.stringify({ label: mkt.label || '', section_html: mkt._sectionHtml || '' }),
+    })
+    const j = await r.json()
+    if (!r.ok || j.error) throw new Error(j.error || 'infer failed')
+    if (j.rowSelector) mkt.rowSelector = j.rowSelector
+    if (Array.isArray(j.fields)) {
+      mkt.fields = j.fields.map(f => ({
+        selector: f.selector || '',
+        as: f.as || 'field',
+        method: f.method || 'text',
+        _why: f.why || '',
+      }))
+    }
+    if (!mkt.label) {
+      // Derive a provisional label from the dominant semantic field.
+      const sel = mkt.fields.find(f => f.as === 'selection')
+      mkt.label = sel ? 'Market ' + (marketIdx + 1) : ('Market ' + (marketIdx + 1))
+    }
+    wizPipeline.value = [...wizPipeline.value]
+    wizStatus.value = { kind: 'info', text: `🪄 Structure suggested for market ${marketIdx + 1} — review selection/odds, then confirm.` }
+  } catch (e) {
+    wizStatus.value = { kind: 'error', text: `AI structure inference failed: ${e.message}. Pick the row + fields manually.` }
+  } finally {
+    oddsInferKey.value = null
+  }
+}
+
+function removeMarket(stageIdx, marketIdx) {
+  const row = wizPipeline.value[stageIdx]
+  if (!row || !Array.isArray(row._markets)) return
+  row._markets.splice(marketIdx, 1)
+  wizPipeline.value = [...wizPipeline.value]
+}
+function toggleMarketEnabled(stageIdx, marketIdx, val) {
+  const row = wizPipeline.value[stageIdx]
+  if (!row || !Array.isArray(row._markets) || !row._markets[marketIdx]) return
+  row._markets[marketIdx].enabled = !!val
+  wizPipeline.value = [...wizPipeline.value]
+}
+function updateMarketProp(stageIdx, marketIdx, prop, val) {
+  const row = wizPipeline.value[stageIdx]
+  if (!row || !Array.isArray(row._markets) || !row._markets[marketIdx]) return
+  row._markets[marketIdx][prop] = val
+  wizPipeline.value = [...wizPipeline.value]
+}
+function addMarketField(stageIdx, marketIdx) {
+  const row = wizPipeline.value[stageIdx]
+  const mkt = row && Array.isArray(row._markets) ? row._markets[marketIdx] : null
+  if (!mkt) return
+  if (!Array.isArray(mkt.fields)) mkt.fields = []
+  mkt.fields.push({ selector: '', as: 'field', method: 'text' })
+  wizPipeline.value = [...wizPipeline.value]
+}
+function updateMarketField(stageIdx, marketIdx, fIdx, prop, val) {
+  const row = wizPipeline.value[stageIdx]
+  const mkt = row && Array.isArray(row._markets) ? row._markets[marketIdx] : null
+  if (!mkt || !Array.isArray(mkt.fields) || !mkt.fields[fIdx]) return
+  mkt.fields[fIdx][prop] = val
+  wizPipeline.value = [...wizPipeline.value]
+}
+function removeMarketField(stageIdx, marketIdx, fIdx) {
+  const row = wizPipeline.value[stageIdx]
+  const mkt = row && Array.isArray(row._markets) ? row._markets[marketIdx] : null
+  if (!mkt || !Array.isArray(mkt.fields)) return
+  mkt.fields.splice(fIdx, 1)
+  wizPipeline.value = [...wizPipeline.value]
+}
+const ODDS_FIELD_ROLES = ['selection', 'odds', 'line', 'over_under', 'spread', 'player_name', 'field']
 
 async function runAutoSuggestFields() {
   if (pickerTargetStageIdx.value == null) return
@@ -5665,6 +5894,31 @@ const relaxingFields = ref(false)
 // whole-page truncation, no nav/footer noise). AI auto-suggest is gated on it.
 const macroBox = ref(null)          // { selector, html }
 const pickingMacroBox = ref(false)  // true while waiting for the box click
+// oddsSelect (deterministic odds extractor): the operator picks ONE box per
+// market (lazy-loaded markets each have their own structure), AI magic infers
+// the per-market odds structure, then ticks the subset to extract.
+const pickingMarketBox = ref(null)  // stageIdx while waiting for a market-box click
+const oddsInferKey     = ref(null)  // "stageIdx:marketIdx" while inferring structure
+// Pipeline-level execution runtime. 'spark' (default) runs the pipeline as a
+// Spark job; 'ray_actor' marks it to run as a Ray actor. METADATA ONLY for now
+// — the actual dispatch is handled by the executor (Phase-4 elastic Ray); the
+// flag just travels in metadata.runtime so the pipeline declares its intent.
+const wizRuntime = ref('spark')
+// Preferential geo zone for the residential proxy (DataImpulse). Empty = no
+// geo (global rotating). ISO-2 code → emitted as metadata.geo, which the
+// runtime turns into DATAIMPULSE_PROXY_COUNTRY (per-session context proxy).
+const wizGeo = ref('')
+const GEO_ZONES = [
+  { code: '',   label: '🌍 Auto (no geo)' },
+  { code: 'it', label: '🇮🇹 Italy' },
+  { code: 'gb', label: '🇬🇧 United Kingdom' },
+  { code: 'de', label: '🇩🇪 Germany' },
+  { code: 'fr', label: '🇫🇷 France' },
+  { code: 'es', label: '🇪🇸 Spain' },
+  { code: 'us', label: '🇺🇸 United States' },
+  { code: 'nl', label: '🇳🇱 Netherlands' },
+  { code: 'se', label: '🇸🇪 Sweden' },
+]
 // Stage awaiting a field-sample response (LLM auto-suggest → resolve values to
 // fill the list's sample column; also used for multi-page consolidation).
 const pendingSampleStageIdx = ref(null)
@@ -6576,6 +6830,38 @@ function buildYamlFromPipeline(pipeline, catalog) {
       continue
     }
 
+    // ── oddsSelect: deterministic multi-market odds extractor ─────
+    // args is a single config map { markets:[…], enabled?:[…] }. The
+    // ticked-subset is expressed by emitting ONLY enabled markets (the
+    // checkbox IS the subset selector); each market carries its own
+    // section/row/field selectors and an explicit label → market_type.
+    if (row.stage === 'oddsSelect' || row.stage === 'odds_select') {
+      const markets = (Array.isArray(row._markets) ? row._markets : [])
+        .filter(m => m && m.enabled !== false)
+        .filter(m => (m.sectionSelector || '').trim() &&
+                     Array.isArray(m.fields) &&
+                     m.fields.some(f => (f.selector || '').trim()))
+      if (markets.length === 0) {
+        lines.push('    args: []    # no enabled market with a section + fields yet')
+        continue
+      }
+      lines.push('    args:')
+      lines.push('      - markets:')
+      markets.forEach((m, mi) => {
+        const label = (m.label || '').trim() || `Market ${mi + 1}`
+        lines.push(`          - label: ${yamlScalar(label)}`)
+        lines.push(`            sectionSelector: ${yamlScalar(m.sectionSelector)}`)
+        if ((m.rowSelector || '').trim()) {
+          lines.push(`            rowSelector: ${yamlScalar(m.rowSelector)}`)
+        }
+        lines.push('            fields:')
+        for (const f of m.fields.filter(f => (f.selector || '').trim())) {
+          lines.push(`              - { selector: ${yamlScalar(f.selector)}, method: ${yamlScalar(f.method || 'text')}, as: ${yamlScalar(f.as || 'field')} }`)
+        }
+      })
+      continue
+    }
+
     // ── Generic stages: positional args from catalog arg_schema ───
     const spec = findSpec(row.stage)
     const orderedArgNames = (spec && spec.arg_schema || []).map(a => a.name)
@@ -6624,12 +6910,27 @@ function buildYamlFromPipeline(pipeline, catalog) {
   // unchecks it (e.g. a false-positive trip on a plain forum), we must
   // NOT leak requires_hitl/anti_bot_kinds into the YAML and silently
   // force pause-on-captcha at submit.
+  const metaLines = []
+  // Pipeline-level execution runtime (spark job vs ray actor). Emitted only
+  // when non-default; metadata only for now — the executor reads it (Phase-4
+  // elastic Ray). Default 'spark' is implicit, so we omit it to keep YAML clean.
+  if (wizRuntime.value && wizRuntime.value !== 'spark') {
+    metaLines.push(`  runtime: ${yamlScalar(wizRuntime.value)}`)
+  }
+  // Preferential geo zone → residential proxy pinned to this country
+  // (DataImpulse __cr.<cc>). Omitted when empty (global rotating proxy).
+  if (wizGeo.value && /^[a-z]{2}$/i.test(wizGeo.value)) {
+    metaLines.push(`  geo: ${yamlScalar(wizGeo.value.toLowerCase())}`)
+  }
   if (hitlAwait.value && pipeline.some(r => r && r._requires_hitl)) {
-    lines.push('metadata:')
-    lines.push('  requires_hitl: true')
+    metaLines.push('  requires_hitl: true')
     const kinds = pipeline
       .map(r => r && r._anti_bot_kind).filter(k => k)
-    if (kinds.length) lines.push(`  anti_bot_kinds: [${kinds.map(yamlScalar).join(', ')}]`)
+    if (kinds.length) metaLines.push(`  anti_bot_kinds: [${kinds.map(yamlScalar).join(', ')}]`)
+  }
+  if (metaLines.length) {
+    lines.push('metadata:')
+    for (const ml of metaLines) lines.push(ml)
   }
   return lines.join('\n')
 }
