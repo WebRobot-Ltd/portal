@@ -204,6 +204,9 @@
               </select>
               <span class="hitl-opt-hint">Choose how the pipeline runs. <em>Ray actor</em> is recorded as <code>metadata.runtime</code> (dispatch lands with Phase-4 elastic Ray); Spark job is the current default.</span>
             </label>
+            <p v-if="wizRuntime === 'ray_actor'" class="hitl-opt-hint" style="color:#b45309;margin-top:6px;">
+              🚧 Ray actor runtime is under design (Phase-4) — not available yet. The pipeline records the choice but executes on Spark for now.
+            </p>
           </div>
           <!-- Preferential geo zone: pins the residential proxy (DataImpulse)
                to a country at browser-session allocation. Emitted as
@@ -1044,6 +1047,34 @@ go</pre>
           </div>
         </div>
 
+        <!-- Pipeline-level settings, available DURING design (not just in the
+             execute panel): geo zone + execution runtime. They're metadata of
+             the pipeline, so they belong here and show up in the YAML below. -->
+        <h4>⚙️ Pipeline settings</h4>
+        <div class="wizard-pipeline-settings">
+          <label class="wizard-setting">
+            <span>🌍 Geo zone (proxy)</span>
+            <select v-model="wizGeo" class="text-input">
+              <option v-for="z in GEO_ZONES" :key="z.code" :value="z.code">{{ z.label }}</option>
+            </select>
+          </label>
+          <label class="wizard-setting">
+            <span>🖥 Execution runtime</span>
+            <select v-model="wizRuntime" class="text-input">
+              <option value="spark">Spark job (default)</option>
+              <option value="ray_actor">Ray actor</option>
+            </select>
+          </label>
+          <p v-if="wizRuntime === 'ray_actor'" class="wizard-setting-warn">
+            🚧 <strong>Ray actor runtime is under design (Phase-4)</strong> — not available yet.
+            The pipeline records <code>metadata.runtime: ray_actor</code>, but execution runs on Spark for now.
+          </p>
+          <p class="wizard-setting-hint">
+            Geo routes the residential proxy through that country (DataImpulse) at browser-session
+            allocation; emitted as <code>metadata.geo</code>. Runtime emitted as <code>metadata.runtime</code>.
+          </p>
+        </div>
+
         <h4>📄 YAML preview</h4>
         <pre class="wizard-yaml">{{ wizYamlPreview }}</pre>
 
@@ -1380,6 +1411,12 @@ go</pre>
             placeholder="https://target-site.example/page"
             @keyup.enter="loadPickerUrl"
           />
+          <!-- Pipeline-level geo zone: choose BEFORE loading so the live mirror
+               session exits through that country (DataImpulse). Same wizGeo used
+               in the YAML metadata.geo — one pipeline-wide setting. -->
+          <select v-model="wizGeo" class="text-input" style="width:auto;" title="Proxy geo zone for this pipeline (applies to the live mirror session too)">
+            <option v-for="z in GEO_ZONES" :key="z.code" :value="z.code">{{ z.label }}</option>
+          </select>
           <button class="btn btn-primary btn-sm" @click="loadPickerUrl">Load page</button>
           <button v-if="pickerLoadedUrl"
                   class="btn btn-secondary btn-sm"
@@ -9785,6 +9822,43 @@ if (typeof window !== 'undefined') {
   border-radius: 4px;
   font-family: inherit;
   font-size: 0.9em;
+}
+.wizard-pipeline-settings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+  padding: 12px 14px;
+  margin-bottom: 12px;
+  background: #f7f8fc;
+  border: 1px solid #e6e8ef;
+  border-radius: 10px;
+}
+.wizard-setting {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #374151;
+}
+.wizard-setting select { min-width: 180px; }
+.wizard-setting-hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.78rem;
+  color: #6b7280;
+  font-weight: 400;
+}
+.wizard-setting-warn {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 0.82rem;
+  color: #92400e;
+  background: #fef3c7;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  padding: 8px 10px;
 }
 .wizard-yaml {
   background: #1e1e1e;
