@@ -214,8 +214,9 @@
           <div class="hitl-opt-wrap">
             <label class="hitl-opt-label" style="display:flex;align-items:center;gap:8px;">
               🌍 <strong>Geo zone (proxy)</strong>
-              <select v-model="wizGeo" :disabled="isExecuting" class="text-input" style="width:auto;">
-                <option v-for="z in GEO_ZONES" :key="z.code" :value="z.code">{{ z.label }}</option>
+              <input v-model="geoSearch" :disabled="isExecuting" class="text-input" style="width:120px;" placeholder="filter country…" />
+              <select v-model="wizGeo" :disabled="isExecuting" class="text-input" style="width:auto;" :size="geoSearch ? 6 : 1">
+                <option v-for="z in geoOptions" :key="z.code" :value="z.code">{{ z.label }}</option>
               </select>
               <span class="hitl-opt-hint">Exit through residential IPs in this country (DataImpulse). <em>Auto</em> uses the global rotating pool. Applied per browser session via <code>metadata.geo</code>.</span>
             </label>
@@ -1054,8 +1055,9 @@ go</pre>
         <div class="wizard-pipeline-settings">
           <label class="wizard-setting">
             <span>🌍 Geo zone (proxy)</span>
-            <select v-model="wizGeo" class="text-input">
-              <option v-for="z in GEO_ZONES" :key="z.code" :value="z.code">{{ z.label }}</option>
+            <input v-model="geoSearch" class="text-input" style="width:120px;margin-bottom:4px;" placeholder="filter country…" />
+            <select v-model="wizGeo" class="text-input" :size="geoSearch ? 6 : 1">
+              <option v-for="z in geoOptions" :key="z.code" :value="z.code">{{ z.label }}</option>
             </select>
           </label>
           <label class="wizard-setting">
@@ -1414,8 +1416,9 @@ go</pre>
           <!-- Pipeline-level geo zone: choose BEFORE loading so the live mirror
                session exits through that country (DataImpulse). Same wizGeo used
                in the YAML metadata.geo — one pipeline-wide setting. -->
-          <select v-model="wizGeo" class="text-input" style="width:auto;" title="Proxy geo zone for this pipeline (applies to the live mirror session too)">
-            <option v-for="z in GEO_ZONES" :key="z.code" :value="z.code">{{ z.label }}</option>
+          <input v-model="geoSearch" class="text-input" style="width:110px;" placeholder="filter country…" />
+          <select v-model="wizGeo" class="text-input" style="width:auto;" :size="geoSearch ? 6 : 1" title="Proxy geo zone for this pipeline (applies to the live mirror session too)">
+            <option v-for="z in geoOptions" :key="z.code" :value="z.code">{{ z.label }}</option>
           </select>
           <button class="btn btn-primary btn-sm" @click="loadPickerUrl">Load page</button>
           <button v-if="pickerLoadedUrl"
@@ -5946,16 +5949,57 @@ const wizRuntime = ref('spark')
 // runtime turns into DATAIMPULSE_PROXY_COUNTRY (per-session context proxy).
 const wizGeo = ref('')
 const GEO_ZONES = [
-  { code: '',   label: '🌍 Auto (no geo)' },
-  { code: 'it', label: '🇮🇹 Italy' },
-  { code: 'gb', label: '🇬🇧 United Kingdom' },
-  { code: 'de', label: '🇩🇪 Germany' },
-  { code: 'fr', label: '🇫🇷 France' },
-  { code: 'es', label: '🇪🇸 Spain' },
-  { code: 'us', label: '🇺🇸 United States' },
-  { code: 'nl', label: '🇳🇱 Netherlands' },
-  { code: 'se', label: '🇸🇪 Sweden' },
+  { code: '', label: '🌍 Auto (no geo)' }, { code: 'af', label: '🇦🇫 Afghanistan' }, { code: 'al', label: '🇦🇱 Albania' }, { code: 'dz', label: '🇩🇿 Algeria' },
+  { code: 'ad', label: '🇦🇩 Andorra' }, { code: 'ao', label: '🇦🇴 Angola' }, { code: 'ar', label: '🇦🇷 Argentina' }, { code: 'am', label: '🇦🇲 Armenia' },
+  { code: 'au', label: '🇦🇺 Australia' }, { code: 'at', label: '🇦🇹 Austria' }, { code: 'az', label: '🇦🇿 Azerbaijan' }, { code: 'bs', label: '🇧🇸 Bahamas' },
+  { code: 'bh', label: '🇧🇭 Bahrain' }, { code: 'bd', label: '🇧🇩 Bangladesh' }, { code: 'bb', label: '🇧🇧 Barbados' }, { code: 'by', label: '🇧🇾 Belarus' },
+  { code: 'be', label: '🇧🇪 Belgium' }, { code: 'bz', label: '🇧🇿 Belize' }, { code: 'bj', label: '🇧🇯 Benin' }, { code: 'bt', label: '🇧🇹 Bhutan' },
+  { code: 'bo', label: '🇧🇴 Bolivia' }, { code: 'ba', label: '🇧🇦 Bosnia & Herzegovina' }, { code: 'bw', label: '🇧🇼 Botswana' }, { code: 'br', label: '🇧🇷 Brazil' },
+  { code: 'bn', label: '🇧🇳 Brunei' }, { code: 'bg', label: '🇧🇬 Bulgaria' }, { code: 'bf', label: '🇧🇫 Burkina Faso' }, { code: 'bi', label: '🇧🇮 Burundi' },
+  { code: 'kh', label: '🇰🇭 Cambodia' }, { code: 'cm', label: '🇨🇲 Cameroon' }, { code: 'ca', label: '🇨🇦 Canada' }, { code: 'cv', label: '🇨🇻 Cape Verde' },
+  { code: 'ky', label: '🇰🇾 Cayman Islands' }, { code: 'td', label: '🇹🇩 Chad' }, { code: 'cl', label: '🇨🇱 Chile' }, { code: 'cn', label: '🇨🇳 China' },
+  { code: 'co', label: '🇨🇴 Colombia' }, { code: 'cg', label: '🇨🇬 Congo' }, { code: 'cr', label: '🇨🇷 Costa Rica' }, { code: 'hr', label: '🇭🇷 Croatia' },
+  { code: 'cu', label: '🇨🇺 Cuba' }, { code: 'cy', label: '🇨🇾 Cyprus' }, { code: 'cz', label: '🇨🇿 Czechia' }, { code: 'cd', label: '🇨🇩 DR Congo' },
+  { code: 'dk', label: '🇩🇰 Denmark' }, { code: 'dj', label: '🇩🇯 Djibouti' }, { code: 'dm', label: '🇩🇲 Dominica' }, { code: 'do', label: '🇩🇴 Dominican Republic' },
+  { code: 'ec', label: '🇪🇨 Ecuador' }, { code: 'eg', label: '🇪🇬 Egypt' }, { code: 'sv', label: '🇸🇻 El Salvador' }, { code: 'ee', label: '🇪🇪 Estonia' },
+  { code: 'et', label: '🇪🇹 Ethiopia' }, { code: 'fj', label: '🇫🇯 Fiji' }, { code: 'fi', label: '🇫🇮 Finland' }, { code: 'fr', label: '🇫🇷 France' },
+  { code: 'ga', label: '🇬🇦 Gabon' }, { code: 'gm', label: '🇬🇲 Gambia' }, { code: 'ge', label: '🇬🇪 Georgia' }, { code: 'de', label: '🇩🇪 Germany' },
+  { code: 'gh', label: '🇬🇭 Ghana' }, { code: 'gr', label: '🇬🇷 Greece' }, { code: 'gd', label: '🇬🇩 Grenada' }, { code: 'gt', label: '🇬🇹 Guatemala' },
+  { code: 'gn', label: '🇬🇳 Guinea' }, { code: 'gy', label: '🇬🇾 Guyana' }, { code: 'ht', label: '🇭🇹 Haiti' }, { code: 'hn', label: '🇭🇳 Honduras' },
+  { code: 'hk', label: '🇭🇰 Hong Kong' }, { code: 'hu', label: '🇭🇺 Hungary' }, { code: 'is', label: '🇮🇸 Iceland' }, { code: 'in', label: '🇮🇳 India' },
+  { code: 'id', label: '🇮🇩 Indonesia' }, { code: 'ir', label: '🇮🇷 Iran' }, { code: 'iq', label: '🇮🇶 Iraq' }, { code: 'ie', label: '🇮🇪 Ireland' },
+  { code: 'il', label: '🇮🇱 Israel' }, { code: 'it', label: '🇮🇹 Italy' }, { code: 'ci', label: '🇨🇮 Ivory Coast' }, { code: 'jm', label: '🇯🇲 Jamaica' },
+  { code: 'jp', label: '🇯🇵 Japan' }, { code: 'jo', label: '🇯🇴 Jordan' }, { code: 'kz', label: '🇰🇿 Kazakhstan' }, { code: 'ke', label: '🇰🇪 Kenya' },
+  { code: 'kw', label: '🇰🇼 Kuwait' }, { code: 'kg', label: '🇰🇬 Kyrgyzstan' }, { code: 'la', label: '🇱🇦 Laos' }, { code: 'lv', label: '🇱🇻 Latvia' },
+  { code: 'lb', label: '🇱🇧 Lebanon' }, { code: 'ls', label: '🇱🇸 Lesotho' }, { code: 'lr', label: '🇱🇷 Liberia' }, { code: 'ly', label: '🇱🇾 Libya' },
+  { code: 'li', label: '🇱🇮 Liechtenstein' }, { code: 'lt', label: '🇱🇹 Lithuania' }, { code: 'lu', label: '🇱🇺 Luxembourg' }, { code: 'mo', label: '🇲🇴 Macao' },
+  { code: 'mg', label: '🇲🇬 Madagascar' }, { code: 'mw', label: '🇲🇼 Malawi' }, { code: 'my', label: '🇲🇾 Malaysia' }, { code: 'mv', label: '🇲🇻 Maldives' },
+  { code: 'ml', label: '🇲🇱 Mali' }, { code: 'mt', label: '🇲🇹 Malta' }, { code: 'mr', label: '🇲🇷 Mauritania' }, { code: 'mu', label: '🇲🇺 Mauritius' },
+  { code: 'mx', label: '🇲🇽 Mexico' }, { code: 'md', label: '🇲🇩 Moldova' }, { code: 'mc', label: '🇲🇨 Monaco' }, { code: 'mn', label: '🇲🇳 Mongolia' },
+  { code: 'me', label: '🇲🇪 Montenegro' }, { code: 'ma', label: '🇲🇦 Morocco' }, { code: 'mz', label: '🇲🇿 Mozambique' }, { code: 'mm', label: '🇲🇲 Myanmar' },
+  { code: 'na', label: '🇳🇦 Namibia' }, { code: 'np', label: '🇳🇵 Nepal' }, { code: 'nl', label: '🇳🇱 Netherlands' }, { code: 'nz', label: '🇳🇿 New Zealand' },
+  { code: 'ni', label: '🇳🇮 Nicaragua' }, { code: 'ne', label: '🇳🇪 Niger' }, { code: 'ng', label: '🇳🇬 Nigeria' }, { code: 'mk', label: '🇲🇰 North Macedonia' },
+  { code: 'no', label: '🇳🇴 Norway' }, { code: 'om', label: '🇴🇲 Oman' }, { code: 'pk', label: '🇵🇰 Pakistan' }, { code: 'pa', label: '🇵🇦 Panama' },
+  { code: 'pg', label: '🇵🇬 Papua New Guinea' }, { code: 'py', label: '🇵🇾 Paraguay' }, { code: 'pe', label: '🇵🇪 Peru' }, { code: 'ph', label: '🇵🇭 Philippines' },
+  { code: 'pl', label: '🇵🇱 Poland' }, { code: 'pt', label: '🇵🇹 Portugal' }, { code: 'pr', label: '🇵🇷 Puerto Rico' }, { code: 'qa', label: '🇶🇦 Qatar' },
+  { code: 'ro', label: '🇷🇴 Romania' }, { code: 'ru', label: '🇷🇺 Russia' }, { code: 'rw', label: '🇷🇼 Rwanda' }, { code: 'sa', label: '🇸🇦 Saudi Arabia' },
+  { code: 'sn', label: '🇸🇳 Senegal' }, { code: 'rs', label: '🇷🇸 Serbia' }, { code: 'sc', label: '🇸🇨 Seychelles' }, { code: 'sl', label: '🇸🇱 Sierra Leone' },
+  { code: 'sg', label: '🇸🇬 Singapore' }, { code: 'sk', label: '🇸🇰 Slovakia' }, { code: 'si', label: '🇸🇮 Slovenia' }, { code: 'so', label: '🇸🇴 Somalia' },
+  { code: 'za', label: '🇿🇦 South Africa' }, { code: 'kr', label: '🇰🇷 South Korea' }, { code: 'ss', label: '🇸🇸 South Sudan' }, { code: 'es', label: '🇪🇸 Spain' },
+  { code: 'lk', label: '🇱🇰 Sri Lanka' }, { code: 'sd', label: '🇸🇩 Sudan' }, { code: 'sr', label: '🇸🇷 Suriname' }, { code: 'se', label: '🇸🇪 Sweden' },
+  { code: 'ch', label: '🇨🇭 Switzerland' }, { code: 'sy', label: '🇸🇾 Syria' }, { code: 'tw', label: '🇹🇼 Taiwan' }, { code: 'tj', label: '🇹🇯 Tajikistan' },
+  { code: 'tz', label: '🇹🇿 Tanzania' }, { code: 'th', label: '🇹🇭 Thailand' }, { code: 'tg', label: '🇹🇬 Togo' }, { code: 'tt', label: '🇹🇹 Trinidad & Tobago' },
+  { code: 'tn', label: '🇹🇳 Tunisia' }, { code: 'tr', label: '🇹🇷 Turkey' }, { code: 'tm', label: '🇹🇲 Turkmenistan' }, { code: 'ae', label: '🇦🇪 UAE' },
+  { code: 'ug', label: '🇺🇬 Uganda' }, { code: 'ua', label: '🇺🇦 Ukraine' }, { code: 'gb', label: '🇬🇧 United Kingdom' }, { code: 'us', label: '🇺🇸 United States' },
+  { code: 'uy', label: '🇺🇾 Uruguay' }, { code: 'uz', label: '🇺🇿 Uzbekistan' }, { code: 've', label: '🇻🇪 Venezuela' }, { code: 'vn', label: '🇻🇳 Vietnam' },
+  { code: 'ye', label: '🇾🇪 Yemen' }, { code: 'zm', label: '🇿🇲 Zambia' }, { code: 'zw', label: '🇿🇼 Zimbabwe' }
 ]
+const geoSearch = ref('')
+const geoOptions = computed(() => {
+  const q = geoSearch.value.trim().toLowerCase()
+  if (!q) return GEO_ZONES
+  return GEO_ZONES.filter(z => !z.code || z.label.toLowerCase().includes(q) || z.code.includes(q))
+})
 // Stage awaiting a field-sample response (LLM auto-suggest → resolve values to
 // fill the list's sample column; also used for multi-page consolidation).
 const pendingSampleStageIdx = ref(null)
