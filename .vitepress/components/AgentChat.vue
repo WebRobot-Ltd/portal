@@ -8,6 +8,14 @@ const CHAT_API = (import.meta?.env?.VITE_AGENT_CHAT_API) || 'https://agent.webro
 
 const sessionId = 'web-' + Math.random().toString(36).slice(2, 10)
 const input = ref('')
+// Optional BYOC: the user's own Claude subscription OAuth token (claude
+// setup-token). Kept only in sessionStorage (this tab) + sent per turn; the
+// server holds it in memory for the session. Empty → server's shared token.
+const token = ref(typeof sessionStorage !== 'undefined' ? (sessionStorage.getItem('wr_oauth') || '') : '')
+const showToken = ref(false)
+function saveToken() {
+  try { token.value ? sessionStorage.setItem('wr_oauth', token.value) : sessionStorage.removeItem('wr_oauth') } catch (_) {}
+}
 const busy = ref(false)
 const log = ref([])          // {role:'user'|'ai', text}
 const logEl = ref(null)
@@ -27,7 +35,7 @@ async function send() {
     const r = await fetch(`${CHAT_API}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, message: msg }),
+      body: JSON.stringify({ sessionId, message: msg, oauthToken: token.value || undefined }),
     })
     if (!r.ok || !r.body) { ai.text = `⚠️ chat server error (${r.status})`; return }
     const reader = r.body.getReader(), dec = new TextDecoder()
@@ -79,6 +87,15 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', endSession); 
     <div class="head">
       🤖 <strong>WebRobot — AI Data Engineer</strong>
       <span class="muted">Agent SDK + live MCP</span>
+      <button class="byoc-toggle" @click="showToken = !showToken">
+        {{ token ? '🔑 your token' : '🔑 use your plan' }}
+      </button>
+    </div>
+
+    <div v-if="showToken" class="byoc">
+      <input type="password" v-model="token" @input="saveToken"
+             placeholder="Your Claude OAuth token (claude setup-token) — optional, BYOC" />
+      <span class="muted small">Kept only in this browser tab + your chat session; runs on your own plan. Leave empty to use the shared demo token.</span>
     </div>
 
     <div ref="logEl" class="log">
@@ -108,6 +125,11 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', endSession); 
        padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
 .head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
 .muted { color: #6b7280; font-weight: 400; }
+.byoc-toggle { margin-left: auto; border: 1px solid #d4d7e2; background: #f8fafc; border-radius: 999px;
+               padding: 3px 10px; font-size: 12px; cursor: pointer; color: #4f46e5; }
+.byoc { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.byoc input { width: 100%; padding: 8px 10px; border: 1px solid #d4d7e2; border-radius: 8px; font: inherit; }
+.small { font-size: 11.5px; }
 .log { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px; height: 56vh;
        overflow-y: auto; background: #fff; }
 .empty { padding: 8px 0; }

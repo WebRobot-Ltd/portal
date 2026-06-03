@@ -3,7 +3,7 @@
     <div class="api-reference-wrap">
       <div class="api-reference-toolbar">
         <a class="api-reference-link"
-           href="/openapi.json"
+           href="https://api.webrobot.eu/api/openapi.json"
            target="_blank"
            rel="noopener">📄 Download openapi.json</a>
         <a class="api-reference-link"
@@ -12,7 +12,7 @@
            rel="noopener">🌐 Production base URL</a>
       </div>
       <rapi-doc
-        spec-url="/openapi.json"
+        spec-url="https://api.webrobot.eu/api/openapi.json"
         theme="light"
         render-style="read"
         layout="column"
