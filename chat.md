@@ -6,12 +6,12 @@ description: Experimental agentic chat — Claude Agent SDK runtime wired to the
 
 <div class="demo-page-wrapper">
 
-# 🤖 AI Data Engineer — Chat <Badge type="warning" text="beta / in sviluppo" />
+# 🤖 AI Data Engineer — Chat <Badge type="warning" text="beta / in development" />
 
-Chat sperimentale con un agente "data engineer" sul runtime **Claude Agent SDK**,
-collegato in tempo reale al **WebRobot MCP**. Può consultare il catalogo stage,
-bozzare e validare pipeline ETL. È una **base in sviluppo**: i risultati sono
-sperimentali e non garantiti.
+Experimental chat with a "data engineer" agent on the **Claude Agent SDK**
+runtime, connected live to the **WebRobot MCP**. It can browse the stage
+catalog and draft & validate ETL pipelines. This is a **work in progress**:
+results are experimental and not guaranteed.
 
 <AgentChat />
 

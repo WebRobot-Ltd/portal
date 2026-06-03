@@ -71,9 +71,9 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', endSession); 
 <template>
   <div class="agent-chat">
     <div class="wip">
-      🚧 <strong>Chat agentica in fase di sviluppo.</strong>
-      Esperimento sul runtime Claude Agent SDK collegato al WebRobot MCP.
-      I risultati sono sperimentali e <strong>non garantiti</strong>.
+      🚧 <strong>Agentic chat — work in progress.</strong>
+      Experiment on the Claude Agent SDK runtime connected to the WebRobot MCP.
+      Results are experimental and <strong>not guaranteed</strong>.
     </div>
 
     <div class="head">
@@ -83,20 +83,20 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', endSession); 
 
     <div ref="logEl" class="log">
       <div v-if="!log.length" class="muted empty">
-        Chiedi qualcosa, es. “Elenca gli stage ETL di WebRobot e riassumine 5”,
-        oppure “Bozza una pipeline per scrapare titoli e prezzi da un e-commerce”.
+        Ask something, e.g. “List the WebRobot ETL stages and summarize 5 of them”,
+        or “Draft a pipeline to scrape titles and prices from an e-commerce site”.
       </div>
       <div v-for="(m, i) in log" :key="i" :class="['msg', m.role]">
-        <span class="who">{{ m.role === 'user' ? 'Tu' : 'AI' }}</span>
+        <span class="who">{{ m.role === 'user' ? 'You' : 'AI' }}</span>
         <span class="text">{{ m.text || (busy && i === log.length - 1 ? '…' : '') }}</span>
       </div>
     </div>
 
     <div class="row">
       <input v-model="input" :disabled="busy" autofocus
-             placeholder="Scrivi un messaggio…" @keydown.enter="send" />
+             placeholder="Type a message…" @keydown.enter="send" />
       <button :disabled="busy || !input.trim()" @click="send">
-        {{ busy ? '…' : 'Invia' }}
+        {{ busy ? '…' : 'Send' }}
       </button>
     </div>
   </div>
