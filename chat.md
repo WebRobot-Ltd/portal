@@ -21,3 +21,11 @@ autonomous, goal-driven browsing is coming next.
 <AgentChat />
 
 </div>
+
+<style>
+/* Constrain + margin the whole chat page (layout: page is otherwise full-bleed). */
+.demo-page-wrapper { max-width: 860px; margin: 0 auto; padding: 24px 18px 40px; box-sizing: border-box; }
+/* AgentChat supplies its own width/padding standalone — let the wrapper own it here. */
+.demo-page-wrapper .agent-chat { max-width: none; padding: 0; }
+@media (max-width: 640px) { .demo-page-wrapper { padding: 16px 12px 28px; } }
+</style>
