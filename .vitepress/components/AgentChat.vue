@@ -47,6 +47,16 @@ const logEl = ref(null)
 function scroll() { nextTick(() => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight }) }
 function persist() { try { localStorage.setItem(LOG_KEY, JSON.stringify(log.value)) } catch (_) {} }
 
+// Token usage (Claude-Code style): last turn + cumulative session totals.
+const usage = ref(null)
+const totIn = ref(0), totOut = ref(0), totCost = ref(0)
+function applyUsage(u) {
+  usage.value = u
+  totIn.value  += (u.input  || 0) + (u.cache_read || 0) + (u.cache_write || 0)
+  totOut.value += (u.output || 0)
+  totCost.value += (u.cost_usd || 0)
+}
+
 let abortCtrl = null
 function stop() { if (abortCtrl) abortCtrl.abort() }
 
@@ -84,6 +94,9 @@ async function send() {
           const raw = frame.slice(6)
           let piece; try { piece = JSON.parse(raw) } catch (_) { piece = raw }
           ai.text += piece; scroll()
+        } else if (frame.startsWith('event: usage')) {
+          const raw = frame.split('data: ')[1] || '{}'
+          try { applyUsage(JSON.parse(raw)) } catch (_) {}
         } else if (frame.startsWith('event: error')) {
           const raw = frame.split('data: ')[1] || '"error"'
           let m; try { m = JSON.parse(raw) } catch (_) { m = raw }
@@ -119,6 +132,7 @@ function clearChat() {
   if (busy.value) return
   endSession(sessionId.value)
   log.value = []
+  usage.value = null; totIn.value = 0; totOut.value = 0; totCost.value = 0
   sessionId.value = newSid()
   try {
     localStorage.setItem(SID_KEY, sessionId.value)
@@ -187,6 +201,11 @@ onMounted(() => {
       <button v-if="busy" class="stop-btn" @click="stop" title="Stop the current reply">⏹ Stop</button>
       <button :disabled="!input.trim()" @click="send">Send</button>
     </div>
+
+    <div v-if="usage || totOut" class="usage">
+      <span v-if="usage">last turn: {{ (usage.input||0)+(usage.cache_read||0)+(usage.cache_write||0) }} in → {{ usage.output||0 }} out<span v-if="usage.cost_usd"> · ${{ usage.cost_usd.toFixed(4) }}</span></span>
+      <span class="muted"> · session: {{ totIn + totOut }} tokens<span v-if="totCost"> · ${{ totCost.toFixed(4) }}</span></span>
+    </div>
   </div>
 </template>
 
@@ -224,4 +243,5 @@ onMounted(() => {
             animation: wr-bounce 1.2s infinite ease-in-out both; }
 .typing i:nth-child(1) { animation-delay: -0.24s } .typing i:nth-child(2) { animation-delay: -0.12s }
 @keyframes wr-bounce { 0%,80%,100% { transform: scale(.6); opacity: .5 } 40% { transform: scale(1); opacity: 1 } }
+.usage { margin-top: 6px; font-size: 11.5px; color: #6b7280; text-align: right; }
 </style>
