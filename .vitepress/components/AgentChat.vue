@@ -1,7 +1,7 @@
 <script setup>
 // WebRobot AI Data Engineer — chat (Agent SDK runtime + live WebRobot MCP).
 // Talks to the standalone chat_server (SSE /chat). Experimental / WIP.
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
 // Chat-server base URL. Override at build via VITE_AGENT_CHAT_API, else default.
 const CHAT_API = (import.meta?.env?.VITE_AGENT_CHAT_API) || 'https://agent.webrobot.eu'
@@ -52,7 +52,20 @@ async function send() {
   }
 }
 
-onMounted(() => { /* focus handled by autofocus */ })
+// Signal the chat server to tear down the session's Ray actor when the user
+// leaves (tab close / navigation / component unmount). Best-effort, keepalive
+// so it still fires during unload. The idle reaper is the server-side backstop.
+function endSession() {
+  try {
+    fetch(`${CHAT_API}/chat/end`, {
+      method: 'POST', keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId }),
+    }).catch(() => {})
+  } catch (_) {}
+}
+onMounted(() => { window.addEventListener('beforeunload', endSession) })
+onBeforeUnmount(() => { window.removeEventListener('beforeunload', endSession); endSession() })
 </script>
 
 <template>
