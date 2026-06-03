@@ -7,6 +7,7 @@ import AgenticDemo from '../components/AgenticDemo.vue'
 import AgenticStudio from '../components/AgenticStudio.vue'
 import ByocModeSelector from '../components/ByocModeSelector.vue'
 import ApiReference from '../components/ApiReference.vue'
+import AgentChat from '../components/AgentChat.vue'
 
 export default {
   extends: DefaultTheme,
@@ -18,6 +19,7 @@ export default {
     app.component('AgenticStudio', AgenticStudio)
     app.component('ByocModeSelector', ByocModeSelector)
     app.component('ApiReference', ApiReference)
+    app.component('AgentChat', AgentChat)
   }
 }
 
