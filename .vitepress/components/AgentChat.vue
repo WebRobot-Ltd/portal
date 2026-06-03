@@ -5,6 +5,11 @@ import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
 
 // Chat-server base URL. Override at build via VITE_AGENT_CHAT_API, else default.
 const CHAT_API = (import.meta?.env?.VITE_AGENT_CHAT_API) || 'https://agent.webrobot.eu'
+// Gate token (Bearer) — the chat server requires a bearer (beta abuse gate; the
+// reply consumes Anthropic tokens). For this public beta it's a shared static
+// token, overridable at build via VITE_AGENT_CHAT_GATE. Not real auth — the
+// per-session rate limit + idle reaper are the actual guardrails.
+const GATE = (import.meta?.env?.VITE_AGENT_CHAT_GATE) || 'webrobot-portal-beta-gate-0001'
 
 const sessionId = 'web-' + Math.random().toString(36).slice(2, 10)
 const input = ref('')
@@ -34,7 +39,7 @@ async function send() {
   try {
     const r = await fetch(`${CHAT_API}/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GATE}` },
       body: JSON.stringify({ sessionId, message: msg, oauthToken: token.value || undefined }),
     })
     if (!r.ok || !r.body) { ai.text = `⚠️ chat server error (${r.status})`; return }
