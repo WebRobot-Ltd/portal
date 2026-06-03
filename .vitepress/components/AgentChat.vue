@@ -146,7 +146,8 @@ onMounted(() => {
 
     <div class="head">
       🤖 <strong>WebRobot — AI Data Engineer</strong>
-      <span class="muted">Agent SDK + live MCP</span>
+      <span v-if="busy" class="working">● working…</span>
+      <span v-else class="muted">Agent SDK + live MCP</span>
       <button class="byoc-toggle" @click="showToken = !showToken">
         {{ token ? '🔑 your token' : '🔑 use your plan' }}
       </button>
@@ -172,7 +173,10 @@ onMounted(() => {
       </div>
       <div v-for="(m, i) in log" :key="i" :class="['msg', m.role]">
         <span class="who">{{ m.role === 'user' ? 'You' : 'AI' }}</span>
-        <span class="text">{{ m.text || (busy && i === log.length - 1 ? '…' : '') }}</span>
+        <span v-if="m.text" class="text">{{ m.text }}</span>
+        <span v-else-if="busy && i === log.length - 1" class="typing" title="The AI is working…">
+          <i></i><i></i><i></i>
+        </span>
       </div>
     </div>
 
@@ -213,4 +217,11 @@ onMounted(() => {
               background: linear-gradient(135deg,#5b54ec,#7c4fb5); color: #fff; font-weight: 600; }
 .row button:disabled { opacity: .55; cursor: not-allowed; }
 .stop-btn { background: #fdf6f6 !important; color: #b91c1c !important; border: 1px solid #e7d4d4 !important; }
+.working { color: #5b54ec; font-weight: 600; font-size: 12.5px; animation: wr-pulse 1.2s ease-in-out infinite; }
+@keyframes wr-pulse { 0%,100% { opacity: .45 } 50% { opacity: 1 } }
+.typing { display: inline-flex; gap: 4px; align-items: center; padding: 4px 0; }
+.typing i { width: 7px; height: 7px; border-radius: 50%; background: #9aa0b4; display: inline-block;
+            animation: wr-bounce 1.2s infinite ease-in-out both; }
+.typing i:nth-child(1) { animation-delay: -0.24s } .typing i:nth-child(2) { animation-delay: -0.12s }
+@keyframes wr-bounce { 0%,80%,100% { transform: scale(.6); opacity: .5 } 40% { transform: scale(1); opacity: 1 } }
 </style>
