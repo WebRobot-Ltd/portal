@@ -52,9 +52,15 @@ async function send() {
       let p
       while ((p = buf.indexOf('\n\n')) >= 0) {
         const frame = buf.slice(0, p); buf = buf.slice(p + 2)
-        if (frame.startsWith('data: ')) { ai.text += frame.slice(6); scroll() }
-        else if (frame.startsWith('event: error')) {
-          const m = frame.split('data: ')[1] || 'error'; ai.text += `\n⚠️ ${m}`
+        if (frame.startsWith('data: ')) {
+          // Backend JSON-encodes each chunk so newlines don't break framing.
+          const raw = frame.slice(6)
+          let piece; try { piece = JSON.parse(raw) } catch (_) { piece = raw }
+          ai.text += piece; scroll()
+        } else if (frame.startsWith('event: error')) {
+          const raw = frame.split('data: ')[1] || '"error"'
+          let m; try { m = JSON.parse(raw) } catch (_) { m = raw }
+          ai.text += `\n⚠️ ${m}`
         }
       }
     }
