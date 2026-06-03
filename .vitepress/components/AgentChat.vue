@@ -203,8 +203,9 @@ onMounted(() => {
     </div>
 
     <div v-if="usage || totOut" class="usage">
-      <span v-if="usage">last turn: {{ (usage.input||0)+(usage.cache_read||0)+(usage.cache_write||0) }} in → {{ usage.output||0 }} out<span v-if="usage.cost_usd"> · ${{ usage.cost_usd.toFixed(4) }}</span></span>
-      <span class="muted"> · session: {{ totIn + totOut }} tokens<span v-if="totCost"> · ${{ totCost.toFixed(4) }}</span></span>
+      <span v-if="usage">last turn: {{ (usage.input||0)+(usage.cache_read||0)+(usage.cache_write||0) }} in → {{ usage.output||0 }} out</span>
+      <span class="muted"> · session: {{ totIn + totOut }} tokens<span v-if="totCost"> · ≈${{ totCost.toFixed(4) }} est.</span></span>
+      <span class="muted"> · on Claude subscription (no per-token charge)</span>
     </div>
   </div>
 </template>
