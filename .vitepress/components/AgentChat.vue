@@ -47,18 +47,23 @@ const logEl = ref(null)
 function scroll() { nextTick(() => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight }) }
 function persist() { try { localStorage.setItem(LOG_KEY, JSON.stringify(log.value)) } catch (_) {} }
 
+let abortCtrl = null
+function stop() { if (abortCtrl) abortCtrl.abort() }
+
 async function send() {
   const msg = input.value.trim()
-  if (!msg || busy.value) return
+  if (!msg) return
+  if (busy.value && abortCtrl) abortCtrl.abort()   // sending while busy → stop the current turn first
   input.value = ''
   log.value.push({ role: 'user', text: msg })
   const ai = { role: 'ai', text: '' }
   log.value.push(ai)
+  const ctrl = new AbortController(); abortCtrl = ctrl
   busy.value = true
   scroll()
   try {
     const r = await fetch(`${CHAT_API}/chat`, {
-      method: 'POST',
+      method: 'POST', signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GATE}` },
       body: JSON.stringify({ sessionId: sessionId.value, message: msg,
                              oauthToken: token.value || undefined,
@@ -87,9 +92,11 @@ async function send() {
       }
     }
   } catch (e) {
-    ai.text += `\n⚠️ ${e?.message || 'network error — chat server unreachable'}`
+    if (e?.name !== 'AbortError')   // abort = user stopped/redirected → not an error
+      ai.text += `\n⚠️ ${e?.message || 'network error — chat server unreachable'}`
   } finally {
-    busy.value = false; scroll(); persist()
+    if (abortCtrl === ctrl) { busy.value = false; abortCtrl = null }  // only the latest turn clears busy
+    scroll(); persist()
   }
 }
 
@@ -170,11 +177,11 @@ onMounted(() => {
     </div>
 
     <div class="row">
-      <input v-model="input" :disabled="busy" autofocus
-             placeholder="Type a message…" @keydown.enter="send" />
-      <button :disabled="busy || !input.trim()" @click="send">
-        {{ busy ? '…' : 'Send' }}
-      </button>
+      <input v-model="input" autofocus
+             placeholder="Type a message… (Enter sends; sending while busy stops the current reply)"
+             @keydown.enter="send" />
+      <button v-if="busy" class="stop-btn" @click="stop" title="Stop the current reply">⏹ Stop</button>
+      <button :disabled="!input.trim()" @click="send">Send</button>
     </div>
   </div>
 </template>
@@ -205,4 +212,5 @@ onMounted(() => {
 .row button { padding: 10px 18px; border: 0; border-radius: 8px; cursor: pointer;
               background: linear-gradient(135deg,#5b54ec,#7c4fb5); color: #fff; font-weight: 600; }
 .row button:disabled { opacity: .55; cursor: not-allowed; }
+.stop-btn { background: #fdf6f6 !important; color: #b91c1c !important; border: 1px solid #e7d4d4 !important; }
 </style>
