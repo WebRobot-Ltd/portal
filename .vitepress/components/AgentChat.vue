@@ -32,6 +32,14 @@ const showToken = ref(false)
 function saveToken() {
   try { token.value ? sessionStorage.setItem('wr_oauth', token.value) : sessionStorage.removeItem('wr_oauth') } catch (_) {}
 }
+// Optional BYOC: the user's own Hetzner API token, to run jobs on their own
+// ephemeral VMs. Kept ONLY in sessionStorage + sent as a separate body field
+// (never typed into the message → never in the saved transcript). The agent
+// uses it only for a BYOC run after you confirm; it's never echoed/logged.
+const hetzner = ref(typeof sessionStorage !== 'undefined' ? (sessionStorage.getItem('wr_hetzner') || '') : '')
+function saveHetzner() {
+  try { hetzner.value ? sessionStorage.setItem('wr_hetzner', hetzner.value) : sessionStorage.removeItem('wr_hetzner') } catch (_) {}
+}
 const busy = ref(false)
 const log = ref([])          // {role:'user'|'ai', text}
 const logEl = ref(null)
@@ -52,7 +60,9 @@ async function send() {
     const r = await fetch(`${CHAT_API}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GATE}` },
-      body: JSON.stringify({ sessionId: sessionId.value, message: msg, oauthToken: token.value || undefined }),
+      body: JSON.stringify({ sessionId: sessionId.value, message: msg,
+                             oauthToken: token.value || undefined,
+                             hetznerToken: hetzner.value || undefined }),
     })
     if (!r.ok || !r.body) { ai.text = `⚠️ chat server error (${r.status})`; return }
     const reader = r.body.getReader(), dec = new TextDecoder()
@@ -143,6 +153,9 @@ onMounted(() => {
       <input type="password" v-model="token" @input="saveToken"
              placeholder="Your Claude OAuth token (claude setup-token) — optional, BYOC" />
       <span class="muted small">Kept only in this browser tab + your chat session; runs on your own plan. Leave empty to use the shared demo token.</span>
+      <input type="password" v-model="hetzner" @input="saveHetzner"
+             placeholder="Your Hetzner API token — optional, to run jobs on your own VMs (BYOC)" />
+      <span class="muted small">Only used to launch ephemeral Ray/Spark jobs on your Hetzner account after you confirm. Kept in this tab only, never shown in the chat, never logged.</span>
     </div>
 
     <div ref="logEl" class="log">
