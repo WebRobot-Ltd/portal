@@ -21,6 +21,7 @@ export default defineConfig({
       { text: 'Demo', link: '/demo' },
       { text: 'Chat (beta)', link: '/chat' },
       { text: 'MCP', link: '/mcp' },
+      { text: 'Integrations', link: '/integrations' },
       { text: 'Agentic', link: '/agentic' },
       { text: 'Use Cases', link: '/use-cases' },
       { text: 'About', link: '/about' }
