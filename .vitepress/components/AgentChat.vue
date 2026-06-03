@@ -210,10 +210,12 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.agent-chat { max-width: 820px; margin: 0 auto; font: 14px/1.5 system-ui, sans-serif; }
+.agent-chat { max-width: 820px; margin: 0 auto; padding: 0 16px; box-sizing: border-box;
+              font: 14px/1.5 system-ui, sans-serif; }
+.agent-chat *, .agent-chat *::before, .agent-chat *::after { box-sizing: border-box; }
 .wip { background: #fef3c7; border: 1px solid #fde68a; color: #92400e; border-radius: 8px;
        padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
-.head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .muted { color: #6b7280; font-weight: 400; }
 .byoc-toggle { margin-left: auto; border: 1px solid #d4d7e2; background: #f8fafc; border-radius: 999px;
                padding: 3px 10px; font-size: 12px; cursor: pointer; color: #4f46e5; }
@@ -244,4 +246,18 @@ onMounted(() => {
 .typing i:nth-child(1) { animation-delay: -0.24s } .typing i:nth-child(2) { animation-delay: -0.12s }
 @keyframes wr-bounce { 0%,80%,100% { transform: scale(.6); opacity: .5 } 40% { transform: scale(1); opacity: 1 } }
 .usage { margin-top: 6px; font-size: 11.5px; color: #6b7280; text-align: right; }
+
+/* ── Mobile ─────────────────────────────────────────────────────────────── */
+@media (max-width: 640px) {
+  .agent-chat { padding: 0 12px; }
+  .head { gap: 6px; }
+  .head strong { font-size: 14px; }
+  .byoc-toggle, .clear-btn { padding: 4px 10px; }          /* easier tap targets */
+  .log { height: 58vh; padding: 11px; }
+  .msg { margin: 10px 0; }
+  .row { flex-wrap: wrap; }
+  .row input { flex: 1 1 100%; padding: 12px; font-size: 16px; }  /* 16px avoids iOS zoom */
+  .row button { flex: 1 1 auto; padding: 11px 16px; }
+  .usage { text-align: left; }
+}
 </style>
