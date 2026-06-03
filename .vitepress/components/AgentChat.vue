@@ -1,7 +1,7 @@
 <script setup>
 // WebRobot AI Data Engineer — chat (Agent SDK runtime + live WebRobot MCP).
 // Talks to the standalone chat_server (SSE /chat). Experimental / WIP.
-import { ref, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { ref, nextTick, onMounted } from 'vue'
 
 // Chat-server base URL. Override at build via VITE_AGENT_CHAT_API, else default.
 const CHAT_API = (import.meta?.env?.VITE_AGENT_CHAT_API) || 'https://agent.webrobot.eu'
@@ -11,7 +11,18 @@ const CHAT_API = (import.meta?.env?.VITE_AGENT_CHAT_API) || 'https://agent.webro
 // per-session rate limit + idle reaper are the actual guardrails.
 const GATE = (import.meta?.env?.VITE_AGENT_CHAT_GATE) || 'webrobot-portal-beta-gate-0001'
 
-const sessionId = 'web-' + Math.random().toString(36).slice(2, 10)
+// Session + history persist in localStorage so a reload keeps the conversation.
+// We never auto-clear it — only the explicit "Clear" button starts fresh.
+const SID_KEY = 'wr_chat_sid', LOG_KEY = 'wr_chat_log'
+const newSid = () => 'web-' + Math.random().toString(36).slice(2, 10)
+function loadSid() {
+  try {
+    let s = localStorage.getItem(SID_KEY)
+    if (!s) { s = newSid(); localStorage.setItem(SID_KEY, s) }
+    return s
+  } catch (_) { return newSid() }
+}
+const sessionId = ref(loadSid())
 const input = ref('')
 // Optional BYOC: the user's own Claude subscription OAuth token (claude
 // setup-token). Kept only in sessionStorage (this tab) + sent per turn; the
@@ -26,6 +37,7 @@ const log = ref([])          // {role:'user'|'ai', text}
 const logEl = ref(null)
 
 function scroll() { nextTick(() => { if (logEl.value) logEl.value.scrollTop = logEl.value.scrollHeight }) }
+function persist() { try { localStorage.setItem(LOG_KEY, JSON.stringify(log.value)) } catch (_) {} }
 
 async function send() {
   const msg = input.value.trim()
@@ -40,7 +52,7 @@ async function send() {
     const r = await fetch(`${CHAT_API}/chat`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GATE}` },
-      body: JSON.stringify({ sessionId, message: msg, oauthToken: token.value || undefined }),
+      body: JSON.stringify({ sessionId: sessionId.value, message: msg, oauthToken: token.value || undefined }),
     })
     if (!r.ok || !r.body) { ai.text = `⚠️ chat server error (${r.status})`; return }
     const reader = r.body.getReader(), dec = new TextDecoder()
@@ -67,24 +79,44 @@ async function send() {
   } catch (e) {
     ai.text += `\n⚠️ ${e?.message || 'network error — chat server unreachable'}`
   } finally {
-    busy.value = false; scroll()
+    busy.value = false; scroll(); persist()
   }
 }
 
-// Signal the chat server to tear down the session's Ray actor when the user
-// leaves (tab close / navigation / component unmount). Best-effort, keepalive
-// so it still fires during unload. The idle reaper is the server-side backstop.
-function endSession() {
+// Tell the chat server to tear down the session's agent. Called ONLY from the
+// explicit Clear — NOT on tab-close/unmount, so a reload keeps the conversation
+// alive (the server's idle reaper is the eventual backstop).
+function endSession(sid) {
   try {
     fetch(`${CHAT_API}/chat/end`, {
       method: 'POST', keepalive: true,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId }),
+      body: JSON.stringify({ sessionId: sid }),
     }).catch(() => {})
   } catch (_) {}
 }
-onMounted(() => { window.addEventListener('beforeunload', endSession) })
-onBeforeUnmount(() => { window.removeEventListener('beforeunload', endSession); endSession() })
+
+// Explicit reset: end the current backend session, wipe the saved history, and
+// start a fresh session. The only thing that clears the chat.
+function clearChat() {
+  if (busy.value) return
+  endSession(sessionId.value)
+  log.value = []
+  sessionId.value = newSid()
+  try {
+    localStorage.setItem(SID_KEY, sessionId.value)
+    localStorage.removeItem(LOG_KEY)
+  } catch (_) {}
+  input.value = ''
+}
+
+// Restore the saved conversation on load (same browser).
+onMounted(() => {
+  try {
+    const raw = localStorage.getItem(LOG_KEY)
+    if (raw) { log.value = JSON.parse(raw) || []; scroll() }
+  } catch (_) {}
+})
 </script>
 
 <template>
@@ -100,6 +132,10 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', endSession); 
       <span class="muted">Agent SDK + live MCP</span>
       <button class="byoc-toggle" @click="showToken = !showToken">
         {{ token ? '🔑 your token' : '🔑 use your plan' }}
+      </button>
+      <button class="clear-btn" :disabled="busy || !log.length" @click="clearChat"
+              title="Clear the conversation and start a new session">
+        🗑 Clear
       </button>
     </div>
 
@@ -138,6 +174,9 @@ onBeforeUnmount(() => { window.removeEventListener('beforeunload', endSession); 
 .muted { color: #6b7280; font-weight: 400; }
 .byoc-toggle { margin-left: auto; border: 1px solid #d4d7e2; background: #f8fafc; border-radius: 999px;
                padding: 3px 10px; font-size: 12px; cursor: pointer; color: #4f46e5; }
+.clear-btn { border: 1px solid #e7d4d4; background: #fdf6f6; border-radius: 999px;
+             padding: 3px 10px; font-size: 12px; cursor: pointer; color: #b91c1c; }
+.clear-btn:disabled { opacity: .5; cursor: not-allowed; }
 .byoc { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
 .byoc input { width: 100%; padding: 8px 10px; border: 1px solid #d4d7e2; border-radius: 8px; font: inherit; }
 .small { font-size: 11.5px; }
