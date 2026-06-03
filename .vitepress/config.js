@@ -20,6 +20,7 @@ export default defineConfig({
       { text: 'API', link: '/api/reference' },
       { text: 'Demo', link: '/demo' },
       { text: 'Chat (beta)', link: '/chat' },
+      { text: 'MCP', link: '/mcp' },
       { text: 'Agentic', link: '/agentic' },
       { text: 'Use Cases', link: '/use-cases' },
       { text: 'About', link: '/about' }
