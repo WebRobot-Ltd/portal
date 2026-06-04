@@ -24,6 +24,10 @@ function loadSid() {
 }
 const sessionId = ref(loadSid())
 const input = ref('')
+// Persona/profile (data-engineer + founders). Loaded from the server; persisted.
+// Switching persona starts a fresh session (the agent binds the persona per session).
+const profiles = ref([])
+const profile = ref(typeof localStorage !== 'undefined' ? (localStorage.getItem('wr_profile') || '') : '')
 // Optional BYOC: the user's own Claude subscription OAuth token (claude
 // setup-token). Kept only in sessionStorage (this tab) + sent per turn; the
 // server holds it in memory for the session. Empty → server's shared token.
@@ -76,6 +80,7 @@ async function send() {
       method: 'POST', signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${GATE}` },
       body: JSON.stringify({ sessionId: sessionId.value, message: msg,
+                             profile: profile.value || undefined,
                              oauthToken: token.value || undefined,
                              hetznerToken: hetzner.value || undefined }),
     })
@@ -141,11 +146,26 @@ function clearChat() {
   input.value = ''
 }
 
-// Restore the saved conversation on load (same browser).
-onMounted(() => {
+// Switching persona = fresh session (the backend binds the persona on the first
+// message of a session). Persist the choice + clear the chat.
+function onProfileChange() {
+  try { localStorage.setItem('wr_profile', profile.value) } catch (_) {}
+  clearChat()
+}
+
+// Restore the saved conversation + load the selectable personas.
+onMounted(async () => {
   try {
     const raw = localStorage.getItem(LOG_KEY)
     if (raw) { log.value = JSON.parse(raw) || []; scroll() }
+  } catch (_) {}
+  try {
+    const r = await fetch(`${CHAT_API}/profiles`)
+    if (r.ok) {
+      const d = await r.json()
+      profiles.value = d.profiles || []
+      if (!profile.value) profile.value = d.default || (profiles.value[0]?.id || '')
+    }
   } catch (_) {}
 })
 </script>
@@ -159,9 +179,12 @@ onMounted(() => {
     </div>
 
     <div class="head">
-      🤖 <strong>WebRobot — AI Data Engineer</strong>
+      🤖 <strong>WebRobot</strong>
+      <select v-if="profiles.length" v-model="profile" @change="onProfileChange"
+              :disabled="busy" class="profile-sel" title="Choose who you talk to">
+        <option v-for="p in profiles" :key="p.id" :value="p.id">{{ p.label }}</option>
+      </select>
       <span v-if="busy" class="working">● working…</span>
-      <span v-else class="muted">Agent SDK + live MCP</span>
       <button class="byoc-toggle" @click="showToken = !showToken">
         {{ token ? '🔑 your token' : '🔑 use your plan' }}
       </button>
@@ -218,6 +241,8 @@ onMounted(() => {
        padding: 10px 12px; margin-bottom: 12px; font-size: 13px; }
 .head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .muted { color: #6b7280; font-weight: 400; }
+.profile-sel { border: 1px solid #d4d7e2; background: #fff; border-radius: 8px; padding: 3px 8px;
+               font: inherit; font-size: 12.5px; color: #4f46e5; cursor: pointer; max-width: 230px; }
 .byoc-toggle { margin-left: auto; border: 1px solid #d4d7e2; background: #f8fafc; border-radius: 999px;
                padding: 3px 10px; font-size: 12px; cursor: pointer; color: #4f46e5; }
 .clear-btn { border: 1px solid #e7d4d4; background: #fdf6f6; border-radius: 999px;
