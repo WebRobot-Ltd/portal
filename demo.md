@@ -19,8 +19,10 @@ Explore WebRobot's capabilities through interactive demonstrations:
 
 <style scoped>
 .demo-page-wrapper {
-  margin: 2rem 0;
+  max-width: 1100px;
+  margin: 2rem auto;
   padding: 2rem;
+  box-sizing: border-box;
 }
 
 .demo-page-wrapper h1 {
