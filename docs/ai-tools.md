@@ -8,7 +8,7 @@ WebroBot ships a first-class AI integration layer: an MCP (Model Context Protoco
 
 ## Claude Code MCP Plugin
 
-The `webrobot-claude-plugin` installs as a Claude Code plugin and exposes a set of domain skills that are aware of WebroBot's architecture, stage catalog, API schema, and multi-tenancy patterns.
+The [WebRobot Claude Code plugin](https://github.com/WebRobot-Ltd/claude-code-webrobot-skills) installs as a Claude Code plugin and exposes a set of domain skills that are aware of WebroBot's architecture, stage catalog, API schema, and multi-tenancy patterns.
 
 ### Installing the Plugin
 

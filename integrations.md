@@ -15,7 +15,7 @@ The **WebRobot plugin** ships **10 skills** (invokable as `/` slash commands) pl
 an on-demand **MCP server**. Install it in Claude Code:
 
 ```
-/plugin marketplace add https://github.com/WebRobot-Ltd/webrobot-claude-plugin
+/plugin marketplace add https://github.com/WebRobot-Ltd/claude-code-webrobot-skills
 /plugin install webrobot
 ```
 
@@ -35,7 +35,7 @@ pip install -r mcp-server/requirements.txt   # only if python3/mcp aren't presen
 **Credentials** — the plugin reads, in order: env (`WEBROBOT_API_KEY` / `WEBROBOT_JWT`),
 then `~/.claude/plugins/webrobot/config.json`. Default base URL: `https://api.webrobot.eu`.
 
-**Repo:** [github.com/WebRobot-Ltd/webrobot-claude-plugin](https://github.com/WebRobot-Ltd/webrobot-claude-plugin)
+**Repo:** [github.com/WebRobot-Ltd/claude-code-webrobot-skills](https://github.com/WebRobot-Ltd/claude-code-webrobot-skills)
 (`.claude-plugin/plugin.json` + `skills/` + `mcp-server/`).
 
 ## MCP — any MCP client
