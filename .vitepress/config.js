@@ -18,7 +18,7 @@ export default defineConfig({
       { text: 'Features', link: '/features' },
       { text: 'Docs', link: '/docs/introduction' },
       { text: 'API', link: '/api/reference' },
-      { text: 'Demo', link: '/demo' },
+      { text: 'Build with AI', link: '/demo' },
       { text: 'Chat (beta)', link: '/chat' },
       { text: 'MCP', link: '/mcp' },
       { text: 'Integrations', link: '/integrations' },
