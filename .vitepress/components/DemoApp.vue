@@ -7579,7 +7579,9 @@ async function runValidation() {
       // validator skips the slow re-navigate (+ its 30s DCL timeout / SSL hiccups
       // on heavy sites via the proxy). Backend falls back to opening fresh if the
       // session is gone.
-      body: JSON.stringify({ yaml: yamlText, session_id: cmfSessionId.value || null })
+      // include_snapshot:true → the backend returns the full-page html_snapshot for the iframe preview
+      // below. (Default is OFF so MCP/agent callers don't get the huge HTML; the picker UI opts in.)
+      body: JSON.stringify({ yaml: yamlText, session_id: cmfSessionId.value || null, include_snapshot: true })
     })
     const j = await r.json()
     if (!r.ok) throw new Error(j.error || 'Validation request failed')
