@@ -714,13 +714,18 @@ go</pre>
           <div class="wizard-pane" :class="{ 'wiz-pane-hidden-mobile': wizMobilePane !== 'editor' }">
             <h4>🧩 Pipeline</h4>
             <div v-if="wizPipeline.length" class="wizard-source-toolbar">
-              <button class="btn btn-ghost btn-xs" @click="addSourceBranch"
-                      title="The NEXT stage you add starts a new data source (multi-source pipeline)">➕ Add source</button>
-              <button class="btn btn-ghost btn-xs" @click="combineSources"
-                      title="The NEXT stage you add starts the shared final part — runs on the union of all sources (e.g. dedup / match / sentiment)">🔗 Shared final part</button>
-              <span v-if="wizPendingBoundary" class="wizard-source-pending">
-                → next stage starts {{ wizPendingBoundary === 'sharedTail' ? 'the shared final part' : 'a new source' }}
-              </span>
+              <label class="wizard-source-target">Add to:
+                <select class="text-input"
+                        :value="wizTargetSource === 'shared' ? 'shared' : String(wizTargetSource)"
+                        @change="setTargetSource($event.target.value)">
+                  <option v-for="n in sourceNumbers()" :key="n" :value="String(n)">Source {{ n }}</option>
+                  <option value="__new">➕ New source</option>
+                  <option value="shared">🔗 Shared final part</option>
+                </select>
+              </label>
+              <button class="btn btn-ghost btn-xs" @click="addSourceBranch" title="Create a new source and target it">➕ New source</button>
+              <button class="btn btn-ghost btn-xs" @click="combineSources" title="Target the shared final part — runs on the union of all sources (e.g. dedup / match / sentiment)">🔗 Shared part</button>
+              <span class="wizard-source-pending">→ new stages go to {{ targetSourceLabel() }}</span>
             </div>
             <div class="wizard-editor">
               <div v-if="wizPipeline.length === 0" class="wizard-empty-state">
@@ -740,6 +745,8 @@ go</pre>
                 <div class="wizard-editor-row-head">
                   <strong>
                     {{ idx + 1 }}. {{ row.stage }}
+                    <span v-if="sourceOf(idx)" class="wizard-src-badge" :class="{ 'is-shared': sourceOf(idx) === 'shared' }"
+                          :title="sourceOf(idx) === 'shared' ? 'Shared final part (runs on the union)' : 'Belongs to ' + sourceOf(idx)">{{ sourceOf(idx) }}</span>
                     <span v-if="row._trace && row._trace.length" class="wizard-trace-badge" :title="row._trace.length + ' actions in trace'">
                       🎬 {{ row._trace.length }}
                     </span>
@@ -5912,46 +5919,69 @@ const wizYamlPreview = computed(() => buildYamlFromPipeline(wizPipeline.value, w
 function findStageSpec(name) {
   return wizCatalog.value.find(s => s.stage_name === name || (s.aliases || []).includes(name))
 }
-// ── Multi-source authoring — boundaries are FLAGS on real stages, NOT stages ──
-// Source N+1 begins at a stage flagged `_newSource`; the shared post-union tail
-// (dedup / match / sentiment, runs on the auto-union of all sources) begins at a
-// stage flagged `_sharedTail`. The YAML generator compiles these into the
-// canonical top-level `sources:` + a shared `pipeline:` tail. No fake store/reset
-// stages ever appear in the editor.
-const wizPendingBoundary = ref(null)   // 'newSource' | 'sharedTail' | null — applied to the next added stage
+// ── Multi-source authoring — each stage carries an EXPLICIT source assignment ──
+// `_src`: a source number (1, 2, …) or the string 'shared' (the final part that
+// runs on the auto-union of all sources). An "Add to:" dropdown picks the target;
+// EVERY add stamps the new stage with the current target → no fragile positional
+// flags, and it's always clear which source a stage belongs to. The YAML generator
+// groups by `_src` into the canonical top-level `sources:` + a shared `pipeline:`.
+const wizTargetSource = ref(1)   // number | 'shared' — where newly added stages go
 function addStageToPipeline(stageName) {
-  const row = { stage: stageName, args: {} }
-  if (wizPendingBoundary.value === 'newSource') row._newSource = true
-  else if (wizPendingBoundary.value === 'sharedTail') row._sharedTail = true
-  wizPendingBoundary.value = null
-  wizPipeline.value = [...wizPipeline.value, row]
+  wizPipeline.value = [...wizPipeline.value, { stage: stageName, args: {}, _src: wizTargetSource.value }]
 }
-function multiSourceActive() {
-  return wizPipeline.value.some(r => r && (r._newSource || r._sharedTail))
+// Highest source number currently in use (≥1).
+function maxSourceNum() {
+  let m = 1
+  for (const r of wizPipeline.value) if (r && typeof r._src === 'number' && r._src > m) m = r._src
+  return m
 }
-// Divider label shown ABOVE a stage that starts a source / the shared tail.
-function sourceDivider(idx) {
-  const pipe = wizPipeline.value
+// Source numbers offered in the "Add to:" dropdown (1..max).
+function sourceNumbers() {
+  const out = []; const m = maxSourceNum()
+  for (let i = 1; i <= m; i++) out.push(i)
+  return out
+}
+function setTargetSource(v) {
+  if (v === 'shared') wizTargetSource.value = 'shared'
+  else if (v === '__new') wizTargetSource.value = maxSourceNum() + 1
+  else wizTargetSource.value = Number(v)
+}
+function targetSourceLabel() {
+  return wizTargetSource.value === 'shared' ? 'the shared final part' : ('Source ' + wizTargetSource.value)
+}
+// Multi-source once any stage targets source ≥2 or the shared part.
+function multiSourceActive(pipe) {
+  const p = pipe || wizPipeline.value
+  return p.some(r => r && (r._src === 'shared' || (typeof r._src === 'number' && r._src > 1)))
+}
+// Per-stage badge: 'S1' / 'S2' / 'shared' (empty when single-source).
+function sourceOf(idx) {
   if (!multiSourceActive()) return ''
-  const r = pipe[idx]
-  if (r && r._sharedTail) return 'Shared final part — runs on the union'
-  if (r && r._newSource) {
-    let m = 0
-    for (let i = 0; i <= idx; i++) { const x = pipe[i]; if (x && x._sharedTail) break; if (x && x._newSource) m++ }
-    return 'Source ' + (m + 1)
+  const s = wizPipeline.value[idx] && wizPipeline.value[idx]._src
+  return s === 'shared' ? 'shared' : ('S' + (s || 1))
+}
+// Divider label shown ABOVE the first stage of each source / the shared part
+// (i.e. whenever the source assignment changes from the previous stage).
+function sourceDivider(idx) {
+  if (!multiSourceActive()) return ''
+  const pipe = wizPipeline.value
+  const norm = x => (x === 'shared' ? 'shared' : (x || 1))
+  const cur = norm(pipe[idx] && pipe[idx]._src)
+  const prev = idx > 0 ? norm(pipe[idx - 1] && pipe[idx - 1]._src) : null
+  if (idx === 0 || cur !== prev) {
+    return cur === 'shared' ? 'Shared final part — runs on the union' : ('Source ' + cur)
   }
-  if (idx === 0) return 'Source 1'
   return ''
 }
-// ➕ Add source: the NEXT stage you add starts a new source branch.
+// ➕ Add source: create the next source number and target it.
 function addSourceBranch() {
   if (!wizPipeline.value.length) return
-  wizPendingBoundary.value = 'newSource'
+  wizTargetSource.value = maxSourceNum() + 1
 }
-// 🔗 Shared final part: the NEXT stage you add starts the shared post-union tail.
+// 🔗 Shared final part: target the shared post-union tail.
 function combineSources() {
   if (!wizPipeline.value.length) return
-  wizPendingBoundary.value = 'sharedTail'
+  wizTargetSource.value = 'shared'
 }
 function removeStage(idx) {
   const next = [...wizPipeline.value]; next.splice(idx, 1); wizPipeline.value = next
@@ -6910,33 +6940,26 @@ function emitEmbeddedTraceActions(row, lines, indent) {
   return true
 }
 
-// Split the pipeline into source branches + a shared tail using stage FLAGS:
-// `_newSource` starts a new source branch; `_sharedTail` starts the shared
-// post-union tail. Source 1 is implicit from the start.
+// Group the pipeline into source branches + a shared tail by each stage's `_src`
+// (a source number, or 'shared'). Sources ordered by number; in-source order kept.
 function splitBranchesForYaml(pipeline) {
-  const sources = []
+  const bySrc = new Map()   // sourceNum -> stages[]
   const tail = []
-  let cur = []
-  let n = 1
-  let inTail = false
   for (const row of pipeline) {
-    if (!inTail && row && row._sharedTail) {
-      if (cur.length) { sources.push({ label: 'source_' + n, stages: cur }); n++ }
-      cur = []; inTail = true; tail.push(row); continue
-    }
-    if (!inTail && row && row._newSource) {
-      if (cur.length) { sources.push({ label: 'source_' + n, stages: cur }); n++ }
-      cur = [row]; continue
-    }
-    if (inTail) tail.push(row); else cur.push(row)
+    const s = row && row._src
+    if (s === 'shared') { tail.push(row); continue }
+    const k = (typeof s === 'number' && s > 0) ? s : 1
+    if (!bySrc.has(k)) bySrc.set(k, [])
+    bySrc.get(k).push(row)
   }
-  if (cur.length) { if (inTail) tail.push(...cur); else sources.push({ label: 'source_' + n, stages: cur }) }
+  const sources = [...bySrc.keys()].sort((a, b) => a - b)
+    .map(k => ({ label: 'source_' + k, stages: bySrc.get(k) }))
   return { sources, tail }
 }
-// Drop the authoring-only boundary flags before serializing a branch (else the
-// branch's first stage would re-trigger the multi-source dispatch → recursion).
+// Drop the authoring-only `_src` assignment before serializing a branch (else the
+// branch's stages would re-trigger the multi-source dispatch → recursion).
 function stripBoundaryFlags(stages) {
-  return stages.map(s => { const c = { ...s }; delete c._newSource; delete c._sharedTail; return c })
+  return stages.map(s => { const c = { ...s }; delete c._src; return c })
 }
 
 // Extract the indented stage lines under the `pipeline:` key from a generated YAML doc.
@@ -6979,9 +7002,9 @@ function buildSourcesYaml(pipeline, catalog) {
 function buildYamlFromPipeline(pipeline, catalog) {
   if (!pipeline || pipeline.length === 0) return '(add at least one stage)'
   // Multi-source authoring → emit the canonical top-level `sources:` form
-  // (matches the agent + validator). Source boundaries are FLAGS on real stages
-  // (`_newSource` / `_sharedTail`), grouped into sources[] + a shared `pipeline:` tail.
-  if (pipeline.some(r => r && (r._newSource || r._sharedTail))) {
+  // (matches the agent + validator). Each stage's `_src` assigns it to a source
+  // number or the shared tail; grouped into sources[] + a shared `pipeline:` tail.
+  if (multiSourceActive(pipeline)) {
     return buildSourcesYaml(pipeline, catalog)
   }
   const findSpec = (n) => catalog.find(s => s.stage_name === n || (s.aliases || []).includes(n))
@@ -11310,7 +11333,11 @@ if (typeof window !== 'undefined') {
 .validate-source-frame .validate-iframe { min-height: 140px; }
 
 /* Multi-source authoring (designer) */
-.wizard-source-toolbar { display: flex; gap: 6px; margin: 0 0 8px 0; }
+.wizard-source-toolbar { display: flex; gap: 6px; margin: 0 0 8px 0; align-items: center; flex-wrap: wrap; }
+.wizard-source-target { font-size: 0.78em; display: inline-flex; align-items: center; gap: 4px; }
+.wizard-source-target select { padding: 1px 4px; font-size: 0.92em; width: auto; }
+.wizard-src-badge { font-size: 0.66em; font-weight: 700; background: #e0e7ff; color: #4338ca; border-radius: 4px; padding: 1px 5px; margin-left: 4px; vertical-align: middle; }
+.wizard-src-badge.is-shared { background: #fce7f3; color: #be185d; }
 .wizard-source-divider {
   font-size: 0.72em; letter-spacing: 0.06em; text-transform: uppercase;
   color: #6366f1; font-weight: 600; margin: 6px 0 4px 0; text-align: center;
