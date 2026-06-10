@@ -713,6 +713,12 @@ go</pre>
           <!-- Pipeline editor -->
           <div class="wizard-pane" :class="{ 'wiz-pane-hidden-mobile': wizMobilePane !== 'editor' }">
             <h4>🧩 Pipeline</h4>
+            <div v-if="wizPipeline.length" class="wizard-source-toolbar">
+              <button class="btn btn-ghost btn-xs" @click="addSourceBranch"
+                      title="Close the current branch and start another data source (multi-source pipeline)">➕ Add source</button>
+              <button class="btn btn-ghost btn-xs" @click="combineSources"
+                      title="Union all stored sources + dedup by url">🔗 Combine sources</button>
+            </div>
             <div class="wizard-editor">
               <div v-if="wizPipeline.length === 0" class="wizard-empty-state">
                 <div>empty — click a stage in the catalog to add it.</div>
@@ -726,7 +732,9 @@ go</pre>
                   >{{ n }}</button>
                 </div>
               </div>
-              <div v-for="(row, idx) in wizPipeline" :key="idx" class="wizard-editor-row">
+              <div v-for="(row, idx) in wizPipeline" :key="idx" class="wizard-editor-row"
+                   :class="{ 'wizard-row-marker': isSourceMarker(row.stage) }">
+                <div v-if="sourceDivider(idx)" class="wizard-source-divider">⎯⎯ {{ sourceDivider(idx) }} ⎯⎯</div>
                 <div class="wizard-editor-row-head">
                   <strong>
                     {{ idx + 1 }}. {{ row.stage }}
@@ -5905,6 +5913,45 @@ function findStageSpec(name) {
 function addStageToPipeline(stageName) {
   wizPipeline.value = [...wizPipeline.value, { stage: stageName, args: {} }]
 }
+// ── Multi-source authoring ─────────────────────────────────────────────
+// A multi-source pipeline is a flat stage list delimited by markers:
+//   <source A stages> store(source_1)  reset  <source B stages> … union_with(source_1) … dedup
+const SOURCE_MARKERS = ['store', 'reset', 'union_with']
+function isSourceMarker(stage) { return SOURCE_MARKERS.includes(stage) }
+// Divider label shown before a row that STARTS a source branch (row 0, or right after a `reset`).
+function sourceDivider(idx) {
+  const pipe = wizPipeline.value
+  if (!pipe.some(r => r && isSourceMarker(r.stage))) return ''      // single-source → no dividers
+  if (idx === 0) return 'Source 1'
+  const prev = pipe[idx - 1]
+  if (prev && prev.stage === 'reset') {
+    // count resets up to here → this is source N+1
+    let n = 1
+    for (let i = 0; i < idx; i++) if (pipe[i] && pipe[i].stage === 'reset') n++
+    return 'Source ' + n
+  }
+  return ''
+}
+// Close the current branch (store it under source_N) and start a fresh one (reset).
+function addSourceBranch() {
+  const pipe = wizPipeline.value
+  if (pipe.length === 0) return
+  const n = pipe.filter(r => r && r.stage === 'store').length + 1
+  wizPipeline.value = [...pipe,
+    { stage: 'store', args: { label: 'source_' + n } },
+    { stage: 'reset', args: {} },
+  ]
+}
+// Combine all stored sources into the current branch (union_with each) + dedup by url.
+function combineSources() {
+  const pipe = wizPipeline.value
+  const labels = pipe.filter(r => r && r.stage === 'store')
+    .map(r => r.args && (r.args.label || r.args.name)).filter(Boolean)
+  if (!labels.length) return
+  if (pipe.some(r => r && r.stage === 'union_with')) return         // already combined
+  const adds = labels.map(l => ({ stage: 'union_with', args: { label: l } }))
+  wizPipeline.value = [...pipe, ...adds, { stage: 'dedup', args: { columns: 'url' } }]
+}
 function removeStage(idx) {
   const next = [...wizPipeline.value]; next.splice(idx, 1); wizPipeline.value = next
 }
@@ -6989,6 +7036,23 @@ function buildYamlFromPipeline(pipeline, catalog) {
           lines.push(`              - { selector: ${yamlScalar(f.selector)}, method: ${yamlScalar(f.method || 'text')}, as: ${yamlScalar(f.as || 'field')} }`)
         }
       })
+      continue
+    }
+
+    // ── Multi-source markers: store / reset / union_with / dedup ──────
+    // These may not live in the dynamic catalog, so emit their positional
+    // args directly (otherwise the generic path below would drop them).
+    if (row.stage === 'store' || row.stage === 'union_with') {
+      const lbl = row.args && (row.args.label || row.args.name || row.args.source)
+      if (lbl) { lines.push('    args:'); lines.push(`      - ${yamlScalar(lbl)}`) }
+      else lines.push('    args: []')
+      continue
+    }
+    if (row.stage === 'reset') { lines.push('    args: []'); continue }
+    if (row.stage === 'dedup') {
+      const col = row.args && (row.args.columns || row.args.column || row.args.by)
+      if (col) { lines.push('    args:'); lines.push(`      - ${yamlScalar(col)}`) }
+      else lines.push('    args: []')
       continue
     }
 
@@ -11179,6 +11243,14 @@ if (typeof window !== 'undefined') {
 .validate-source-frame.is-selected { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.25); }
 .validate-source-frame-hd { display: flex; justify-content: space-between; align-items: center; font-size: 0.8em; margin-bottom: 4px; }
 .validate-source-frame .validate-iframe { min-height: 140px; }
+
+/* Multi-source authoring (designer) */
+.wizard-source-toolbar { display: flex; gap: 6px; margin: 0 0 8px 0; }
+.wizard-source-divider {
+  font-size: 0.72em; letter-spacing: 0.06em; text-transform: uppercase;
+  color: #6366f1; font-weight: 600; margin: 6px 0 4px 0; text-align: center;
+}
+.wizard-editor-row.wizard-row-marker { opacity: 0.75; background: #f5f3ff; border-style: dashed; }
 
 /* ──────────────────────────────────────────────────────────────
  * Mobile responsiveness pass (≤768px = tablet portrait, ≤480px = phone)
