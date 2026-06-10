@@ -5926,8 +5926,18 @@ function findStageSpec(name) {
 // flags, and it's always clear which source a stage belongs to. The YAML generator
 // groups by `_src` into the canonical top-level `sources:` + a shared `pipeline:`.
 const wizTargetSource = ref(1)   // number | 'shared' — where newly added stages go
+// Keep stages of the same source CONTIGUOUS: stable sort by source key
+// (source 1..N then 'shared'), preserving the in-source insertion order.
+function srcKey(r) {
+  if (r && r._src === 'shared') return Number.MAX_SAFE_INTEGER
+  return (r && typeof r._src === 'number') ? r._src : 1
+}
+function groupBySource(pipe) {
+  return [...pipe].sort((a, b) => srcKey(a) - srcKey(b))   // Array.sort is stable
+}
 function addStageToPipeline(stageName) {
-  wizPipeline.value = [...wizPipeline.value, { stage: stageName, args: {}, _src: wizTargetSource.value }]
+  const next = [...wizPipeline.value, { stage: stageName, args: {}, _src: wizTargetSource.value }]
+  wizPipeline.value = groupBySource(next)
 }
 // Highest source number currently in use (≥1).
 function maxSourceNum() {
@@ -5991,7 +6001,9 @@ function moveStage(idx, dir) {
   if (j < 0 || j >= wizPipeline.value.length) return
   const next = [...wizPipeline.value]
   const tmp = next[idx]; next[idx] = next[j]; next[j] = tmp
-  wizPipeline.value = next
+  // Re-group so same-source stages stay contiguous: a within-source reorder is
+  // kept (stable sort), a cross-source swap snaps back to its source group.
+  wizPipeline.value = groupBySource(next)
 }
 
 // Single-line readable rendering of a recorded action, matching the
