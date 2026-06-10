@@ -1303,8 +1303,8 @@ go</pre>
               </ol>
             </div>
 
-            <div v-if="validateResult && Array.isArray(validateResult.records) && validateResult.records.length" class="validate-records">
-              <h5>Records preview ({{ validateResult.record_count }} of max 5)</h5>
+            <div v-if="validatePreview && Array.isArray(validatePreview.records) && validatePreview.records.length" class="validate-records">
+              <h5>Records preview ({{ validatePreview.record_count }} of max 5)<span v-if="validateResult && validateResult.multi_source && validatePreview.label"> — source: <code>{{ validatePreview.label }}</code></span></h5>
               <div class="validate-records-scroll">
                 <table class="validate-records-table">
                   <thead>
@@ -1313,7 +1313,7 @@ go</pre>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr v-for="(row, ri) in validateResult.records" :key="ri">
+                    <tr v-for="(row, ri) in validatePreview.records" :key="ri">
                       <td v-for="col in validateColumns" :key="col" :title="String(row[col] == null ? '' : row[col])">
                         {{ truncate(row[col]) }}
                       </td>
@@ -1330,18 +1330,42 @@ go</pre>
 
           <div class="validate-right">
             <h5>Final page (after trace)</h5>
-            <div v-if="!validateResult || !validateResult.html_snapshot" class="validate-iframe-placeholder">
-              Run the validation to capture a snapshot of what Camoufox saw.
+
+            <!-- Multi-source: one iframe per source (grid scales with source count).
+                 Click a frame to load that source's records in the left panel. -->
+            <div v-if="validateResult && validateResult.multi_source && Array.isArray(validateResult.sources)"
+                 class="validate-sources-grid">
+              <div v-for="(s, i) in validateResult.sources" :key="i"
+                   class="validate-source-frame"
+                   :class="{ 'is-selected': selectedSourceIdx === i }"
+                   @click="selectedSourceIdx = i">
+                <div class="validate-source-frame-hd">
+                  <strong>{{ s.label }}</strong>
+                  <span :class="s.valid ? 'validate-footer-ok' : 'validate-footer-ko'">
+                    {{ s.valid ? '✓' : '✗' }}<span v-if="s.record_count != null"> {{ s.record_count }} rec</span>
+                  </span>
+                </div>
+                <div v-if="!s.html_snapshot" class="validate-iframe-placeholder">No snapshot for this source.</div>
+                <iframe v-else class="validate-iframe" sandbox="allow-same-origin" :srcdoc="s.html_snapshot"></iframe>
+                <div v-if="s.final_url" class="validate-final-url"><strong>URL:</strong> {{ s.final_url }}</div>
+              </div>
             </div>
-            <iframe
-              v-else
-              class="validate-iframe"
-              sandbox="allow-same-origin"
-              :srcdoc="validateResult.html_snapshot"
-            ></iframe>
-            <div v-if="validateResult && validateResult.final_url" class="validate-final-url">
-              <strong>URL:</strong> {{ validateResult.final_url }}
-            </div>
+
+            <!-- Single-source -->
+            <template v-else>
+              <div v-if="!validatePreview || !validatePreview.html_snapshot" class="validate-iframe-placeholder">
+                Run the validation to capture a snapshot of what Camoufox saw.
+              </div>
+              <iframe
+                v-else
+                class="validate-iframe"
+                sandbox="allow-same-origin"
+                :srcdoc="validatePreview.html_snapshot"
+              ></iframe>
+              <div v-if="validatePreview && validatePreview.final_url" class="validate-final-url">
+                <strong>URL:</strong> {{ validatePreview.final_url }}
+              </div>
+            </template>
           </div>
         </div>
 
@@ -7310,8 +7334,19 @@ function wizardSaveAsDraft() { return wizardSubmit(false) }
 const validateOpen   = ref(false)
 const validateState  = ref({ kind: 'idle', text: '' })
 const validateResult = ref(null)
+const selectedSourceIdx = ref(0)
+// For a multi-source result the preview (records / iframe snapshot / URL) binds
+// to the SELECTED source branch; for single-source it binds to the result itself.
+const validatePreview = computed(() => {
+  const v = validateResult.value
+  if (!v) return null
+  if (v.multi_source && Array.isArray(v.sources) && v.sources.length) {
+    return v.sources[Math.min(selectedSourceIdx.value, v.sources.length - 1)] || null
+  }
+  return v
+})
 const validateColumns = computed(() => {
-  const recs = validateResult.value && validateResult.value.records
+  const recs = validatePreview.value && validatePreview.value.records
   if (!Array.isArray(recs) || !recs.length) return []
   const cols = []
   const seen = new Set()
@@ -7611,6 +7646,7 @@ async function runValidation() {
     const j = await r.json()
     if (!r.ok) throw new Error(j.error || 'Validation request failed')
     validateResult.value = j
+    selectedSourceIdx.value = 0
     if (j.multi_source && Array.isArray(j.sources)) {
       const total = j.sources.length
       const ok = j.sources.filter(s => s && s.valid).length
@@ -11130,6 +11166,19 @@ if (typeof window !== 'undefined') {
 }
 .validate-iframe { flex: 1; width: 100%; border: 1px solid #e0e0e0; border-radius: 6px; background: white; }
 .validate-final-url { font-size: 0.78em; color: #6b7280; margin-top: 6px; word-break: break-all; }
+
+/* Multi-source: one mini-preview per source, grid scales with the number of sources. */
+.validate-sources-grid {
+  flex: 1; display: grid; gap: 8px; overflow: auto;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+.validate-source-frame {
+  display: flex; flex-direction: column; min-height: 200px;
+  border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px; cursor: pointer;
+}
+.validate-source-frame.is-selected { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99,102,241,0.25); }
+.validate-source-frame-hd { display: flex; justify-content: space-between; align-items: center; font-size: 0.8em; margin-bottom: 4px; }
+.validate-source-frame .validate-iframe { min-height: 140px; }
 
 /* ──────────────────────────────────────────────────────────────
  * Mobile responsiveness pass (≤768px = tablet portrait, ≤480px = phone)
