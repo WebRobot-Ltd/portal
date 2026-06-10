@@ -6909,8 +6909,85 @@ function emitEmbeddedTraceActions(row, lines, indent) {
   return true
 }
 
+// Split a flat marker-delimited pipeline into source branches + a combine tail.
+// store(label) closes+names a branch; reset closes a branch; union_with is
+// dropped (the union is implicit in `sources:`); dedup/other post-union stages
+// go to the tail.
+function splitBranchesForYaml(pipeline) {
+  const sources = []
+  const tail = []
+  let cur = []
+  let n = 1
+  let inTail = false
+  for (const row of pipeline) {
+    const s = row && row.stage
+    if (!inTail && s === 'store') {
+      if (cur.length) { const label = (row.args && (row.args.label || row.args.name)) || ('source_' + n); sources.push({ label, stages: cur }); cur = [] }
+      n++
+      continue
+    }
+    if (!inTail && s === 'reset') {
+      if (cur.length) { sources.push({ label: 'source_' + n, stages: cur }); cur = []; n++ }
+      continue
+    }
+    if (s === 'union_with' || s === 'dedup') {
+      if (cur.length) { sources.push({ label: 'source_' + n, stages: cur }); cur = []; n++ }
+      inTail = true
+      if (s !== 'union_with') tail.push(row)   // union implicit in sources:; dedup/etc → tail
+      continue
+    }
+    if (inTail) tail.push(row); else cur.push(row)
+  }
+  if (cur.length) { if (inTail) tail.push(...cur); else sources.push({ label: 'source_' + n, stages: cur }) }
+  return { sources, tail }
+}
+
+// Extract the indented stage lines under the `pipeline:` key from a generated YAML doc.
+function pipelineSectionLines(yamlStr) {
+  const all = String(yamlStr).split('\n')
+  const start = all.findIndex(l => l === 'pipeline:')
+  if (start < 0) return []
+  const out = []
+  for (let i = start + 1; i < all.length; i++) {
+    if (/^\S/.test(all[i])) break   // next top-level key (output:/metadata:/…) → stop
+    out.push(all[i])
+  }
+  return out
+}
+
+// Assemble the canonical multi-source `sources:` YAML from a marker-delimited pipeline.
+function buildSourcesYaml(pipeline, catalog) {
+  const { sources, tail } = splitBranchesForYaml(pipeline)
+  const lines = []
+  lines.push('sources:')
+  for (const b of sources) {
+    lines.push(`  - source: ${yamlScalar(b.label)}`)
+    lines.push('    pipeline:')
+    for (const l of pipelineSectionLines(buildYamlFromPipeline(b.stages, catalog))) lines.push('    ' + l)
+  }
+  if (tail.length) {
+    lines.push('pipeline:')
+    for (const l of pipelineSectionLines(buildYamlFromPipeline(tail, catalog))) lines.push(l)
+  }
+  lines.push('output:')
+  lines.push('  format: parquet')
+  lines.push('  mode: overwrite')
+  const metaLines = []
+  if (wizRuntime.value && wizRuntime.value !== 'spark') metaLines.push(`  runtime: ${yamlScalar(wizRuntime.value)}`)
+  if (wizGeo.value && /^[a-z]{2}$/i.test(wizGeo.value)) metaLines.push(`  geo: ${yamlScalar(wizGeo.value.toLowerCase())}`)
+  if (metaLines.length) { lines.push('metadata:'); for (const ml of metaLines) lines.push(ml) }
+  return lines.join('\n')
+}
+
 function buildYamlFromPipeline(pipeline, catalog) {
   if (!pipeline || pipeline.length === 0) return '(add at least one stage)'
+  // Multi-source authoring → emit the canonical top-level `sources:` form
+  // (matches the agent + validator) by grouping the branch markers into
+  // sources[], each with its own `pipeline:`. Combine tail (dedup/…) stays
+  // a top-level `pipeline:` that runs on the auto-union.
+  if (pipeline.some(r => r && (r.stage === 'store' || r.stage === 'reset' || r.stage === 'union_with'))) {
+    return buildSourcesYaml(pipeline, catalog)
+  }
   const findSpec = (n) => catalog.find(s => s.stage_name === n || (s.aliases || []).includes(n))
   const lines = []
   // Python extensions: split into the two backend-recognized shapes:
