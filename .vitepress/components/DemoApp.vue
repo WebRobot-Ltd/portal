@@ -1267,6 +1267,31 @@ go</pre>
               </span>
             </div>
 
+            <!-- Multi-source: the validator decomposed the pipeline (store/reset/union_with)
+                 into per-source sub-pipelines and validated each ONE AT A TIME. -->
+            <div v-if="validateResult && validateResult.multi_source && Array.isArray(validateResult.sources)" class="validate-sources">
+              <h5>Multi-source — validated one source at a time
+                ({{ validateResult.sources.filter(s => s.valid).length }}/{{ validateResult.sources.length }} OK)</h5>
+              <ol>
+                <li v-for="(s, i) in validateResult.sources" :key="i"
+                    :class="s.valid ? 'validate-step-ok' : 'validate-step-error'">
+                  <strong>{{ s.label }}</strong>
+                  <span class="validate-step-status">[{{ s.valid ? 'ok' : 'error' }}]</span>
+                  <span class="validate-step-msg">
+                    <template v-if="s.valid">✓ {{ s.record_count }} record(s)</template>
+                    <template v-else>✗ {{ s.error || 'failed' }}</template>
+                  </span>
+                  <ol v-if="s.steps && s.steps.length" class="validate-substeps">
+                    <li v-for="(ss, si) in s.steps" :key="si" :class="'validate-step-' + ss.status">
+                      <strong>{{ ss.stage }}</strong>
+                      <span class="validate-step-status">[{{ ss.status }}]</span>
+                      <span class="validate-step-msg">{{ ss.message }}</span>
+                    </li>
+                  </ol>
+                </li>
+              </ol>
+            </div>
+
             <div v-if="validateResult && validateResult.steps && validateResult.steps.length" class="validate-steps">
               <h5>Pipeline walk</h5>
               <ol>
@@ -7586,7 +7611,16 @@ async function runValidation() {
     const j = await r.json()
     if (!r.ok) throw new Error(j.error || 'Validation request failed')
     validateResult.value = j
-    if (j.valid) {
+    if (j.multi_source && Array.isArray(j.sources)) {
+      const total = j.sources.length
+      const ok = j.sources.filter(s => s && s.valid).length
+      validateState.value = {
+        kind: j.valid ? 'success' : 'error',
+        text: j.valid
+          ? `✓ Multi-source OK — all ${total} source(s) validated (one at a time).`
+          : `Multi-source: ${ok}/${total} source(s) valid — see per-source results below.`
+      }
+    } else if (j.valid) {
       validateState.value = {
         kind: 'success',
         text: `✓ Validation OK — ${j.record_count} record(s) extracted via Camoufox.`
