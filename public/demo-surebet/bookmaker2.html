@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Velox Bookmakers — Olympia FC v Riverside United</title>
+<!-- WebRobot DEMO FIXTURE — FICTIONAL bookmaker. Bookmaker 2 of 2.
+     Structure B (table / bet-row / price) — deliberately DIFFERENT DOM from
+     bookmaker1 so oddsNormalize must map heterogeneous markups to a canonical
+     model before surebetFinder. Odds complete a genuine cross-book arbitrage. -->
+<style>
+  body { font-family: "Segoe UI", Roboto, Arial, sans-serif; margin:0; background:#f4f6f9; color:#1f2733; }
+  header { background:#0a7d4b; color:#fff; padding:12px 20px; display:flex; align-items:center; gap:12px; }
+  .logo { font-weight:800; font-size:1.2em; letter-spacing:.5px; }
+  .fixture-note { font-size:.7em; background:#0d6e44; padding:2px 8px; border-radius:10px; }
+  .wrap { max-width:760px; margin:18px auto; padding:0 16px; }
+  .fixture { background:#fff; border:1px solid #e0e5ec; border-radius:8px; padding:14px 16px; margin-bottom:16px; }
+  .fixture .matchup { font-size:1.15em; font-weight:700; }
+  .fixture .info { color:#667; font-size:.85em; margin-top:3px; }
+  .inplay { color:#c0392b; font-weight:700; font-size:.78em; margin-left:8px; }
+  .phase { font-size:.72em; text-transform:uppercase; letter-spacing:.08em; color:#0a7d4b; margin:16px 0 4px; font-weight:700; }
+  table.bet-board { width:100%; border-collapse:collapse; background:#fff; border:1px solid #e0e5ec; border-radius:8px; overflow:hidden; margin:8px 0 14px; }
+  table.bet-board caption { text-align:left; font-weight:700; padding:10px 12px; font-size:.9em; background:#eef3f0; }
+  .bet-row td { padding:10px 12px; border-top:1px solid #eef0f4; }
+  .bet-row .competitor { color:#33414f; }
+  .bet-row .price { text-align:right; font-weight:800; font-size:1.1em; color:#0a7d4b; width:90px; }
+  .stamp { font-size:.72em; color:#8a97a6; }
+  footer { max-width:760px; margin:22px auto; padding:0 16px 30px; color:#8a97a6; font-size:.75em; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo">🟢 VELOX</span>
+  <span class="fixture-note">WebRobot demo fixture · fictional</span>
+</header>
+
+<div class="wrap">
+  <div class="fixture" data-game="olympia-riverside-md12" data-discipline="soccer" data-competition="Demo League">
+    <div class="matchup"><span class="side-home">Olympia FC</span> v <span class="side-away">Riverside United</span></div>
+    <div class="info">Demo League — MD12 — <time class="ko" datetime="2026-06-10T20:45:00Z">10 Jun 20:45 UTC</time>
+      <span class="inplay" data-state="inplay">IN-PLAY · <span class="game-minute">58'</span></span>
+    </div>
+  </div>
+
+  <!-- ── PRE-MATCH (fixed) ─────────────────────────────────────────── -->
+  <div class="phase">Pre-match</div>
+  <div data-phase="prematch">
+    <table class="bet-board" data-market="1x2">
+      <caption>Full Time Result</caption>
+      <tbody>
+        <tr class="bet-row" data-outcome="1"><td class="competitor">Olympia FC</td><td class="price">2.10</td></tr>
+        <tr class="bet-row" data-outcome="X"><td class="competitor">Draw</td><td class="price">3.60</td></tr>
+        <tr class="bet-row" data-outcome="2"><td class="competitor">Riverside United</td><td class="price">4.30</td></tr>
+      </tbody>
+    </table>
+    <table class="bet-board" data-market="ou25">
+      <caption>Total Goals Over/Under 2.5</caption>
+      <tbody>
+        <tr class="bet-row" data-outcome="over"><td class="competitor">Over 2.5</td><td class="price">2.00</td></tr>
+        <tr class="bet-row" data-outcome="under"><td class="competitor">Under 2.5</td><td class="price">1.85</td></tr>
+      </tbody>
+    </table>
+    <table class="bet-board" data-market="btts">
+      <caption>Both Teams To Score</caption>
+      <tbody>
+        <tr class="bet-row" data-outcome="yes"><td class="competitor">Yes</td><td class="price">1.95</td></tr>
+        <tr class="bet-row" data-outcome="no"><td class="competitor">No</td><td class="price">1.90</td></tr>
+      </tbody>
+    </table>
+    <table class="bet-board" data-market="dc">
+      <caption>Double Chance</caption>
+      <tbody>
+        <tr class="bet-row" data-outcome="1X"><td class="competitor">1X</td><td class="price">1.30</td></tr>
+        <tr class="bet-row" data-outcome="12"><td class="competitor">12</td><td class="price">1.28</td></tr>
+        <tr class="bet-row" data-outcome="X2"><td class="competitor">X2</td><td class="price">1.85</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <!-- ── LIVE (JS-updated every 3s → Ray real-time path) ───────────── -->
+  <div class="phase">In-play</div>
+  <div data-phase="live">
+    <table class="bet-board" data-market="1x2">
+      <caption>Full Time Result — In-play</caption>
+      <tbody>
+        <tr class="bet-row" data-outcome="1"><td class="competitor">Olympia FC</td><td class="price" data-base="2.30">2.30</td></tr>
+        <tr class="bet-row" data-outcome="X"><td class="competitor">Draw</td><td class="price" data-base="3.40">3.40</td></tr>
+        <tr class="bet-row" data-outcome="2"><td class="competitor">Riverside United</td><td class="price" data-base="3.35">3.35</td></tr>
+      </tbody>
+    </table>
+    <table class="bet-board" data-market="ou25">
+      <caption>Total Goals O/U 2.5 — In-play</caption>
+      <tbody>
+        <tr class="bet-row" data-outcome="over"><td class="competitor">Over 2.5</td><td class="price" data-base="1.80">1.80</td></tr>
+        <tr class="bet-row" data-outcome="under"><td class="competitor">Under 2.5</td><td class="price" data-base="2.05">2.05</td></tr>
+      </tbody>
+    </table>
+    <table class="bet-board" data-market="btts">
+      <caption>Both Teams To Score — In-play</caption>
+      <tbody>
+        <tr class="bet-row" data-outcome="yes"><td class="competitor">Yes</td><td class="price" data-base="1.75">1.75</td></tr>
+        <tr class="bet-row" data-outcome="no"><td class="competitor">No</td><td class="price" data-base="2.10">2.10</td></tr>
+      </tbody>
+    </table>
+    <div class="stamp">Updated: <span id="stamp">—</span></div>
+  </div>
+</div>
+
+<footer>
+  WebRobot demonstration fixture — “Velox” is a fictional bookmaker; odds are synthetic. Different DOM from
+  bookmaker1 on purpose: the pipeline must normalize heterogeneous markups (oddsNormalize) before surebetFinder.
+  Pre-match odds are static and form a genuine cross-book arbitrage with bookmaker1; in-play odds tick every ~3s.
+</footer>
+
+<script>
+  function jitter(base) {
+    const b = parseFloat(base);
+    const v = b * (1 + (Math.random() - 0.5) * 0.06);   // ±3% random walk
+    return Math.max(1.05, v).toFixed(2);
+  }
+  function tickOdds() {
+    document.querySelectorAll('[data-phase="live"] .price[data-base]').forEach(el => {
+      el.textContent = jitter(el.getAttribute('data-base'));
+    });
+    document.getElementById('stamp').textContent = new Date().toLocaleTimeString();
+  }
+  let mins = 58;
+  function tickClock() {
+    const c = document.querySelector('.game-minute');
+    if (c && mins < 90) { mins += 1; c.textContent = mins + "'"; }
+  }
+  tickOdds();
+  setInterval(tickOdds, 3000);
+  setInterval(tickClock, 60000);
+</script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Aurora Bet — Olympia FC vs Riverside United</title>
+<!-- WebRobot DEMO FIXTURE — a FICTIONAL bookmaker page used to demonstrate the
+     surebet pipeline on a controlled DOM (real bookmakers block scraping).
+     Bookmaker 1 of 2. Structure A (div/selection/odd). Not linked in any menu. -->
+<style>
+  body { font-family: system-ui, Arial, sans-serif; margin: 0; background: #0b1f3a; color: #eaf0f7; }
+  header { background: #12305c; padding: 14px 20px; display:flex; align-items:center; gap:12px; }
+  .brand { font-weight: 800; font-size: 1.25em; color: #7cc4ff; letter-spacing: .5px; }
+  .demo-tag { font-size:.7em; background:#1d4a86; color:#bcd8ff; padding:2px 8px; border-radius:10px; }
+  main { max-width: 720px; margin: 18px auto; padding: 0 16px; }
+  .event { background:#11264a; border:1px solid #1d3a66; border-radius:10px; padding:16px; margin-bottom:18px; }
+  .event-teams { font-size:1.2em; font-weight:700; }
+  .event-meta { color:#9fb6d4; font-size:.85em; margin-top:4px; }
+  .live-badge { display:inline-block; background:#c0392b; color:#fff; font-size:.7em; font-weight:700; padding:2px 7px; border-radius:4px; margin-left:8px; }
+  .market { background:#0e2244; border:1px solid #1d3a66; border-radius:8px; padding:12px; margin:12px 0; }
+  .market h3 { margin:0 0 10px; font-size:.95em; color:#bcd8ff; }
+  .selections { display:flex; gap:10px; }
+  .selection { flex:1; background:#152f59; border:1px solid #21457e; border-radius:6px; padding:10px; text-align:center; cursor:pointer; }
+  .selection .name { display:block; font-size:.78em; color:#9fb6d4; margin-bottom:6px; }
+  .selection .odd { font-size:1.25em; font-weight:800; color:#fff; }
+  .phase-label { font-size:.72em; text-transform:uppercase; letter-spacing:.08em; color:#7cc4ff; margin:18px 0 4px; }
+  .updated { font-size:.72em; color:#7f97b8; margin-top:6px; }
+  footer { max-width:720px; margin:24px auto; padding:0 16px 30px; color:#6f88aa; font-size:.75em; }
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">⚡ Aurora Bet</span>
+  <span class="demo-tag">WebRobot demo fixture · fictional</span>
+</header>
+
+<main>
+  <div class="event" data-event-id="olympia-riverside-md12" data-sport="football" data-league="Demo League">
+    <div class="event-teams"><span class="home-team">Olympia FC</span> vs <span class="away-team">Riverside United</span></div>
+    <div class="event-meta">Demo League · Matchday 12 · <span class="kickoff" data-kickoff="2026-06-10T20:45:00Z">10 Jun, 20:45 UTC</span>
+      <span class="live-badge" data-status="live">● LIVE <span class="match-clock">58'</span></span>
+    </div>
+  </div>
+
+  <!-- ── PRE-MATCH (fixed) ─────────────────────────────────────────── -->
+  <div class="phase-label">Pre-match odds</div>
+  <div class="markets" data-phase="prematch">
+    <div class="market" data-market="1x2">
+      <h3>Match Result (1X2)</h3>
+      <div class="selections">
+        <div class="selection" data-sel="home"><span class="name">Olympia FC</span><span class="odd">2.25</span></div>
+        <div class="selection" data-sel="draw"><span class="name">Draw</span><span class="odd">3.50</span></div>
+        <div class="selection" data-sel="away"><span class="name">Riverside United</span><span class="odd">3.40</span></div>
+      </div>
+    </div>
+    <div class="market" data-market="ou25">
+      <h3>Over/Under 2.5 Goals</h3>
+      <div class="selections">
+        <div class="selection" data-sel="over"><span class="name">Over 2.5</span><span class="odd">1.85</span></div>
+        <div class="selection" data-sel="under"><span class="name">Under 2.5</span><span class="odd">2.10</span></div>
+      </div>
+    </div>
+    <div class="market" data-market="btts">
+      <h3>Both Teams To Score</h3>
+      <div class="selections">
+        <div class="selection" data-sel="yes"><span class="name">Yes</span><span class="odd">1.72</span></div>
+        <div class="selection" data-sel="no"><span class="name">No</span><span class="odd">2.20</span></div>
+      </div>
+    </div>
+    <div class="market" data-market="dc">
+      <h3>Double Chance</h3>
+      <div class="selections">
+        <div class="selection" data-sel="1x"><span class="name">1X</span><span class="odd">1.35</span></div>
+        <div class="selection" data-sel="12"><span class="name">12</span><span class="odd">1.25</span></div>
+        <div class="selection" data-sel="x2"><span class="name">X2</span><span class="odd">1.70</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── LIVE (JS-updated every 3s → validates the Ray real-time path) ── -->
+  <div class="phase-label">Live odds</div>
+  <div class="markets" data-phase="live">
+    <div class="market" data-market="1x2">
+      <h3>Match Result (1X2) — Live</h3>
+      <div class="selections">
+        <div class="selection" data-sel="home"><span class="name">Olympia FC</span><span class="odd" data-base="2.40">2.40</span></div>
+        <div class="selection" data-sel="draw"><span class="name">Draw</span><span class="odd" data-base="3.20">3.20</span></div>
+        <div class="selection" data-sel="away"><span class="name">Riverside United</span><span class="odd" data-base="3.10">3.10</span></div>
+      </div>
+    </div>
+    <div class="market" data-market="ou25">
+      <h3>Over/Under 2.5 Goals — Live</h3>
+      <div class="selections">
+        <div class="selection" data-sel="over"><span class="name">Over 2.5</span><span class="odd" data-base="1.72">1.72</span></div>
+        <div class="selection" data-sel="under"><span class="name">Under 2.5</span><span class="odd" data-base="2.15">2.15</span></div>
+      </div>
+    </div>
+    <div class="market" data-market="btts">
+      <h3>Both Teams To Score — Live</h3>
+      <div class="selections">
+        <div class="selection" data-sel="yes"><span class="name">Yes</span><span class="odd" data-base="1.60">1.60</span></div>
+        <div class="selection" data-sel="no"><span class="name">No</span><span class="odd" data-base="2.35">2.35</span></div>
+      </div>
+    </div>
+    <div class="updated">Last update: <span id="upd">—</span></div>
+  </div>
+</main>
+
+<footer>
+  WebRobot demonstration fixture — “Aurora Bet” is a fictional bookmaker. Odds are synthetic and exist solely to
+  demonstrate WebRobot's surebet pipeline (oddsSelect → oddsNormalize → surebetFinder) on a controlled page.
+  Pre-match odds are static; live odds update every ~3s to exercise the Ray real-time scraping path.
+</footer>
+
+<script>
+  // Live odds drift: small random walk around each selection's data-base, clamped
+  // to a realistic band. Independent per bookmaker → cross-book best-odds occasionally
+  // open a real arbitrage that surebetFinder should catch when scraped repeatedly.
+  function jitter(base) {
+    const b = parseFloat(base);
+    const v = b * (1 + (Math.random() - 0.5) * 0.06);   // ±3%
+    return Math.max(1.05, v).toFixed(2);
+  }
+  function tickOdds() {
+    document.querySelectorAll('[data-phase="live"] .odd[data-base]').forEach(el => {
+      el.textContent = jitter(el.getAttribute('data-base'));
+    });
+    document.getElementById('upd').textContent = new Date().toLocaleTimeString();
+  }
+  // Live match clock (purely cosmetic).
+  let mins = 58;
+  function tickClock() {
+    const c = document.querySelector('.match-clock');
+    if (c && mins < 90) { mins += 1; c.textContent = mins + "'"; }
+  }
+  tickOdds();
+  setInterval(tickOdds, 3000);
+  setInterval(tickClock, 60000);
+</script>
+</body>
+</html>
