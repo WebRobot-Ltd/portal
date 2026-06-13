@@ -17,7 +17,14 @@ editLink: false
 
 # Scraping &amp; ETL that runs on <span class="accent">your</span> cloud
 
-<p class="plans-sub">Same agentic platform — describe what you want in plain language, WebRobot builds and runs the pipeline. Start on our shared infrastructure, then switch to <b>Bring Your Own Cloud</b> and run everything inside your own account.</p>
+<p class="plans-sub">Describe what you want in plain language — WebRobot builds the pipeline and runs it on <b>Ray</b> inside <b>your own cloud</b> (Bring Your Own Cloud), from day one. You stay in control of data, IPs and cost.</p>
+
+<div class="beta-banner">
+  <div class="beta-head">🚀 <b>Beta launch</b> — <b>unlimited for your first 2 months</b></div>
+  <div class="beta-sub">No VM cap, no volume limits during the beta. After 2 months, continue on Starter or Pro.</div>
+  <div class="beta-perk">⭐ <b>First 50 beta contributors</b> get <b>up to 20% off</b> their subscription, for giving feedback.</div>
+  <a class="beta-cta" href="#"><!-- TODO: Stripe Payment Link / signup (Beta) -->Join the Beta</a>
+</div>
 
 <!-- ───────────────── BYOC explainer ───────────────── -->
 <div class="byoc-box">
@@ -37,37 +44,40 @@ editLink: false
 <div class="plans-grid">
 
   <div class="plan-card">
-    <div class="plan-name">Lite</div>
+    <div class="ribbon alt">BYOC</div>
+    <div class="plan-name">Starter · Bring Your Own Cloud</div>
     <div class="plan-price"><span class="cur">€</span>19<span class="per">/mo</span></div>
-    <div class="plan-tag">Managed · shared infrastructure · no cloud setup</div>
+    <div class="plan-tag">Your own AI agent — in your cloud</div>
     <ul class="plan-feats">
-      <li>✅ Agentic / conversational pipeline builder</li>
-      <li>✅ Managed lightweight scraping engine (we host it)</li>
-      <li>✅ Browser rendering on the <b>shared</b> stealth pool</li>
-      <li>✅ Queryable datasets — export + API</li>
-      <li>✅ Fair‑use monthly volume</li>
-      <li class="muted">— Runs on WebRobot infra · no BYOC · no dedicated VMs</li>
+      <li>✅ <b>Personalized AI agent</b> — built &amp; customized from the in‑site explorer</li>
+      <li>✅ <b>Telegram bot</b> — chat with your agent &amp; trigger jobs from Telegram</li>
+      <li>✅ Streaming chat + agent <b>memory</b></li>
+      <li>✅ <b>Ray cluster</b> provisioned in <b>your own cloud</b> (Hetzner)</li>
+      <li>✅ <b>Scrapy runtime</b> — lightweight scraping engine</li>
+      <li>✅ Managed stealth browser (Camoufox), dedicated · your IPs/geo</li>
+      <li>✅ Elastic ephemeral VMs — <b>up to 3</b> in parallel, auto‑tear‑down</li>
+      <li class="muted">— Scrapy engine only (no Spark)</li>
     </ul>
-    <div class="plan-for">Best for: trying the platform, small/occasional jobs.</div>
-    <a class="plan-cta" href="#"><!-- TODO: Stripe Payment Link (Lite €19) -->Start Lite</a>
+    <div class="plan-for">Best for: a custom conversational agent + Telegram bot, light scraping.</div>
+    <a class="plan-cta" href="#"><!-- TODO: Stripe Payment Link (Starter BYOC €19) -->Start Starter</a>
   </div>
 
   <div class="plan-card featured">
     <div class="ribbon">BYOC</div>
     <div class="plan-name">Pro · Bring Your Own Cloud</div>
     <div class="plan-price"><span class="cur">€</span>299<span class="per">/mo</span></div>
-    <div class="plan-tag">Runs in <b>your</b> cloud · elastic · metered</div>
+    <div class="plan-tag">Distributed power — Spark + scale, in your cloud</div>
     <ul class="plan-feats">
-      <li>✅ Everything in Lite</li>
-      <li>✅ <b>Runs on your own cloud</b> (connect your Hetzner token)</li>
-      <li>✅ <b>Dedicated</b> per‑tenant stealth browser VMs (your IPs/geo)</li>
-      <li>✅ <b>Elastic ephemeral scaling</b> — provision per run, auto‑tear‑down</li>
+      <li>✅ Everything in Starter</li>
+      <li>✅ <b>Spark cluster</b> — distributed ETL &amp; analytics (heavy / multi‑source jobs)</li>
+      <li>✅ Both engines: <b>Scrapy + Spark</b></li>
+      <li>✅ Elastic ephemeral VMs — <b>up to 50</b> in parallel</li>
       <li>✅ Higher concurrency &amp; volume</li>
-      <li>✅ Your scraped data stays inside your cloud</li>
+      <li>✅ Managed stealth browser (Camoufox), dedicated</li>
       <li>✅ Priority support</li>
     </ul>
-    <div class="plan-for">Best for: production scraping, data‑sovereignty needs, scale &amp; cost control.</div>
-    <a class="plan-cta primary" href="#"><!-- TODO: Stripe Payment Link (Pro BYOC €299) -->Start BYOC</a>
+    <div class="plan-for">Best for: production &amp; data teams — distributed scraping + analytics at scale.</div>
+    <a class="plan-cta primary" href="#"><!-- TODO: Stripe Payment Link (Pro BYOC €299) -->Start Pro</a>
   </div>
 
 </div>
@@ -82,9 +92,13 @@ editLink: false
   </div>
 </div>
 
-<p class="plans-foot">Prices excl. VAT, cancel anytime. <b>BYOC billing model:</b> the €299/mo covers the WebRobot
-platform &amp; orchestration; the underlying cloud machines are billed <b>directly by your provider</b>
-(Hetzner) to your account — typically a few cents per browser‑hour.</p>
+<div class="notice">⚠️ <b>Important notice</b> — WebRobot is in <b>beta</b>: plans, limits and prices are provisional and
+we reserve the right to update the subscription plans. Current line‑up (2 plans) is what's available for now.</div>
+
+<p class="plans-foot">Prices excl. VAT, cancel anytime. <b>BYOC billing model (both plans):</b> the subscription covers
+the WebRobot platform &amp; orchestration; the underlying cloud machines (Ray cluster + browser VMs)
+are billed <b>directly by your provider</b> (Hetzner) to your own account — typically a few cents per
+machine‑hour, and only while a job runs (ephemeral, auto‑tear‑down).</p>
 
 </div>
 
@@ -92,7 +106,16 @@ platform &amp; orchestration; the underlying cloud machines are billed <b>direct
 .plans-wrapper { max-width: 1000px; margin: 2.5rem auto; padding: 0 1.5rem; box-sizing: border-box; }
 .plans-wrapper h1 { text-align: center; margin: 0 0 .6rem; font-size: 2.2rem; line-height: 1.2; }
 .accent { color: var(--vp-c-brand-1); }
-.plans-sub { text-align: center; color: var(--vp-c-text-2); margin: 0 auto 2.2rem; max-width: 720px; }
+.plans-sub { text-align: center; color: var(--vp-c-text-2); margin: 0 auto 1.6rem; max-width: 720px; }
+
+.beta-banner { border: 1px solid var(--vp-c-brand-1); background: var(--vp-c-brand-soft); border-radius: 14px; padding: 1.1rem 1.4rem; margin: 0 0 2rem; text-align: center; }
+.beta-head { font-size: 1.15rem; }
+.beta-sub { color: var(--vp-c-text-2); font-size: .9rem; margin-top: .3rem; }
+.beta-perk { margin-top: .5rem; font-size: .92rem; }
+.beta-cta { display: inline-block; margin-top: .9rem; padding: .6rem 1.4rem; border-radius: 10px; background: var(--vp-c-brand-1); color: #fff; font-weight: 700; text-decoration: none; }
+.beta-cta:hover { background: var(--vp-c-brand-2); }
+.ribbon.alt { background: var(--vp-c-text-3); }
+.notice { margin: 2rem 0 0; padding: .9rem 1.2rem; border-radius: 10px; border: 1px solid var(--vp-c-warning-1, #d97706); background: var(--vp-c-warning-soft, rgba(217,119,6,.08)); font-size: .88rem; text-align: center; }
 
 .byoc-box { border: 1px solid var(--vp-c-divider); border-radius: 14px; background: var(--vp-c-bg-soft); padding: 1.6rem 1.6rem 1.2rem; margin-bottom: 2rem; }
 .byoc-title { font-weight: 700; font-size: 1.1rem; margin-bottom: .5rem; }
