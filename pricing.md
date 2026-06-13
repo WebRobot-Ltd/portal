@@ -19,6 +19,13 @@ editLink: false
 
 <p class="plans-sub">Describe what you want in plain language — WebRobot builds the pipeline and runs it on <b>Ray</b> inside <b>your own cloud</b> (Bring Your Own Cloud), from day one. You stay in control of data, IPs and cost.</p>
 
+<div class="valueprop">
+  ✨ <b>A fully‑managed multi‑agent agentic runtime — running in <span class="accent">your own</span> cloud.</b>
+  <span>We provision &amp; manage the <b>Ray cluster</b>, the <b>multi‑agent agentic process</b> and the
+  <b>stealth browsers</b> (Camoufox) for you — but everything runs inside your account. Managed
+  convenience <b>+</b> BYOC control (your data, your IPs, your cost).</span>
+</div>
+
 <div class="beta-banner">
   <div class="beta-head">🚀 <b>Beta launch</b> — <b>unlimited for your first 2 months</b></div>
   <div class="beta-sub">No VM cap, no volume limits during the beta. After 2 months, continue on Starter or Pro.</div>
@@ -49,10 +56,10 @@ editLink: false
     <div class="plan-price"><span class="cur">€</span>19<span class="per">/mo</span></div>
     <div class="plan-tag">Your own AI agent — in your cloud</div>
     <ul class="plan-feats">
-      <li>✅ <b>Personalized AI agent</b> — built &amp; customized from the in‑site explorer</li>
+      <li>✅ <b>Personalized AI agent</b> — a <b>multi‑agent agentic process</b> (managed Ray job), built &amp; customized from the in‑site explorer</li>
       <li>✅ <b>Telegram bot</b> — chat with your agent &amp; trigger jobs from Telegram</li>
       <li>✅ Streaming chat + agent <b>memory</b></li>
-      <li>✅ <b>Ray cluster</b> provisioned in <b>your own cloud</b> (Hetzner)</li>
+      <li>✅ <b>Managed Ray cluster</b> provisioned in <b>your own cloud</b> (Hetzner)</li>
       <li>✅ <b>Scrapy runtime</b> — lightweight scraping engine</li>
       <li>✅ Managed stealth browser (Camoufox), dedicated · your IPs/geo</li>
       <li>✅ Elastic ephemeral VMs — <b>up to 3</b> in parallel, auto‑tear‑down</li>
@@ -107,6 +114,10 @@ machine‑hour, and only while a job runs (ephemeral, auto‑tear‑down).</p>
 .plans-wrapper h1 { text-align: center; margin: 0 0 .6rem; font-size: 2.2rem; line-height: 1.2; }
 .accent { color: var(--vp-c-brand-1); }
 .plans-sub { text-align: center; color: var(--vp-c-text-2); margin: 0 auto 1.6rem; max-width: 720px; }
+
+.valueprop { border-radius: 14px; padding: 1.2rem 1.5rem; margin: 0 0 1.4rem; text-align: center; background: linear-gradient(135deg, var(--vp-c-brand-soft), var(--vp-c-bg-soft)); border: 1px solid var(--vp-c-brand-1); }
+.valueprop b { font-size: 1.05rem; }
+.valueprop span { display: block; margin-top: .5rem; color: var(--vp-c-text-2); font-size: .92rem; }
 
 .beta-banner { border: 1px solid var(--vp-c-brand-1); background: var(--vp-c-brand-soft); border-radius: 14px; padding: 1.1rem 1.4rem; margin: 0 0 2rem; text-align: center; }
 .beta-head { font-size: 1.15rem; }
