@@ -48,6 +48,8 @@ editLink: false
 </div>
 
 <!-- ───────────────── Plan cards ───────────────── -->
+<p class="included">🧠 <b>In every plan:</b> our conversational <b>data‑engineer agent</b> — describe the data you need and it <b>builds your scraping &amp; ETL pipeline</b> for you (no YAML, no code required).</p>
+
 <div class="plans-grid">
 
   <div class="plan-card">
@@ -137,6 +139,7 @@ machine‑hour, and only while a job runs (ephemeral, auto‑tear‑down).</p>
 .byoc-points b { display: block; margin-bottom: .2rem; }
 .byoc-points span { color: var(--vp-c-text-2); font-size: .88rem; }
 
+.included { text-align: center; max-width: 820px; margin: 0 auto 1.6rem; padding: .8rem 1.2rem; border-radius: 10px; border: 1px dashed var(--vp-c-brand-1); background: var(--vp-c-bg-soft); font-size: .92rem; }
 .plans-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; align-items: stretch; }
 @media (max-width: 720px) { .plans-grid { grid-template-columns: 1fr; } }
 .plan-card { position: relative; border: 1px solid var(--vp-c-divider); border-radius: 14px; padding: 1.8rem 1.6rem; background: var(--vp-c-bg-soft); display: flex; flex-direction: column; }
