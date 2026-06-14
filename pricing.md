@@ -58,7 +58,7 @@ editLink: false
     <div class="plan-price"><span class="cur">€</span>19<span class="per">/mo</span></div>
     <div class="plan-tag">Your own AI agent — in your cloud</div>
     <ul class="plan-feats">
-      <li>✅ <b>Personalized AI agent</b> — a <b>multi‑agent agentic process</b> (managed Ray job), built &amp; customized from the in‑site explorer</li>
+      <li>✅ <b>Personalized AI agent</b> — your own <b>conversational agent</b> (managed Ray job), built &amp; customized from the in‑site explorer</li>
       <li>✅ <b>Telegram bot</b> — chat with your agent &amp; trigger jobs from Telegram</li>
       <li>✅ Streaming chat + agent <b>memory</b></li>
       <li>✅ <b>Managed Ray cluster</b> provisioned in <b>your own cloud</b> (Hetzner)</li>
@@ -78,6 +78,7 @@ editLink: false
     <div class="plan-tag">Distributed power — Spark + scale, in your cloud</div>
     <ul class="plan-feats">
       <li>✅ Everything in Starter</li>
+      <li>✅ <b>Multi‑agent team</b> — a <b>persistent, distributed team</b> of specialist agents (e.g. planner · builder · reviewer) that <b>collaborate with shared memory</b> across turns, each on its own Ray actor in your cloud</li>
       <li>✅ <b>Spark cluster</b> — distributed ETL &amp; analytics (heavy / multi‑source jobs)</li>
       <li>✅ Both engines: <b>Scrapy + Spark</b></li>
       <li>✅ Elastic ephemeral VMs — <b>up to 50</b> in parallel</li>
@@ -85,7 +86,7 @@ editLink: false
       <li>✅ Managed stealth browser (Camoufox), dedicated</li>
       <li>✅ Priority support</li>
     </ul>
-    <div class="plan-for">Best for: production &amp; data teams — distributed scraping + analytics at scale.</div>
+    <div class="plan-for">Best for: production &amp; data teams — a collaborating agent team + distributed scraping &amp; analytics at scale.</div>
     <a class="plan-cta primary" href="#"><!-- TODO: Stripe Payment Link (Pro BYOC €299) -->Start Pro</a>
   </div>
 
