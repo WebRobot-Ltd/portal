@@ -4,7 +4,7 @@
     <!-- TEMP collaudo gate — soft password while the app is in final testing.
          Removed once everything is resolved. (Client-side only: a casual gate,
          not real security.) -->
-    <div v-if="!demoUnlocked" class="demo-gate">
+    <div v-if="!demoUnlocked && !productMode" class="demo-gate">
       <div class="demo-gate-box">
         <div class="demo-gate-title">🔒 Final testing phase</div>
         <p class="demo-gate-msg">This demo is in its final testing phase. Enter the password to continue.</p>
@@ -45,7 +45,7 @@
     <!-- Scope banner: this demo runs on the Spark ETL subsystem.
          The Ray agentic runtime is live as of 2026-05-22 — point users
          to the dedicated /agentic page rather than crowd this one. -->
-    <div class="scope-banner">
+    <div v-if="!productMode" class="scope-banner">
       ⚙️ This demo runs on the <strong>Apache Spark ETL subsystem</strong>.
       The agentic <strong>Ray</strong> runtime (multi-agent crews, adaptive
       pipelines, LLM oracle cascade) is now live &mdash; try it on the
@@ -58,7 +58,7 @@
       🇪🇺 Everything you trigger here runs on a
       <strong>European, sovereign Kubernetes cluster</strong> hosted on
       <strong>Hetzner</strong> servers in the EU. Your data stays in
-      Europe; no third-country processors are in the demo execution path.
+      Europe; no third-country processors are in the execution path.
       Object storage (MinIO), Trino, Spark, Camoufox browser pool and
       the API control plane all live in the same EU region.
     </div>
@@ -2009,8 +2009,9 @@ go</pre>
       </div>
     </div>
 
-    <!-- Section 3: Private Demo (Authenticated) -->
-    <div class="demo-section">
+    <!-- Section 3: Private Demo (Authenticated) — hidden in product/designer
+         mode (the in-app dashboard iframe): demo-only, and carries "demo" copy. -->
+    <div v-if="!productMode" class="demo-section">
       <div class="section-header">
         <h2>🔐 Private Demo</h2>
         <p>
@@ -2279,8 +2280,8 @@ go</pre>
       </div>
     </div>
 
-    <!-- ───────── Use from CLI / SDK / curl ───────── -->
-    <div class="demo-section api-guide">
+    <!-- ───────── Use from CLI / SDK / curl ───────── (hidden in product/designer mode) -->
+    <div v-if="!productMode" class="demo-section api-guide">
       <h2>📡 Use the demo from CLI, SDK or plain curl</h2>
       <p>
         Every endpoint this page hits is exposed publicly under
@@ -3346,6 +3347,15 @@ function downloadYAML() {
 // the generated pipeline is handed to the HOST (window.top) — which saves it to
 // the REAL org-scoped API — instead of the public demo save endpoint.
 const isEmbed = (() => { try { return new URLSearchParams(window.location.search).get('embed') === '1' } catch (_) { return false } })()
+// PRODUCT/DESIGNER MODE: the same component, but presented as the real product
+// "Pipeline Designer" (the /designer route, and always when embedded in the
+// authenticated dashboard iframe) rather than the public "demo". In this mode
+// we drop the demo-specific chrome — the password gate and the "this demo runs
+// on…" scope banner — and the demo wording, so the in-app/standalone designer
+// carries no "demo" references.
+const productMode = (() => {
+  try { return isEmbed || /\/designer(\/|$)/.test(window.location.pathname) } catch (_) { return isEmbed }
+})()
 function emitPipelineToHost(yaml, name) {
   if (!isEmbed || !yaml) return false
   try { (window.top || window.parent).postMessage({ type: 'webrobot:pipeline-saved', pipeline_yaml: yaml, pipeline_name: name || null }, '*') } catch (_) {}
