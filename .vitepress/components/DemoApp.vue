@@ -2645,6 +2645,12 @@ onMounted(async () => {
 
   // Picker iframe postMessage bridge.
   window.addEventListener('message', onPickerMessage)
+
+  // EMBED MODE (?embed=1): announce readiness to the dashboard host so it knows
+  // the designer is mounted. Saves are handed to the host (see emitPipelineToHost).
+  if (isEmbed && window.top && window.top !== window) {
+    try { window.top.postMessage({ type: 'webrobot:designer-ready' }, '*') } catch (_) {}
+  }
 })
 
 onBeforeUnmount(() => {
@@ -3336,9 +3342,23 @@ function downloadYAML() {
   URL.revokeObjectURL(url)
 }
 
+// EMBED MODE: when this designer runs inside the dashboard iframe (?embed=1),
+// the generated pipeline is handed to the HOST (window.top) — which saves it to
+// the REAL org-scoped API — instead of the public demo save endpoint.
+const isEmbed = (() => { try { return new URLSearchParams(window.location.search).get('embed') === '1' } catch (_) { return false } })()
+function emitPipelineToHost(yaml, name) {
+  if (!isEmbed || !yaml) return false
+  try { (window.top || window.parent).postMessage({ type: 'webrobot:pipeline-saved', pipeline_yaml: yaml, pipeline_name: name || null }, '*') } catch (_) {}
+  return true
+}
+
 async function saveAndExecute() {
   if (!generatedPipeline.value) {
     alert('No pipeline to save. Please generate a pipeline first.')
+    return
+  }
+  if (emitPipelineToHost(generatedPipeline.value, `generated-pipeline-${Date.now()}`)) {
+    generationExecutionResult.value = { status: 'saved-to-app', message: 'Pipeline sent to the dashboard — name & save it there.', polling: false }
     return
   }
 
@@ -7392,6 +7412,10 @@ async function wizardSubmit(execute, _skipVarGate = false) {
   }
 
   wizStatus.value = { kind: 'info', text: execute ? 'Saving + submitting…' : 'Saving as draft…' }
+  if (emitPipelineToHost(yamlText, name)) {
+    wizStatus.value = { kind: 'ok', text: 'Pipeline sent to the dashboard — name & save it there.' }
+    return
+  }
   try {
     const r = await authenticatedDemoFetch(`${API_BASE_URL}/api/webrobot/api/demo/save-generated-pipeline`, {
       method: 'POST',
