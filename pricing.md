@@ -68,7 +68,7 @@ editLink: false
       <li class="muted">— Scrapy engine only (no Spark)</li>
     </ul>
     <div class="plan-for">Best for: a custom conversational agent + Telegram bot, light scraping.</div>
-    <a class="plan-cta" href="#"><!-- TODO: Stripe Payment Link (Starter BYOC €19) -->Start Starter</a>
+    <a class="plan-cta" href="https://cloud.webrobot.eu/checkout?plan=starter" target="_top">Start Starter</a>
   </div>
 
   <div class="plan-card featured">
@@ -87,7 +87,7 @@ editLink: false
       <li>✅ Priority support</li>
     </ul>
     <div class="plan-for">Best for: production &amp; data teams — a collaborating agent team + distributed scraping &amp; analytics at scale.</div>
-    <a class="plan-cta primary" href="#"><!-- TODO: Stripe Payment Link (Pro BYOC €299) -->Start Pro</a>
+    <a class="plan-cta primary" href="https://cloud.webrobot.eu/checkout?plan=pro" target="_top">Start Pro</a>
   </div>
 
 </div>
