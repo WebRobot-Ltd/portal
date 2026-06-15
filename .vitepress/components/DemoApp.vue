@@ -2717,6 +2717,12 @@ async function authenticateDemo() {
 
 // Helper function to get JWT token (authenticates if needed)
 async function getDemoJwtToken() {
+  // Injected widget mode: use the org JWT passed by the host (skip the demo
+  // login flow entirely) so every authenticated call is org-scoped.
+  try {
+    const inj = (typeof window !== 'undefined') && window.__WR_DESIGNER__ && window.__WR_DESIGNER__.token
+    if (inj) return inj
+  } catch (_) {}
   if (demoJwtToken.value) {
     return demoJwtToken.value
   }
@@ -3346,18 +3352,28 @@ function downloadYAML() {
 // EMBED MODE: when this designer runs inside the dashboard iframe (?embed=1),
 // the generated pipeline is handed to the HOST (window.top) — which saves it to
 // the REAL org-scoped API — instead of the public demo save endpoint.
-const isEmbed = (() => { try { return new URLSearchParams(window.location.search).get('embed') === '1' } catch (_) { return false } })()
+// INJECTED WIDGET MODE: when DemoApp is mounted as a library inside the Next.js
+// dashboard (createApp + window.__WR_DESIGNER__ = {apiBase, token, onSave}),
+// it runs same-origin with the org JWT and hands saves back via onSave — no
+// iframe, no postMessage, no demo API/login.
+const _injected = (() => { try { return (typeof window !== 'undefined' && window.__WR_DESIGNER__) || null } catch (_) { return null } })()
+const isEmbed = (() => { try { return !!_injected || new URLSearchParams(window.location.search).get('embed') === '1' } catch (_) { return !!_injected } })()
 // PRODUCT/DESIGNER MODE: the same component, but presented as the real product
-// "Pipeline Designer" (the /designer route, and always when embedded in the
-// authenticated dashboard iframe) rather than the public "demo". In this mode
-// we drop the demo-specific chrome — the password gate and the "this demo runs
-// on…" scope banner — and the demo wording, so the in-app/standalone designer
-// carries no "demo" references.
+// "Pipeline Designer" (injected widget, the /designer route, or the embedded
+// iframe) rather than the public "demo". In this mode we drop the demo-specific
+// chrome — the password gate, the "this demo runs on…" banner, the demo-only
+// sections — and the demo wording.
 const productMode = (() => {
-  try { return isEmbed || /\/designer(\/|$)/.test(window.location.pathname) } catch (_) { return isEmbed }
+  try { return !!_injected || isEmbed || /\/designer(\/|$)/.test(window.location.pathname) } catch (_) { return !!_injected || isEmbed }
 })()
 function emitPipelineToHost(yaml, name) {
-  if (!isEmbed || !yaml) return false
+  if (!yaml) return false
+  // Injected widget: hand the pipeline to the host via the onSave callback.
+  if (_injected && typeof _injected.onSave === 'function') {
+    try { _injected.onSave(yaml, name || null) } catch (_) {}
+    return true
+  }
+  if (!isEmbed) return false
   try { (window.top || window.parent).postMessage({ type: 'webrobot:pipeline-saved', pipeline_yaml: yaml, pipeline_name: name || null }, '*') } catch (_) {}
   return true
 }
@@ -7997,7 +8013,13 @@ function wizardReset() {
 
 // Private Demo Authentication
 // API base URL - can be configured via environment variable or use production default
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.webrobot.eu'
+const API_BASE_URL = (() => {
+  // Injected widget mode (mounted in the dashboard): the host passes the org API
+  // base. window.__WR_DESIGNER__ is set BEFORE this module is dynamically
+  // imported, so this const reads it correctly.
+  try { if (typeof window !== 'undefined' && window.__WR_DESIGNER__ && window.__WR_DESIGNER__.apiBase) return window.__WR_DESIGNER__.apiBase } catch (_) {}
+  return import.meta.env.VITE_API_BASE_URL || 'https://api.webrobot.eu'
+})()
 
 async function authenticate() {
   if (!authConfig.value.apiKey.trim()) return
