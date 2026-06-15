@@ -2730,7 +2730,24 @@ async function getDemoJwtToken() {
 }
 
 // Helper function to make authenticated fetch requests
+// Injected widget: route ORG-DEPENDENT calls to the authenticated per-tenant
+// plugin (/tenant/*) instead of the public demo (/demo/*), so the designer runs
+// on the org's OWN pipelines/executions. Stateless inference (wizard/*, catalog,
+// proxy, cmf) stays on /demo (public). apiPrefix is set by the host
+// (window.__WR_DESIGNER__.apiPrefix='tenant'). See project_tenant_plugin_generalize_demo.
+const _ORG_PATHS = /\/api\/webrobot\/api\/demo\/(list|execute\/|executions\/|generate-pipeline|save-generated-pipeline|upload-dataset\/)/
+function maybeTenantUrl(u) {
+  try {
+    const pfx = (typeof window !== 'undefined' && window.__WR_DESIGNER__ && window.__WR_DESIGNER__.apiPrefix)
+    if (pfx && pfx !== 'demo' && typeof u === 'string' && _ORG_PATHS.test(u)) {
+      return u.replace('/api/webrobot/api/demo/', '/api/webrobot/api/' + pfx + '/')
+    }
+  } catch (_) {}
+  return u
+}
+
 async function authenticatedDemoFetch(url, options = {}) {
+  url = maybeTenantUrl(url)
   try {
     const token = await getDemoJwtToken()
     
