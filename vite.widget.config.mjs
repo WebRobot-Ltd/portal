@@ -12,6 +12,14 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 
 export default defineConfig({
   plugins: [vue()],
+  // The bundled Vue runtime references process.env.NODE_ENV for its dev/prod
+  // feature flags; in a browser UMD bundle `process` is undefined → the module
+  // throws at load ("process is not defined") and never assigns .mount. Replace
+  // it at build time so the bundle is self-contained.
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('production'),
+    'process.env': '{}',
+  },
   build: {
     outDir: 'widget-dist',
     emptyOutDir: true,
