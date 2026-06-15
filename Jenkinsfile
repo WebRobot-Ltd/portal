@@ -143,7 +143,10 @@ spec:
                                 set +e
                                 # apt-get only if `timeout` isn't already there (busybox/coreutils).
                                 command -v timeout >/dev/null 2>&1 || apt-get update -qq >/dev/null && apt-get install -y -qq coreutils >/dev/null 2>&1 || true
-                                timeout --signal=KILL 120 npm run build
+                                # `-s KILL` is portable across GNU coreutils AND BusyBox timeout;
+                                # GNU's `--signal=KILL` long-opt is NOT understood by BusyBox
+                                # (the agent here is BusyBox) and aborts the build before npm runs.
+                                timeout -s KILL 120 npm run build
                                 BUILD_EC=$?
                                 set -e
                                 if [ -d .vitepress/dist ] && [ -f .vitepress/dist/index.html ]; then
